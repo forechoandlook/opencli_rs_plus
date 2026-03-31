@@ -1,0 +1,33 @@
+site: boss
+name: invite
+description: "BOSS直聘发送面试邀请"
+domain: www.zhipin.com
+strategy: cookie
+browser: true
+
+args:
+  uid:
+    positional: true
+    type: string
+    required: true
+    description: Encrypted UID of the candidate
+  time:
+    type: string
+    required: true
+    description: "Interview time (e.g. 2025-04-01 14:00)"
+  address:
+    type: string
+    description: Interview address
+  contact:
+    type: string
+    description: Contact person name
+
+columns: [status, detail]
+
+pipeline:
+  - navigate: https://www.zhipin.com/web/chat/index
+  - wait: 2
+  - evaluate: |
+      (function() {
+        return [{ status: 'info', detail: 'BOSS invite requires multi-API chain. Use the TypeScript adapter.' }];
+      })()

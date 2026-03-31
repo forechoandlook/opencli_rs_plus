@@ -1,0 +1,73 @@
+site: substack
+name: search
+description: 搜索 Substack 文章和 Newsletter
+domain: substack.com
+strategy: public
+browser: false
+
+args:
+  keyword:
+    required: true
+    positional: true
+    type: str
+    description: 搜索关键词
+  type:
+    default: posts
+    description: "搜索类型（posts=文章, publications=Newsletter）"
+  limit:
+    type: int
+    default: 20
+    description: 返回结果数量
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const keyword = '${{ args.keyword }}';
+        const type = '${{ args.type }}' || 'posts';
+        const limit = Math.max(1, Math.min(${{ args.limit }} || 20, 50));
+        const trim = (v) => typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
+        const headers = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
+
+        if (type === 'publications') {
+          const url = new URL('https://substack.com/api/v1/profile/search');
+          url.searchParams.set('query', keyword);
+          url.searchParams.set('page', '0');
+          const resp = await fetch(url, { headers });
+          if (!resp.ok) throw new Error('Substack publication search failed: HTTP ' + resp.status);
+          const data = await resp.json();
+          const results = Array.isArray(data?.results) ? data.results : [];
+          return results.slice(0, limit).map((item, i) => {
+            const pub = item?.primaryPublication || item?.publicationUsers?.[0]?.publication || {};
+            let pubUrl = '';
+            if (pub.custom_domain) pubUrl = 'https://' + pub.custom_domain;
+            else if (pub.subdomain) pubUrl = 'https://' + pub.subdomain + '.substack.com';
+            return {
+              rank: i + 1,
+              title: trim(pub.name || item?.name),
+              author: trim(item?.name),
+              date: '',
+              description: trim(pub.hero_text || item?.bio).slice(0, 150),
+              url: pubUrl,
+            };
+          });
+        }
+
+        const url = new URL('https://substack.com/api/v1/post/search');
+        url.searchParams.set('query', keyword);
+        url.searchParams.set('page', '0');
+        url.searchParams.set('includePlatformResults', 'true');
+        const resp = await fetch(url, { headers });
+        if (!resp.ok) throw new Error('Substack post search failed: HTTP ' + resp.status);
+        const data = await resp.json();
+        const results = Array.isArray(data?.results) ? data.results : [];
+        return results.slice(0, limit).map((item, i) => ({
+          rank: i + 1,
+          title: trim(item?.title),
+          author: trim(item?.publishedBylines?.[0]?.name),
+          date: trim(item?.post_date).split('T')[0] || trim(item?.post_date),
+          description: trim(item?.description || item?.subtitle || item?.truncated_body_text).slice(0, 150),
+          url: trim(item?.canonical_url),
+        }));
+      })()
+
+columns: [rank, title, author, date, description, url]

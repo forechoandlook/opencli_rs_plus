@@ -1,0 +1,19 @@
+site: doubao-app
+name: new
+description: Start a new chat in Doubao desktop app
+domain: doubao-app
+strategy: ui
+browser: true
+
+columns: [Status]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        let btn = document.querySelector('[data-testid="new_chat_button"]');
+        if (!btn) btn = document.querySelector('[data-testid="app-open-newChat"]');
+        if (btn) { btn.click(); }
+        else { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', code: 'KeyN', metaKey: true, bubbles: true })); }
+        await new Promise(r => setTimeout(r, 3000));
+        return [{ Status: 'Success' }];
+      })()

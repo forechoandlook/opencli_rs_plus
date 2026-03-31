@@ -1,0 +1,34 @@
+site: yollomi
+name: background
+description: "Generate AI background for a product/object image (5 credits)"
+domain: yollomi.com
+strategy: cookie
+browser: true
+
+args:
+  image:
+    positional: true
+    type: string
+    required: true
+    description: "Image URL (upload via opencli yollomi upload first)"
+  prompt:
+    type: string
+    description: Background description (optional)
+  output:
+    type: string
+    default: ./yollomi-output
+    description: Output directory
+  no-download:
+    type: boolean
+    default: false
+    description: Only show URL
+
+columns: [status, file, size, url]
+
+pipeline:
+  - navigate: https://yollomi.com
+  - wait: 2
+  - evaluate: |
+      (function() {
+        return [{ status: 'info', file: '-', size: '-', url: 'Yollomi background requires cookie API POST. Use the TypeScript adapter.' }];
+      })()

@@ -1,0 +1,34 @@
+site: boss
+name: greet
+description: "BOSS直聘向新候选人发送招呼（开始聊天）"
+domain: www.zhipin.com
+strategy: cookie
+browser: true
+
+args:
+  uid:
+    positional: true
+    type: string
+    required: true
+    description: "Encrypted UID of the candidate (from recommend)"
+  security-id:
+    type: string
+    required: true
+    description: Security ID of the candidate
+  job-id:
+    type: string
+    required: true
+    description: Encrypted job ID
+  text:
+    type: string
+    description: "Custom greeting message"
+
+columns: [status, detail]
+
+pipeline:
+  - navigate: https://www.zhipin.com/web/chat/index
+  - wait: 3
+  - evaluate: |
+      (function() {
+        return [{ status: 'info', detail: 'BOSS greet requires friend lookup + UI click + message send. Use the TypeScript adapter.' }];
+      })()

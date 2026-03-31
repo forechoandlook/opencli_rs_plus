@@ -1,0 +1,29 @@
+site: antigravity
+name: model
+description: Get or change the active AI model in Antigravity
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  model-name:
+    positional: true
+    type: string
+    description: Model name to switch to
+
+columns: [Status, Model]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const desiredModel = ${{ args["model-name"] | json }};
+        if (!desiredModel) {
+          const selectors = ['[class*="model"] span', 'button[class*="model"]', '[aria-label*="Model"]'];
+          for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el) return [{ Status: 'Active', Model: (el.textContent || '').trim() }];
+          }
+          return [{ Status: 'Active', Model: 'Unknown' }];
+        }
+        return [{ Status: 'Requested', Model: desiredModel }];
+      })()

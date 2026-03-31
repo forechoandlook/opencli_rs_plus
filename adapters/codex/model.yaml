@@ -1,0 +1,34 @@
+site: codex
+name: model
+description: Get or switch the currently active AI model in Codex Desktop
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  model-name:
+    positional: true
+    type: string
+    description: "The ID of the model to switch to (e.g. gpt-4)"
+
+columns: [Status, Model]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const desiredModel = ${{ args["model-name"] | json }};
+
+        if (!desiredModel) {
+          let m = document.querySelector('[title*="Model"], [aria-label*="Model"], .model-selector, [class*="ModelPicker"]');
+          if (!m && document.querySelector('webview, iframe')) {
+            return [{ Status: 'Active', Model: 'Unknown (Likely inside a WebView)' }];
+          }
+          const currentModel = m ? (m.textContent || m.getAttribute('title') || m.getAttribute('aria-label')).trim() : 'Unknown or Not Found';
+          return [{ Status: 'Active', Model: currentModel }];
+        } else {
+          const dropdown = document.querySelector('[title*="Model"], [aria-label*="Model"], .model-selector, [class*="ModelPicker"]');
+          if (!dropdown) return [{ Status: 'Dropdown not found', Model: desiredModel }];
+          dropdown.click();
+          return [{ Status: 'Dropdown clicked. Generic interaction initiated.', Model: desiredModel }];
+        }
+      })()

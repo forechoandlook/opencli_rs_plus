@@ -1,0 +1,61 @@
+site: v2ex
+name: daily
+description: V2EX 每日签到并领取铜币
+domain: www.v2ex.com
+browser: true
+
+args: {}
+
+pipeline:
+  - navigate:
+      url: https://www.v2ex.com/mission/daily
+      settleMs: 3000
+
+  - evaluate: |
+      (async () => {
+        // Wait for Cloudflare if needed
+        for (let i = 0; i < 5; i++) {
+          if (!document.title.includes('Just a moment')) break;
+          await new Promise(r => setTimeout(r, 1500));
+        }
+
+        const btn = document.querySelector('input.super.normal.button');
+        if (!btn || !btn.value.includes('领取')) {
+          return [{ status: 'already_claimed', message: '今日奖励已发/无需领取' }];
+        }
+
+        const onclick = btn.getAttribute('onclick');
+        if (!onclick) {
+          return [{ status: 'error', message: '找到了按钮，但未能提取 once token' }];
+        }
+
+        const match = onclick.match(/once=(\d+)/);
+        if (!match) {
+          return [{ status: 'error', message: '找到了按钮，但未能提取 once token' }];
+        }
+
+        // Perform check in
+        const resp = await fetch(`/mission/daily/redeem?once=${match[1]}`, { credentials: 'include' });
+        await new Promise(r => setTimeout(r, 2000));
+
+        // Reload to verify
+        window.location.reload();
+        await new Promise(r => setTimeout(r, 3000));
+
+        const btn2 = document.querySelector('input.super.normal.button');
+        if (!btn2 || !btn2.value.includes('领取')) {
+          let balance = '';
+          const balanceLink = document.querySelector('a.balance_area');
+          if (balanceLink) {
+            balance = Array.from(balanceLink.childNodes)
+              .filter(n => n.nodeType === 3)
+              .map(n => n.textContent?.trim())
+              .join(' ')
+              .trim();
+          }
+          return [{ status: 'success', message: `签到成功，当前余额: ${balance || '未知'}` }];
+        }
+        return [{ status: 'failed', message: '未能确认签到结果，请手动检查' }];
+      })()
+
+columns: [status, message]

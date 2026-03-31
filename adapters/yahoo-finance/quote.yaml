@@ -1,0 +1,79 @@
+site: yahoo-finance
+name: quote
+description: "Yahoo Finance 股票行情"
+domain: finance.yahoo.com
+strategy: cookie
+browser: true
+
+args:
+  symbol:
+    positional: true
+    type: string
+    required: true
+    description: "Stock ticker (e.g. AAPL, MSFT, TSLA)"
+
+columns: [symbol, name, price, change, changePercent, open, high, low, volume, marketCap]
+
+pipeline:
+  - navigate: https://finance.yahoo.com/quote/${{ args.symbol | urlencode }}/
+  - evaluate: |
+      (async () => {
+        const sym = ${{ args.symbol | json }}.toUpperCase().trim();
+
+        // Strategy 1: v8 chart API
+        try {
+          const chartUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(sym) + '?interval=1d&range=1d';
+          const resp = await fetch(chartUrl);
+          if (resp.ok) {
+            const d = await resp.json();
+            const chart = d?.chart?.result?.[0];
+            if (chart) {
+              const meta = chart.meta || {};
+              const prevClose = meta.previousClose || meta.chartPreviousClose;
+              const price = meta.regularMarketPrice;
+              const change = price != null && prevClose != null ? (price - prevClose) : null;
+              const changePct = change != null && prevClose ? ((change / prevClose) * 100) : null;
+              return [{
+                symbol: meta.symbol || sym,
+                name: meta.shortName || meta.longName || sym,
+                price: price != null ? Number(price.toFixed(2)) : null,
+                change: change != null ? change.toFixed(2) : null,
+                changePercent: changePct != null ? changePct.toFixed(2) + '%' : null,
+                open: chart.indicators?.quote?.[0]?.open?.[0] || null,
+                high: meta.regularMarketDayHigh || null,
+                low: meta.regularMarketDayLow || null,
+                volume: meta.regularMarketVolume || null,
+                marketCap: null,
+              }];
+            }
+          }
+        } catch(e) {}
+
+        // Strategy 2: DOM fallback
+        const priceEl = document.querySelector('[data-testid="qsp-price"]');
+        const changeEl = document.querySelector('[data-testid="qsp-price-change"]');
+        const changePctEl = document.querySelector('[data-testid="qsp-price-change-percent"]');
+        const titleEl = document.querySelector('title');
+        if (priceEl) {
+          return [{
+            symbol: sym,
+            name: titleEl ? titleEl.textContent.split('(')[0].trim() : sym,
+            price: priceEl.textContent.replace(/,/g, ''),
+            change: changeEl ? changeEl.textContent : null,
+            changePercent: changePctEl ? changePctEl.textContent : null,
+            open: null, high: null, low: null, volume: null, marketCap: null,
+          }];
+        }
+        return [];
+      })()
+  - map:
+      symbol: ${{ item.symbol }}
+      name: ${{ item.name }}
+      price: ${{ item.price }}
+      change: ${{ item.change }}
+      changePercent: ${{ item.changePercent }}
+      open: ${{ item.open }}
+      high: ${{ item.high }}
+      low: ${{ item.low }}
+      volume: ${{ item.volume }}
+      marketCap: ${{ item.marketCap }}

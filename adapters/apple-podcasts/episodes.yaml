@@ -1,0 +1,45 @@
+site: apple-podcasts
+name: episodes
+domain: itunes.apple.com
+description: List recent episodes of an Apple Podcast (use ID from search)
+strategy: public
+browser: false
+
+args:
+  id:
+    type: str
+    required: true
+    positional: true
+    description: Podcast ID (collectionId from search output)
+  limit:
+    type: int
+    default: 15
+    description: Max episodes to show
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const limit = Math.max(1, Math.min(Number(args.limit), 200));
+        const resp = await fetch(`https://itunes.apple.com/lookup?id=${args.id}&entity=podcastEpisode&limit=${limit + 1}`);
+        if (!resp.ok) throw new Error(`iTunes API HTTP ${resp.status}`);
+        const data = await resp.json();
+        const episodes = (data.results ?? []).filter(r => r.kind === 'podcast-episode');
+        if (!episodes.length) throw new Error('No episodes found');
+        return episodes.slice(0, limit).map(ep => {
+          let duration = '-';
+          const ms = ep.trackTimeMillis;
+          if (ms && Number.isFinite(ms)) {
+            const totalSec = Math.round(ms / 1000);
+            const m = Math.floor(totalSec / 60);
+            const s = totalSec % 60;
+            duration = `${m}:${String(s).padStart(2, '0')}`;
+          }
+          return {
+            title: ep.trackName,
+            duration,
+            date: ep.releaseDate ? ep.releaseDate.slice(0, 10) : '-'
+          };
+        });
+      })()
+
+columns: [title, duration, date]

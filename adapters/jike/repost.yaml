@@ -1,0 +1,70 @@
+site: jike
+name: repost
+description: "转发即刻帖子"
+domain: web.okjike.com
+strategy: ui
+browser: true
+
+args:
+  id:
+    positional: true
+    type: string
+    required: true
+    description: "帖子 ID"
+  text:
+    positional: true
+    type: string
+    description: "转发附言（可选）"
+
+columns: [status, message]
+
+pipeline:
+  - navigate: https://web.okjike.com/originalPost/${{ args.id }}
+  - evaluate: |
+      (async () => {
+        // 1. Click repost button (third in actions bar)
+        const actions = document.querySelector('[class*="_actions_"]');
+        if (!actions) return [{ status: 'failed', message: '未找到操作栏' }];
+        const children = Array.from(actions.children).filter(c => c.offsetHeight > 0);
+        if (!children[2]) return [{ status: 'failed', message: '未找到转发按钮' }];
+        children[2].click();
+        await new Promise(r => setTimeout(r, 1000));
+
+        // 2. Click "转发动态" menu item
+        const menuBtn = Array.from(document.querySelectorAll('button')).find(
+          b => b.textContent?.trim() === '转发动态'
+        );
+        if (!menuBtn) return [{ status: 'failed', message: '未找到"转发动态"菜单项' }];
+        menuBtn.click();
+        await new Promise(r => setTimeout(r, 2000));
+
+        // 3. Add comment text if provided
+        const text = ${{ args.text | default('') | json }};
+        if (text) {
+          const editor = document.querySelector('[contenteditable="true"]');
+          if (editor) {
+            editor.focus();
+            const dt = new DataTransfer();
+            dt.setData('text/plain', text);
+            editor.dispatchEvent(new ClipboardEvent('paste', {
+              clipboardData: dt, bubbles: true, cancelable: true,
+            }));
+            await new Promise(r => setTimeout(r, 500));
+          }
+        }
+
+        // 4. Click send button
+        await new Promise(r => setTimeout(r, 500));
+        const btn = Array.from(document.querySelectorAll('button')).find(b => {
+          const t = b.textContent?.trim() || '';
+          return (t === '发送' || t === '发布') && !b.disabled;
+        });
+        if (!btn) return [{ status: 'failed', message: '未找到发送按钮' }];
+        btn.click();
+        await new Promise(r => setTimeout(r, 3000));
+
+        return [{ status: 'success', message: '转发成功' }];
+      })()
+  - map:
+      status: ${{ item.status }}
+      message: ${{ item.message }}

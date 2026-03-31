@@ -1,0 +1,33 @@
+site: google
+name: suggest
+domain: suggestqueries.google.com
+description: Get Google search suggestions
+strategy: public
+browser: false
+
+args:
+  keyword:
+    type: str
+    required: true
+    positional: true
+    description: Search query
+  lang:
+    type: str
+    default: zh-CN
+    description: Language code
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const keyword = encodeURIComponent(args.keyword);
+        const lang = encodeURIComponent(args.lang);
+        const url = `https://suggestqueries.google.com/complete/search?client=firefox&q=${keyword}&hl=${lang}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const suggestions = Array.isArray(data) && Array.isArray(data[1]) ? data[1] : [];
+        if (!suggestions.length) throw new Error('No suggestions found');
+        return suggestions.map(s => ({ suggestion: s }));
+      })()
+
+columns: [suggestion]

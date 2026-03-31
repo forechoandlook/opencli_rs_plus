@@ -1,0 +1,88 @@
+site: doubao
+name: ask
+description: Send a prompt and wait for the Doubao response
+domain: www.doubao.com
+strategy: cookie
+browser: true
+timeoutSeconds: 180
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Prompt to send
+  timeout:
+    type: int
+    default: 60
+    description: Max seconds to wait
+
+columns: [Role, Text]
+
+pipeline:
+  - navigate: https://www.doubao.com/chat
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        const text = ${{ args.text | json }};
+        const timeout = ${{ args.timeout }} || 60;
+
+        // Fill composer and submit
+        const candidates = [
+          'textarea[data-testid="chat_input_input"]',
+          'textarea[placeholder*="发消息"]',
+          'textarea',
+        ];
+        let composer = null;
+        for (const sel of candidates) {
+          const node = document.querySelector(sel);
+          if (node) { composer = node; break; }
+        }
+        if (!composer) return [{ Role: 'System', Text: 'Could not find Doubao input element' }];
+
+        composer.focus();
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+        if (setter) setter.call(composer, text);
+        else composer.value = text;
+        composer.dispatchEvent(new Event('input', { bubbles: true }));
+        composer.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 500));
+
+        // Click send or press Enter
+        const root = document.querySelector('[data-testid="chat_input"]') || document.body;
+        const buttons = Array.from(root.querySelectorAll('button, [role="button"]'));
+        const lastBtn = buttons[buttons.length - 1];
+        if (lastBtn) lastBtn.click();
+        else composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+
+        await new Promise(r => setTimeout(r, 1500));
+
+        // Poll for response
+        const pollInterval = 2;
+        const maxPolls = Math.ceil(timeout / pollInterval);
+        let lastCandidate = '';
+        let stableCount = 0;
+
+        for (let i = 0; i < maxPolls; i++) {
+          await new Promise(r => setTimeout(r, pollInterval * 1000));
+          const msgs = document.querySelectorAll('[data-testid="receive_message"] [data-testid="message_text_content"]');
+          if (msgs.length === 0) continue;
+          const lastMsg = msgs[msgs.length - 1];
+          const candidate = (lastMsg.innerText || '').trim();
+          if (!candidate) continue;
+          if (candidate === lastCandidate) { stableCount++; } else { lastCandidate = candidate; stableCount = 1; }
+          if (stableCount >= 2) break;
+        }
+
+        if (!lastCandidate) {
+          return [
+            { Role: 'User', Text: text },
+            { Role: 'System', Text: 'No response within ' + timeout + 's. Doubao may still be generating.' },
+          ];
+        }
+
+        return [
+          { Role: 'User', Text: text },
+          { Role: 'Assistant', Text: lastCandidate },
+        ];
+      })()

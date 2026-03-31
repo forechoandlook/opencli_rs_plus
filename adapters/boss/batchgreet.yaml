@@ -1,0 +1,28 @@
+site: boss
+name: batchgreet
+description: "BOSS直聘批量向推荐候选人发送招呼"
+domain: www.zhipin.com
+strategy: cookie
+browser: true
+
+args:
+  job-id:
+    type: string
+    description: "Filter by encrypted job ID (greet all jobs if empty)"
+  limit:
+    type: int
+    default: 5
+    description: Max candidates to greet
+  text:
+    type: string
+    description: "Custom greeting message (uses default if empty)"
+
+columns: [name, status, detail]
+
+pipeline:
+  - navigate: https://www.zhipin.com/web/chat/index
+  - wait: 3
+  - evaluate: |
+      (async () => {
+        return [{ name: '-', status: 'info', detail: 'BOSS batch greet requires complex multi-step UI automation with API calls. Use the TypeScript adapter for full functionality.' }];
+      })()

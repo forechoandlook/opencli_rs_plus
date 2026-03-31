@@ -1,0 +1,107 @@
+site: zhihu
+name: feed_api
+description: 关注的人动态 (Moments API)
+domain: www.zhihu.com
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Number of activities to return
+
+pipeline:
+  - navigate: https://www.zhihu.com
+
+  - evaluate: |
+      (async () => {
+        const res = await fetch('https://www.zhihu.com/api/v3/moments?limit=50&desktop=true', {
+          credentials: 'include'
+        });
+        const data = await res.json();
+        const items = data.data || [];
+
+        // 有效的动作类型
+        const validActions = ['赞同了回答', '赞同了文章', '回答了问题', '发布了文章', '收藏了文章'];
+
+        return items
+          .map((item) => {
+            const actionText = item.action_text || '';
+            const target = item.target || {};
+            const question = target.question || {};
+            const ts = item.created_time || 0;
+
+            // 检查是否有有效的动作
+            const action = validActions.find(a => actionText.includes(a));
+            if (!action) {
+              return null;
+            }
+
+            // 提取用户名
+            const user = actionText.split(action)[0].split(',')[0].split('，')[0].trim() || '用户';
+
+            // 提取标题、URL 和点赞数
+            let title = '';
+            let url = '';
+            let upvotes = '0';
+
+            if (target.type === 'answer') {
+              title = question.title || '';
+              if (question.id && target.id) {
+                url = 'https://www.zhihu.com/question/' + question.id + '/answer/' + target.id;
+              }
+              upvotes = String(target.voteup_count || 0);
+            } else if (target.type === 'article') {
+              title = target.title || '';
+              if (target.url) {
+                const m = target.url.match(/\/articles\/(\d+)/);
+                if (m) {
+                  url = 'https://zhuanlan.zhihu.com/p/' + m[1];
+                }
+              }
+              upvotes = String(target.voteup_count || 0);
+            }
+
+            // 必须有标题才处理
+            if (!title) {
+              return null;
+            }
+
+            // 计算时间
+            const now = Math.floor(Date.now() / 1000);
+            const diff = now - ts;
+            let time = '';
+            if (diff < 60) {
+              time = '刚刚';
+            } else if (diff < 3600) {
+              time = Math.floor(diff / 60) + ' 分钟前';
+            } else if (diff < 86400) {
+              time = Math.floor(diff / 3600) + ' 小时前';
+            } else if (diff < 365 * 86400) {
+              time = Math.floor(diff / 86400) + ' 天前';
+            } else {
+              return null; // 过滤掉太旧的数据
+            }
+
+            return {
+              user: user,
+              action: action,
+              title: title,
+              url: url,
+              time: time,
+              upvotes: upvotes
+            };
+          })
+          .filter(x => x !== null);
+      })()
+
+  - map:
+      user: ${{ item.user }}
+      action: ${{ item.action }}
+      title: ${{ item.title }}
+      time: ${{ item.time }}
+      upvotes: ${{ item.upvotes }}
+      url: ${{ item.url }}
+
+  - limit: ${{ args.limit }}
+
+columns: [user, action, title, time, upvotes]

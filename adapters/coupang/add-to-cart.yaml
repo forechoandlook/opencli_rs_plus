@@ -1,0 +1,116 @@
+site: coupang
+name: add-to-cart
+description: "Add a Coupang product to cart using logged-in browser session"
+domain: www.coupang.com
+strategy: cookie
+browser: true
+
+args:
+  product-id:
+    positional: true
+    type: string
+    description: Coupang product ID
+  url:
+    type: string
+    description: Canonical product URL
+
+columns: [ok, product_id, url, message]
+
+pipeline:
+  - evaluate: |
+      (() => {
+        const rawId = ${{ args['product-id'] | default('') | json }};
+        const rawUrl = ${{ args.url | default('') | json }};
+
+        function normalizeId(text) {
+          if (!text) return '';
+          const match = text.match(/\/vp\/products\/(\d+)/) || text.match(/\b(\d{6,})\b/);
+          return match?.[1] || text;
+        }
+
+        const productId = normalizeId(rawId);
+        let targetUrl = '';
+        if (rawUrl) {
+          try {
+            const u = new URL(rawUrl.startsWith('http') ? rawUrl : 'https://www.coupang.com' + rawUrl);
+            const id = normalizeId(u.pathname) || productId;
+            targetUrl = id ? 'https://www.coupang.com/vp/products/' + id : u.toString();
+          } catch {}
+        }
+        if (!targetUrl && productId) targetUrl = 'https://www.coupang.com/vp/products/' + productId;
+        if (!targetUrl) throw new Error('Either --product-id or --url is required');
+
+        return { productId, targetUrl };
+      })()
+  - navigate: ${{ data.targetUrl }}
+  - evaluate: |
+      (async () => {
+        const expectedProductId = ${{ data.productId | json }};
+        const text = document.body.innerText || '';
+        const loginHints = {
+          hasLoginLink: Boolean(document.querySelector('a[href*="login"], a[title*="로그인"]')),
+          hasMyCoupang: /마이쿠팡/.test(text),
+        };
+
+        if (loginHints.hasLoginLink && !loginHints.hasMyCoupang) {
+          throw new Error('Coupang login required. Please log into Coupang in Chrome and retry.');
+        }
+
+        const pathMatch = location.pathname.match(/\/vp\/products\/(\d+)/);
+        const currentProductId = pathMatch?.[1] || '';
+        if (expectedProductId && currentProductId && expectedProductId !== currentProductId) {
+          throw new Error('Product mismatch: expected ' + expectedProductId + ', got ' + currentProductId);
+        }
+
+        // Check for required options
+        const optionSelectors = ['select', '[role="listbox"]', '.prod-option'];
+        const hasRequiredOption = optionSelectors.some(sel => {
+          const nodes = Array.from(document.querySelectorAll(sel));
+          return nodes.some(n => /옵션|색상|사이즈|용량|선택/i.test((n.textContent || '') + ' ' + (n.getAttribute?.('aria-label') || '')));
+        });
+        if (hasRequiredOption) throw new Error('This product requires option selection and is not supported.');
+
+        // Click add-to-cart button
+        const beforeCount = (() => {
+          const node = document.querySelector('[class*="cart"] .count, #headerCartCount, .cart-count');
+          const num = Number((node?.textContent || '').replace(/[^\d]/g, ''));
+          return Number.isFinite(num) ? num : null;
+        })();
+
+        const buttons = Array.from(document.querySelectorAll('button, a[role="button"], input[type="button"]'));
+        let clicked = false;
+        for (const btn of buttons) {
+          const label = ((btn.innerText || '') + ' ' + (btn.getAttribute('aria-label') || '')).trim();
+          if (/장바구니|카트|cart/i.test(label) && !/sold out|품절/i.test(label)) {
+            btn.click();
+            clicked = true;
+            break;
+          }
+        }
+        if (!clicked) throw new Error('Could not find an add-to-cart button on the product page.');
+
+        await new Promise(r => setTimeout(r, 2500));
+
+        const afterText = document.body.innerText || '';
+        const successMessage = /장바구니에 담|장바구니 담기 완료|added to cart/i.test(afterText);
+        const afterCount = (() => {
+          const node = document.querySelector('[class*="cart"] .count, #headerCartCount, .cart-count');
+          const num = Number((node?.textContent || '').replace(/[^\d]/g, ''));
+          return Number.isFinite(num) ? num : null;
+        })();
+        const countIncreased = beforeCount != null && afterCount != null && afterCount >= beforeCount && (afterCount > beforeCount || beforeCount === 0);
+
+        if (!successMessage && !countIncreased) throw new Error('Failed to confirm add-to-cart success.');
+
+        return [{
+          ok: true,
+          product_id: currentProductId || expectedProductId,
+          url: location.href,
+          message: 'Added to cart',
+        }];
+      })()
+  - map:
+      ok: ${{ item.ok }}
+      product_id: ${{ item.product_id }}
+      url: ${{ item.url }}
+      message: ${{ item.message }}

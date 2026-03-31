@@ -1,0 +1,55 @@
+site: twitter
+name: unbookmark
+description: Remove a tweet from bookmarks
+domain: x.com
+strategy: cookie
+browser: true
+
+args:
+  url:
+    type: str
+    positional: true
+    required: true
+    description: Tweet URL to unbookmark
+
+columns: [status, message]
+
+pipeline:
+  - navigate:
+      url: ${{ args.url }}
+      settleMs: 5000
+
+  - evaluate: |
+      (async () => {
+        try {
+          let attempts = 0;
+          let removeBtn = null;
+
+          while (attempts < 20) {
+            const bookmarkBtn = document.querySelector('[data-testid="bookmark"]');
+            if (bookmarkBtn) {
+              return [{ status: 'success', message: 'Tweet is not bookmarked (already removed).' }];
+            }
+            removeBtn = document.querySelector('[data-testid="removeBookmark"]');
+            if (removeBtn) break;
+            await new Promise(r => setTimeout(r, 500));
+            attempts++;
+          }
+
+          if (!removeBtn) {
+            return [{ status: 'failed', message: 'Could not find Remove Bookmark button. Are you logged in?' }];
+          }
+
+          removeBtn.click();
+          await new Promise(r => setTimeout(r, 1000));
+
+          const verify = document.querySelector('[data-testid="bookmark"]');
+          if (verify) {
+            return [{ status: 'success', message: 'Tweet successfully removed from bookmarks.' }];
+          } else {
+            return [{ status: 'failed', message: 'Unbookmark action initiated but UI did not update.' }];
+          }
+        } catch (e) {
+          return [{ status: 'failed', message: e.toString() }];
+        }
+      })()

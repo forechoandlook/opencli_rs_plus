@@ -1,0 +1,72 @@
+site: gemini
+name: write
+description: Use Gemini's Write anything tool
+domain: gemini.google.com
+strategy: cookie
+browser: true
+
+args:
+  prompt:
+    positional: true
+    type: string
+    required: true
+    description: Writing prompt or request
+  timeout:
+    type: int
+    default: 120
+    description: Max seconds to wait for response
+
+columns: [response]
+
+pipeline:
+  - navigate: https://gemini.google.com/
+  - wait:
+      time: 3
+  - evaluate: |
+      (async () => {
+        const prompt = ${{ args.prompt | json }};
+        const timeoutMs = (${{ args.timeout }} || 120) * 1000;
+
+        // Click Write anything card
+        const writeBtn = document.querySelector('button[aria-label*="Write anything"]');
+        if (!writeBtn) return [{ response: '[FAILED] Write anything button not found' }];
+        writeBtn.click();
+        await new Promise(r => setTimeout(r, 2000));
+
+        // Type in the input
+        const box = document.querySelector('div[aria-label="Enter a prompt for Gemini"]');
+        if (!box) return [{ response: '[FAILED] Input box not found' }];
+        box.focus();
+        await new Promise(r => setTimeout(r, 300));
+        document.execCommand('selectAll');
+        document.execCommand('insertText', false, prompt);
+        await new Promise(r => setTimeout(r, 1500));
+
+        // Send
+        const sendBtn = document.querySelector('button[aria-label="Send message"]');
+        if (sendBtn && !sendBtn.disabled) sendBtn.click();
+        else box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+
+        const startTime = Date.now();
+        let lastText = '';
+        let stableCount = 0;
+
+        while (Date.now() - startTime < timeoutMs) {
+          await new Promise(r => setTimeout(r, 4000));
+          const responses = document.querySelectorAll('.model-response-text');
+          if (responses.length === 0) continue;
+          const last = responses[responses.length - 1];
+          const text = (last.innerText || '').trim();
+          if (!text || text.length < 5) continue;
+          if (text === lastText) {
+            stableCount++;
+            if (stableCount >= 2) return [{ response: text }];
+          } else {
+            stableCount = 0;
+          }
+          lastText = text;
+        }
+
+        if (lastText) return [{ response: lastText }];
+        return [{ response: '[TIMEOUT] Write request timed out' }];
+      })()

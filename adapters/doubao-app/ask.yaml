@@ -1,0 +1,82 @@
+site: doubao-app
+name: ask
+description: Send a message to Doubao desktop app and wait for the AI response
+domain: doubao-app
+strategy: ui
+browser: true
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Prompt to send
+  timeout:
+    type: int
+    default: 30
+    description: Max seconds to wait for response
+
+columns: [Role, Text]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const text = ${{ args.text | json }};
+        const timeout = ${{ args.timeout }} || 30;
+        const SEL_INPUT = '[data-testid="chat_input_input"]';
+        const SEL_MESSAGE = '[data-testid="message_content"]';
+        const SEL_MESSAGE_TEXT = '[data-testid="message_text_content"]';
+        const SEL_INDICATOR = '[data-testid="indicator"]';
+        const SEL_SEND_BTN = '[data-testid="chat_input_send_button"]';
+
+        const beforeCount = document.querySelectorAll(SEL_MESSAGE).length;
+
+        // Inject text
+        const textarea = document.querySelector(SEL_INPUT);
+        if (!textarea) return [{ Role: 'System', Text: 'Could not find chat input.' }];
+        textarea.focus();
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+        if (setter) setter.call(textarea, text);
+        else textarea.value = text;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 500));
+
+        // Click send
+        const btn = document.querySelector(SEL_SEND_BTN);
+        if (btn) btn.click();
+        else textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+
+        // Poll for response
+        const pollInterval = 1;
+        const maxPolls = Math.ceil(timeout / pollInterval);
+        let response = '';
+
+        for (let i = 0; i < maxPolls; i++) {
+          await new Promise(r => setTimeout(r, pollInterval * 1000));
+          const msgs = document.querySelectorAll(SEL_MESSAGE);
+          if (msgs.length <= beforeCount) continue;
+          const lastMsg = msgs[msgs.length - 1];
+          if (lastMsg.classList.contains('justify-end')) continue;
+          const textEl = lastMsg.querySelector(SEL_MESSAGE_TEXT);
+          if (!textEl) continue;
+          if (textEl.querySelector(SEL_INDICATOR)) continue;
+          let t = '';
+          const children = textEl.querySelectorAll('div[dir]');
+          if (children.length > 0) t = Array.from(children).map(c => c.innerText || c.textContent || '').join('');
+          else t = textEl.innerText?.trim() || '';
+          if (t) { response = t; break; }
+        }
+
+        if (!response) {
+          return [
+            { Role: 'User', Text: text },
+            { Role: 'System', Text: 'No response received within ' + timeout + 's.' },
+          ];
+        }
+
+        return [
+          { Role: 'User', Text: text },
+          { Role: 'Assistant', Text: response },
+        ];
+      })()

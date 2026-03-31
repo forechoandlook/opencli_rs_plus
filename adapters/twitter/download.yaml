@@ -1,0 +1,98 @@
+site: twitter
+name: download
+description: 下载 Twitter/X 媒体（图片和视频）
+domain: x.com
+strategy: cookie
+browser: true
+
+args:
+  username:
+    type: str
+    positional: true
+    description: Twitter username (downloads from media tab)
+  tweet-url:
+    type: str
+    description: Single tweet URL to download
+  limit:
+    type: int
+    default: 10
+    description: Number of tweets to scan
+  output:
+    type: str
+    default: ./twitter-downloads
+    description: Output directory
+
+columns: [index, type, status, size]
+
+pipeline:
+  # Step 1: Navigate to target page
+  - navigate:
+      url: https://x.com/home
+      settleMs: 3000
+
+  - evaluate: |
+      (() => {
+        const username = args.username || '';
+        const tweetUrl = args['tweet-url'] || '';
+        if (!username && !tweetUrl) throw new Error('Must provide a username or --tweet-url');
+        return tweetUrl || ('https://x.com/' + username + '/media');
+      })()
+
+  - navigate:
+      url: "${{ data }}"
+      settleMs: 5000
+
+  # Step 2: Scroll and extract media
+  - evaluate: |
+      (async () => {
+        const tweetUrl = args['tweet-url'] || '';
+        const limit = args.limit || 10;
+
+        // Scroll to load more
+        if (!tweetUrl) {
+          for (let i = 0; i < Math.ceil(limit / 5); i++) {
+            window.scrollTo(0, document.body.scrollHeight);
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+
+        const media = [];
+
+        // Find images (high quality)
+        document.querySelectorAll('img[src*="pbs.twimg.com/media"]').forEach(img => {
+          let src = img.src || '';
+          src = src.replace(/&name=\w+$/, '&name=large');
+          if (!src.includes('&name=')) src += '&name=large';
+          media.push({ type: 'image', url: src });
+        });
+
+        // Find videos
+        document.querySelectorAll('video').forEach(video => {
+          const src = video.src || '';
+          if (src) media.push({ type: 'video', url: src });
+        });
+
+        // Find video tweets (for yt-dlp)
+        document.querySelectorAll('[data-testid="videoPlayer"]').forEach(player => {
+          const tweetLink = player.closest('article')?.querySelector('a[href*="/status/"]');
+          const href = tweetLink?.getAttribute('href') || '';
+          if (href) media.push({ type: 'video-tweet', url: 'https://x.com' + href });
+        });
+
+        // Deduplicate
+        const seen = new Set();
+        const unique = media.filter(m => { if (seen.has(m.url)) return false; seen.add(m.url); return true; }).slice(0, limit);
+
+        if (!unique.length) return [{ index: 0, type: '-', status: 'failed', size: 'No media found' }];
+
+        return {
+          items: unique,
+          output: args.output || './twitter-downloads',
+          username: args.username || 'tweet',
+        };
+      })()
+
+  - download:
+      type: twitter-media
+      output: "${{ data.output }}"
+      username: "${{ data.username }}"

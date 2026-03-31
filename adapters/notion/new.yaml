@@ -1,0 +1,34 @@
+site: notion
+name: new
+description: Create a new page in Notion
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  title:
+    positional: true
+    type: string
+    description: "Page title (optional)"
+
+columns: [Status]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const title = ${{ args.title | json }};
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', code: 'KeyN', metaKey: true, bubbles: true }));
+        await new Promise(r => setTimeout(r, 1000));
+
+        if (title) {
+          const titleEl = document.querySelector('[placeholder="Untitled"], [data-content-editable-leaf] [placeholder]');
+          if (titleEl) {
+            titleEl.focus();
+            document.execCommand('insertText', false, title);
+          }
+          await new Promise(r => setTimeout(r, 500));
+          return [{ Status: 'Created page: ' + title }];
+        }
+
+        return [{ Status: 'New blank page created' }];
+      })()

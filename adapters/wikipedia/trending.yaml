@@ -1,0 +1,43 @@
+site: wikipedia
+name: trending
+domain: en.wikipedia.org
+description: Most-read Wikipedia articles (yesterday)
+strategy: public
+browser: false
+
+args:
+  limit:
+    type: int
+    default: 10
+    description: Max results
+  lang:
+    type: str
+    default: en
+    description: "Language code (e.g. en, zh, ja)"
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const lang = args.lang || 'en';
+        const limit = Math.max(1, Math.min(Number(args.limit), 50));
+        const d = new Date(Date.now() - 86400000);
+        const yyyy = d.getUTCFullYear();
+        const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(d.getUTCDate()).padStart(2, '0');
+        const url = `https://${lang}.wikipedia.org/api/rest_v1/feed/featured/${yyyy}/${mm}/${dd}`;
+        const resp = await fetch(url, {
+          headers: { 'User-Agent': 'opencli/1.0 (https://github.com/jackwener/opencli)' }
+        });
+        if (!resp.ok) throw new Error(`Wikipedia API HTTP ${resp.status}`);
+        const data = await resp.json();
+        const articles = data?.mostread?.articles;
+        if (!articles?.length) throw new Error('No trending articles available');
+        return articles.slice(0, limit).map((a, i) => ({
+          rank: i + 1,
+          title: a.title ?? '-',
+          description: (a.description ?? '-').slice(0, 80),
+          views: a.views ?? 0
+        }));
+      })()
+
+columns: [rank, title, description, views]

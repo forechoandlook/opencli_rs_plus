@@ -1,0 +1,43 @@
+site: reddit
+name: saved
+description: Browse your saved Reddit posts
+domain: reddit.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 15
+
+columns: [title, subreddit, score, comments, url]
+
+pipeline:
+  - navigate: https://www.reddit.com
+  - evaluate: |
+      (async () => {
+        const meRes = await fetch('/api/me.json?raw_json=1', { credentials: 'include' });
+        const me = await meRes.json();
+        const username = me?.name || me?.data?.name;
+        if (!username) throw new Error('Not logged in — cannot determine username');
+
+        const limit = ${{ args.limit }};
+        const res = await fetch('/user/' + username + '/saved.json?limit=' + limit + '&raw_json=1', {
+          credentials: 'include'
+        });
+        const d = await res.json();
+        return (d?.data?.children || []).map(c => ({
+          title: c.data.title || (c.data.body || '').slice(0, 100) || '-',
+          subreddit: c.data.subreddit_name_prefixed || 'r/' + (c.data.subreddit || '?'),
+          score: c.data.score || 0,
+          comments: c.data.num_comments || 0,
+          url: 'https://www.reddit.com' + (c.data.permalink || ''),
+        }));
+      })()
+  - map:
+      title: ${{ item.title }}
+      subreddit: ${{ item.subreddit }}
+      score: ${{ item.score }}
+      comments: ${{ item.comments }}
+      url: ${{ item.url }}
+  - limit: ${{ args.limit }}

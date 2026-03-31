@@ -1,0 +1,124 @@
+site: linkedin
+name: search
+description: Search LinkedIn jobs
+domain: www.linkedin.com
+strategy: header
+browser: true
+
+args:
+  query:
+    positional: true
+    type: string
+    required: true
+    description: Job search keywords
+  location:
+    type: string
+    description: "Location text such as San Francisco Bay Area"
+  limit:
+    type: int
+    default: 10
+    description: "Number of jobs to return (max 100)"
+  start:
+    type: int
+    default: 0
+    description: Result offset for pagination
+
+columns: [rank, title, company, location, listed, salary, url]
+
+pipeline:
+  - evaluate: |
+      (() => {
+        const keywords = ${{ args.query | json }};
+        const location = ${{ args.location | default('') | json }};
+        const params = new URLSearchParams({ keywords });
+        if (location) params.set('location', location);
+        return 'https://www.linkedin.com/jobs/search/?' + params.toString();
+      })()
+  - navigate: ${{ data }}
+  - wait: 3
+  - evaluate: |
+      (async () => {
+        const keywords = ${{ args.query | json }};
+        const location = ${{ args.location | default('') | json }};
+        const limit = Math.max(1, Math.min(${{ args.limit }}, 100));
+        const start = Math.max(0, ${{ args.start }});
+
+        // Build Voyager query
+        const parts = [
+          'origin:JOB_SEARCH_PAGE_OTHER_ENTRY',
+          'keywords:' + keywords,
+        ];
+        if (location) parts.push('locationUnion:(seoLocation:(location:' + location + '))');
+        parts.push('spellCorrectionEnabled:true');
+        const query = '(' + parts.join(',') + ')';
+
+        const MAX_BATCH = 25;
+        const allJobs = [];
+        let offset = start;
+
+        while (allJobs.length < limit) {
+          const count = Math.min(MAX_BATCH, limit - allJobs.length);
+          const params = new URLSearchParams({
+            decorationId: 'com.linkedin.voyager.dash.deco.jobs.search.JobSearchCardsCollection-220',
+            count: String(count),
+            q: 'jobSearch',
+          });
+          const encodedQuery = encodeURIComponent(query)
+            .replace(/%3A/gi, ':').replace(/%2C/gi, ',')
+            .replace(/%28/gi, '(').replace(/%29/gi, ')');
+          const apiPath = '/voyager/api/voyagerJobsDashJobCards?' + params.toString() + '&query=' + encodedQuery + '&start=' + offset;
+
+          const jsession = document.cookie.split(';').map(p => p.trim())
+            .find(p => p.startsWith('JSESSIONID='))?.slice('JSESSIONID='.length);
+          if (!jsession) throw new Error('LinkedIn JSESSIONID cookie not found. Please sign in.');
+
+          const csrf = jsession.replace(/^"|"$/g, '');
+          const res = await fetch(apiPath, {
+            credentials: 'include',
+            headers: { 'csrf-token': csrf, 'x-restli-protocol-version': '2.0.0' },
+          });
+          if (!res.ok) throw new Error('LinkedIn API error: HTTP ' + res.status);
+          const batch = await res.json();
+
+          const elements = Array.isArray(batch?.elements) ? batch.elements : [];
+          if (elements.length === 0) break;
+
+          for (const element of elements) {
+            const card = element?.jobCardUnion?.jobPostingCard;
+            if (!card) continue;
+
+            const jobId = [card.jobPostingUrn, card.jobPosting?.entityUrn, card.entityUrn]
+              .filter(Boolean)
+              .map(s => String(s).match(/(\d+)/)?.[1])
+              .find(Boolean) || '';
+
+            const listedItem = (card.footerItems || []).find(i => i?.type === 'LISTED_DATE' && i?.timeAt);
+            const listed = listedItem?.timeAt ? new Date(listedItem.timeAt).toISOString().slice(0, 10) : '';
+
+            allJobs.push({
+              title: card.jobPostingTitle || card.title?.text || '',
+              company: card.primaryDescription?.text || '',
+              location: card.secondaryDescription?.text || '',
+              listed,
+              salary: card.tertiaryDescription?.text || '',
+              url: jobId ? 'https://www.linkedin.com/jobs/view/' + jobId : '',
+            });
+          }
+
+          if (elements.length < count) break;
+          offset += elements.length;
+        }
+
+        return allJobs.slice(0, limit).map((item, index) => ({
+          rank: start + index + 1,
+          ...item,
+        }));
+      })()
+  - map:
+      rank: ${{ item.rank }}
+      title: ${{ item.title }}
+      company: ${{ item.company }}
+      location: ${{ item.location }}
+      listed: ${{ item.listed }}
+      salary: ${{ item.salary }}
+      url: ${{ item.url }}

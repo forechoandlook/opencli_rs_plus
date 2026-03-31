@@ -1,0 +1,44 @@
+site: wikipedia
+name: search
+domain: en.wikipedia.org
+description: Search Wikipedia articles
+strategy: public
+browser: false
+
+args:
+  query:
+    type: str
+    required: true
+    positional: true
+    description: Search keyword
+  limit:
+    type: int
+    default: 10
+    description: Max results
+  lang:
+    type: str
+    default: en
+    description: "Language code (e.g. en, zh, ja)"
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const limit = Math.max(1, Math.min(Number(args.limit), 50));
+        const lang = args.lang || 'en';
+        const q = encodeURIComponent(args.query);
+        const url = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${q}&srlimit=${limit}&format=json&utf8=1`;
+        const resp = await fetch(url, {
+          headers: { 'User-Agent': 'opencli/1.0 (https://github.com/jackwener/opencli)' }
+        });
+        if (!resp.ok) throw new Error(`Wikipedia API HTTP ${resp.status}`);
+        const data = await resp.json();
+        const results = data?.query?.search;
+        if (!results?.length) throw new Error('No articles found');
+        return results.map(r => ({
+          title: r.title,
+          snippet: r.snippet.replace(/<[^>]+>/g, '').slice(0, 120),
+          url: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(r.title.replace(/ /g, '_'))}`
+        }));
+      })()
+
+columns: [title, snippet, url]

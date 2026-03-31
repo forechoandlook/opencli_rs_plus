@@ -1,0 +1,30 @@
+site: chatgpt
+name: ask
+description: Send a prompt and wait for the AI response (macOS ChatGPT desktop app)
+domain: localhost
+strategy: public
+browser: false
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Prompt to send
+  timeout:
+    type: int
+    default: 30
+    description: Max seconds to wait for response
+
+columns: [Role, Text]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const text = ${{ args.text | json }};
+        const timeout = ${{ args.timeout }} || 30;
+        return [
+          { Role: 'User', Text: text },
+          { Role: 'System', Text: 'ChatGPT desktop app requires native macOS automation (osascript + AX API). Use the TypeScript adapter for full functionality.' },
+        ];
+      })()

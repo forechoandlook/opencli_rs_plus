@@ -1,0 +1,153 @@
+site: coupang
+name: search
+description: "Search Coupang products with logged-in browser session"
+domain: www.coupang.com
+strategy: cookie
+browser: true
+
+args:
+  query:
+    positional: true
+    type: string
+    required: true
+    description: Search keyword
+  page:
+    type: int
+    default: 1
+    description: Search result page number
+  limit:
+    type: int
+    default: 20
+    description: "Max results (max 50)"
+  filter:
+    type: string
+    description: "Optional search filter (currently supports: rocket)"
+
+columns: [rank, title, price, unit_price, rating, review_count, rocket, delivery_type, delivery_promise, url]
+
+pipeline:
+  - navigate: https://www.coupang.com/np/search?q=${{ args.query | urlencode }}&channel=user&page=${{ args.page | default(1) }}
+  - scroll:
+      times: 2
+      delay: 1500
+  - evaluate: |
+      (async () => {
+        const query = ${{ args.query | json }};
+        const limit = Math.min(Math.max(${{ args.limit }}, 1), 50);
+        const pageNumber = ${{ args.page | default(1) }};
+
+        const normalizeText = (value) => (value == null ? '' : String(value).trim());
+        const parseNum = (value) => {
+          const text = normalizeText(value).replace(/[^\d.]/g, '');
+          if (!text) return null;
+          const num = Number(text);
+          return Number.isFinite(num) ? num : null;
+        };
+
+        const canonicalUrl = (url, productId) => {
+          if (url) {
+            try {
+              const parsed = new URL(url, 'https://www.coupang.com');
+              const match = parsed.pathname.match(/\/vp\/products\/(\d+)/);
+              return 'https://www.coupang.com/vp/products/' + (match?.[1] || productId || '');
+            } catch {}
+          }
+          return productId ? 'https://www.coupang.com/vp/products/' + productId : '';
+        };
+
+        // DOM extraction
+        const domScanLimit = Math.max(limit * 6, 60);
+        const cards = Array.from(new Set([
+          ...document.querySelectorAll('li.search-product'),
+          ...document.querySelectorAll('li[class*="search-product"]'),
+          ...document.querySelectorAll('[class*="ProductUnit_productUnit"]'),
+          ...document.querySelectorAll('a[href*="/vp/products/"]'),
+        ])).slice(0, domScanLimit);
+
+        const items = [];
+        for (const el of cards) {
+          const root = el.closest('li, div, article, section') || el;
+          const html = root.innerHTML || '';
+          const productId =
+            root.getAttribute('data-product-id') ||
+            el.getAttribute('data-product-id') ||
+            root.querySelector('a[href*="/vp/products/"]')?.getAttribute('href')?.match(/\/vp\/products\/(\d+)/)?.[1] ||
+            html.match(/\/vp\/products\/(\d+)/)?.[1] ||
+            (el.getAttribute('href') || '').match(/\/vp\/products\/(\d+)/)?.[1] || '';
+          const title =
+            root.querySelector('.name, .title, .product-name, [class*="productName"], [class*="title"]')?.textContent?.trim() ||
+            root.querySelector('img[alt]')?.getAttribute('alt') || '';
+          if (!title || !productId) continue;
+
+          // Price extraction
+          const priceArea = root.querySelector('[class*="PriceArea"], [class*="priceArea"]') || root;
+          const originalPrice = normalizeText(priceArea.querySelector('del, .base-price, [class*="base-price"]')?.textContent);
+          const priceEls = Array.from(priceArea.querySelectorAll('span, strong, div'))
+            .map(node => ({ text: normalizeText(node.textContent), num: parseNum(node.textContent) }))
+            .filter(p => p.num != null && p.num >= 100);
+          const originalNum = parseNum(originalPrice);
+          const price = priceEls.find(p => p.num !== originalNum)?.text || priceEls[0]?.text || '';
+          const unitPrice = normalizeText(root.querySelector('[class*="unit-price"], [class*="unitPrice"]')?.textContent);
+          const rating = root.querySelector('[class*="rating"], [class*="star"], [class*="ProductRating"]')?.getAttribute?.('aria-label') ||
+            root.querySelector('[class*="rating"]')?.textContent || '';
+          const reviewCount = root.querySelector('[class*="review"], [class*="count"], [class*="ProductRating"] span')?.textContent || '';
+          const badgeNodes = Array.from(root.querySelectorAll('.badge, .delivery, .tag, [class*="badge"], [class*="delivery"]'));
+          const badgeText = badgeNodes.map(n => n.textContent || '').join(' ');
+          const text = (root.textContent || '').replace(/\s+/g, ' ').trim();
+          const allText = badgeText + ' ' + text;
+
+          let rocket = '';
+          if (/판매자\s*로켓/.test(allText)) rocket = '판매자로켓';
+          else if (/로켓\s*프레시/.test(allText)) rocket = '로켓프레시';
+          else if (/로켓\s*와우/.test(allText)) rocket = '로켓와우';
+          else if (/로켓\s*직구|직구/.test(allText)) rocket = '로켓직구';
+          else if (/로켓\s*배송/.test(allText)) rocket = '로켓배송';
+
+          let deliveryType = '';
+          if (/무료\s*배송/.test(allText)) deliveryType = '무료배송';
+          else if (/일반\s*배송/.test(allText)) deliveryType = '일반배송';
+
+          let deliveryPromise = '';
+          if (/오늘\s*출발/.test(allText)) deliveryPromise = '오늘출발';
+          else if (/오늘.*도착/.test(allText)) deliveryPromise = '오늘도착';
+          else if (/새벽.*도착/.test(allText)) deliveryPromise = '새벽도착';
+          else if (/내일.*도착/.test(allText)) deliveryPromise = '내일도착';
+
+          const hrefNode = root.querySelector('a[href*="/vp/products/"]');
+          items.push({
+            rank: items.length + 1,
+            title,
+            price,
+            unit_price: unitPrice,
+            rating: normalizeText(rating).replace(/[^\d.]/g, ''),
+            review_count: normalizeText(reviewCount).replace(/[^\d]/g, ''),
+            rocket,
+            delivery_type: deliveryType,
+            delivery_promise: deliveryPromise,
+            url: canonicalUrl(hrefNode?.getAttribute('href') || '', productId),
+          });
+        }
+
+        // Dedupe
+        const seen = new Set();
+        const deduped = [];
+        for (const item of items) {
+          const key = item.url || item.title;
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          deduped.push({ ...item, rank: deduped.length + 1 });
+        }
+
+        return deduped.slice(0, limit);
+      })()
+  - map:
+      rank: ${{ item.rank }}
+      title: ${{ item.title }}
+      price: ${{ item.price }}
+      unit_price: ${{ item.unit_price }}
+      rating: ${{ item.rating }}
+      review_count: ${{ item.review_count }}
+      rocket: ${{ item.rocket }}
+      delivery_type: ${{ item.delivery_type }}
+      delivery_promise: ${{ item.delivery_promise }}
+      url: ${{ item.url }}

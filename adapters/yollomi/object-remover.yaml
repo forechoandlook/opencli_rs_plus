@@ -1,0 +1,16 @@
+site: yollomi
+name: object-remover
+description: "Yollomi AI object-remover"
+domain: yollomi.com
+strategy: cookie
+browser: true
+
+columns: [status, detail]
+
+pipeline:
+  - navigate: https://yollomi.com
+  - wait: 2
+  - evaluate: |
+      (function() {
+        return [{ status: 'info', detail: 'Yollomi object-remover requires cookie-authenticated API POST + file download chain. Use the TypeScript adapter for full functionality.' }];
+      })()

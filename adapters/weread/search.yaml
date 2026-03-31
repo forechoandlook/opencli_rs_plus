@@ -1,0 +1,38 @@
+site: weread
+name: search
+description: Search books on WeRead
+domain: weread.qq.com
+strategy: public
+browser: false
+
+args:
+  query:
+    positional: true
+    required: true
+    type: str
+    description: Search keyword
+  limit:
+    type: int
+    default: 10
+    description: Max results
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const keyword = '${{ args.query }}';
+        const limit = ${{ args.limit }} || 10;
+        const resp = await fetch('https://weread.qq.com/web/search/global?keyword=' + encodeURIComponent(keyword), {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        const books = data?.books || [];
+        return books.slice(0, limit).map((item, i) => ({
+          rank: i + 1,
+          title: item.bookInfo?.title || '',
+          author: item.bookInfo?.author || '',
+          bookId: item.bookInfo?.bookId || '',
+        }));
+      })()
+
+columns: [rank, title, author, bookId]

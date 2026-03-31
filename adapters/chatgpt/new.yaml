@@ -1,0 +1,14 @@
+site: chatgpt
+name: new
+description: Open a new chat in ChatGPT Desktop App
+domain: localhost
+strategy: public
+browser: false
+
+columns: [Status]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        return [{ Status: 'ChatGPT desktop new chat requires native macOS automation (osascript Cmd+N). Use the TypeScript adapter for full functionality.' }];
+      })()

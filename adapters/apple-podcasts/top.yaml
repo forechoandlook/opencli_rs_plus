@@ -1,0 +1,37 @@
+site: apple-podcasts
+name: top
+domain: rss.marketingtools.apple.com
+description: Top podcasts chart on Apple Podcasts
+strategy: public
+browser: false
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Number of podcasts (max 100)
+  country:
+    type: str
+    default: us
+    description: "Country code (e.g. us, cn, gb, jp)"
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const limit = Math.max(1, Math.min(Number(args.limit), 100));
+        const country = String(args.country || 'us').trim().toLowerCase();
+        const url = `https://rss.marketingtools.apple.com/api/v2/${country}/podcasts/top/${limit}/podcasts.json`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`Charts API HTTP ${resp.status}`);
+        const data = await resp.json();
+        const results = data?.feed?.results;
+        if (!results?.length) throw new Error('No chart data found');
+        return results.map((p, i) => ({
+          rank: i + 1,
+          title: p.name,
+          author: p.artistName,
+          id: p.id
+        }));
+      })()
+
+columns: [rank, title, author, id]

@@ -1,0 +1,14 @@
+site: chatgpt
+name: status
+description: Check if ChatGPT Desktop App is running natively on macOS
+domain: localhost
+strategy: public
+browser: false
+
+columns: [Status]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        return [{ Status: 'ChatGPT desktop status requires native macOS automation (osascript). Use the TypeScript adapter for full functionality.' }];
+      })()

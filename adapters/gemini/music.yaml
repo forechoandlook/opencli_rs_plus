@@ -1,0 +1,127 @@
+site: gemini
+name: music
+description: Generate music with Gemini
+domain: gemini.google.com
+strategy: cookie
+browser: true
+
+args:
+  prompt:
+    positional: true
+    type: string
+    required: true
+    description: Music description prompt
+  timeout:
+    type: int
+    default: 120
+    description: Max seconds to wait for generation
+
+columns: [response]
+
+pipeline:
+  - navigate: https://gemini.google.com/
+  - wait:
+      time: 3
+  - evaluate: |
+      (async () => {
+        const prompt = ${{ args.prompt | json }};
+        const timeoutMs = (${{ args.timeout }} || 120) * 1000;
+
+        // Helper: wait for page URL to stabilize and not be about:blank
+        const waitForPageStable = async (maxWaitMs = 15000) => {
+          const startTime = Date.now();
+          while (Date.now() - startTime < maxWaitMs) {
+            const url = window.location.href;
+            if (url.includes('about:blank')) {
+              console.log('[music] Page is about:blank, waiting for reload...');
+              await new Promise(r => setTimeout(r, 1000));
+              continue;
+            }
+            if (url.includes('gemini.google.com')) {
+              await new Promise(r => setTimeout(r, 1000));
+              return true;
+            }
+            await new Promise(r => setTimeout(r, 500));
+          }
+          return false;
+        };
+
+        console.log('[music] Starting music generation');
+
+        // Click Create music tool card
+        const musicBtn = document.querySelector('button[aria-label*="Create music"]');
+        if (!musicBtn) return [{ response: '[ERROR] Create music button not found' }];
+
+        console.log('[music] Clicking Create music button');
+        musicBtn.click();
+
+        // Wait for page to recover from about:blank
+        const pageReady = await waitForPageStable(15000);
+        if (!pageReady) {
+          return [{ response: '[ERROR] Page failed to stabilize after clicking Create music button' }];
+        }
+
+        // Wait for input box to appear
+        let box = null;
+        const inputStartTime = Date.now();
+        while (Date.now() - inputStartTime < 10000 && !box) {
+          box = document.querySelector('div[aria-label="Enter a prompt for Gemini"]');
+          if (!box) {
+            await new Promise(r => setTimeout(r, 500));
+          }
+        }
+
+        if (!box) return [{ response: '[ERROR] Input box not found after 10s' }];
+
+        console.log('[music] Typing prompt');
+        box.focus();
+        await new Promise(r => setTimeout(r, 300));
+        document.execCommand('selectAll');
+        document.execCommand('insertText', false, prompt);
+        await new Promise(r => setTimeout(r, 1500));
+
+        // Send
+        const sendBtn = document.querySelector('button[aria-label="Send message"]');
+        if (sendBtn && !sendBtn.disabled) sendBtn.click();
+        else box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+
+        const startTime = Date.now();
+        let lastText = '';
+        let stableCount = 0;
+        let pollCount = 0;
+
+        while (Date.now() - startTime < timeoutMs) {
+          await new Promise(r => setTimeout(r, 3000));
+          pollCount++;
+
+          // Check page is still valid
+          const currentUrl = window.location.href;
+          if (currentUrl.includes('about:blank')) {
+            console.log('[music] Page went to about:blank during response polling, waiting...');
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+
+          const responses = document.querySelectorAll('.model-response-text');
+          if (responses.length === 0) {
+            if (pollCount % 5 === 0) console.log('[music] Poll #' + pollCount + ': no responses yet');
+            continue;
+          }
+          const last = responses[responses.length - 1];
+          const text = (last.innerText || '').trim();
+          if (!text || text.length < 5) continue;
+          if (text === lastText) {
+            stableCount++;
+            if (stableCount >= 2) {
+              console.log('[music] Response stable, returning');
+              return [{ response: text }];
+            }
+          } else {
+            stableCount = 0;
+          }
+          lastText = text;
+        }
+
+        if (lastText) return [{ response: lastText }];
+        return [{ response: '[TIMEOUT] Music generation timed out (polls: ' + pollCount + ')' }];
+      })()

@@ -1,0 +1,63 @@
+site: gemini
+name: history
+description: List Gemini conversation history
+domain: gemini.google.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Max number of conversations to list
+
+columns: [content, link]
+
+pipeline:
+  - navigate: https://gemini.google.com/
+  - wait: 5
+  - evaluate: |
+      (async () => {
+        const limit = ${{ args.limit }} || 20;
+
+        // Wait for sidebar to fully load
+        const waitForSidebar = async (maxWaitMs = 8000) => {
+          const startTime = Date.now();
+          while (Date.now() - startTime < maxWaitMs) {
+            const items = document.querySelectorAll('a[data-test-id="conversation"]');
+            if (items.length > 0) {
+              console.log('[history] Sidebar loaded with ' + items.length + ' conversations');
+              return true;
+            }
+            await new Promise(r => setTimeout(r, 500));
+          }
+          console.log('[history] Sidebar did not load within timeout');
+          return false;
+        };
+
+        const sidebarReady = await waitForSidebar();
+        if (!sidebarReady) {
+          return [{ content: '[ERROR]', link: 'Sidebar failed to load - no conversations found' }];
+        }
+
+        const items = document.querySelectorAll('a[data-test-id="conversation"]');
+        const results = [];
+        for (const item of items) {
+          if (results.length >= limit) break;
+          // Extract content from text content (main label)
+          const mainText = (item.textContent || '').trim();
+          // Also try to get any subtitle or preview text from nested elements
+          const titleEl = item.querySelector('[class*="title"], [class*="label"]');
+          const content = (titleEl ? titleEl.textContent : mainText).trim() || mainText;
+          const href = item.getAttribute('href') || '';
+          if (content && href) {
+            results.push({ content, link: 'https://gemini.google.com' + href });
+          }
+        }
+
+        if (results.length === 0) {
+          return [{ content: '[NO DATA]', link: 'No conversations found - you may need to have a conversation first' }];
+        }
+        console.log('[history] Found ' + results.length + ' conversations');
+        return results;
+      })()

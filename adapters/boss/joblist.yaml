@@ -1,0 +1,30 @@
+site: boss
+name: joblist
+description: "BOSS直聘查看我发布的职位列表"
+domain: www.zhipin.com
+strategy: cookie
+browser: true
+
+columns: [job_name, salary, city, status, encrypt_job_id]
+
+pipeline:
+  - navigate: https://www.zhipin.com/web/chat/index
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        const url = 'https://www.zhipin.com/wapi/zpjob/job/chatted/jobList';
+        const resp = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', url, true); xhr.withCredentials = true; xhr.timeout = 15000;
+          xhr.setRequestHeader('Accept', 'application/json');
+          xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)); } catch(e) { reject(e); } };
+          xhr.onerror = () => reject(new Error('Network Error'));
+          xhr.ontimeout = () => reject(new Error('Timeout'));
+          xhr.send(null);
+        });
+        if (resp.code !== 0) return [{ job_name: 'Error', salary: '', city: '', status: resp.message || '', encrypt_job_id: '' }];
+        return (resp.zpData || []).map(j => ({
+          job_name: j.jobName || '', salary: j.salaryDesc || '', city: j.address || '',
+          status: j.jobOnlineStatus === 1 ? '在线' : '已关闭', encrypt_job_id: j.encryptJobId || '',
+        }));
+      })()

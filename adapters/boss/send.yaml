@@ -1,0 +1,28 @@
+site: boss
+name: send
+description: "BOSS直聘发送聊天消息"
+domain: www.zhipin.com
+strategy: cookie
+browser: true
+
+args:
+  uid:
+    positional: true
+    type: string
+    required: true
+    description: "Encrypted UID of the candidate (from chatlist)"
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Message text to send
+
+columns: [status, detail]
+
+pipeline:
+  - navigate: https://www.zhipin.com/web/chat/index
+  - wait: 3
+  - evaluate: |
+      (function() {
+        return [{ status: 'info', detail: 'BOSS send requires friend lookup + UI click + message type. Use the TypeScript adapter.' }];
+      })()

@@ -1,0 +1,93 @@
+site: jike
+name: notifications
+description: "即刻通知"
+domain: web.okjike.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Number of notifications
+
+columns: [type, user, content, time]
+
+pipeline:
+  - navigate: https://web.okjike.com/notification
+  - scroll:
+      times: 3
+      delay: 2000
+  - evaluate: |
+      (() => {
+        const actionLabels = {
+          LIKE: '赞了你', COMMENT: '评论了你', FOLLOW: '关注了你',
+          REPOST: '转发了你', MENTION: '提到了你', REPLY: '回复了你',
+        };
+
+        function resolveAction(type) {
+          if (!type) return '通知';
+          const upper = type.toUpperCase();
+          for (const [key, label] of Object.entries(actionLabels)) {
+            if (upper.includes(key)) return label;
+          }
+          return type;
+        }
+
+        function getNotificationData(element) {
+          for (const key of Object.keys(element)) {
+            if (key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$')) {
+              let fiber = element[key];
+              for (let i = 0; i < 15 && fiber; i++) {
+                const props = fiber.memoizedProps || fiber.pendingProps;
+                if (props && props.data) {
+                  const d = props.data;
+                  if (d.type || d.actionType || d.notificationType) return d;
+                }
+                fiber = fiber.return;
+              }
+            }
+          }
+          return null;
+        }
+
+        const results = [];
+        const seen = new Set();
+        const elements = Array.from(document.querySelectorAll('[class*="_item_"]'));
+
+        for (const el of elements) {
+          const data = getNotificationData(el);
+          if (!data) continue;
+
+          const actionType = data.actionType || data.type || data.notificationType || '';
+          const fromUser =
+            data.sourceUser?.screenName ||
+            data.user?.screenName ||
+            data.actionUser?.screenName ||
+            data.actor?.screenName || '';
+          const targetContent = data.targetPost?.content || data.post?.content || '';
+          const commentContent = data.comment?.content || data.commentContent || '';
+          const content = (commentContent || targetContent).replace(/\n/g, ' ').slice(0, 100);
+          const time = data.createdAt || data.updatedAt || '';
+
+          const key = fromUser + '\x00' + time + '\x00' + actionType;
+          if (seen.has(key)) continue;
+          seen.add(key);
+
+          if (!fromUser && !content) continue;
+          results.push({
+            type: resolveAction(actionType),
+            user: fromUser,
+            content: content,
+            time: time,
+          });
+        }
+
+        return results;
+      })()
+  - map:
+      type: ${{ item.type }}
+      user: ${{ item.user }}
+      content: ${{ item.content }}
+      time: ${{ item.time }}
+  - limit: ${{ args.limit | default(20) }}

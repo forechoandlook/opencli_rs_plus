@@ -1,0 +1,47 @@
+site: chatwise
+name: model
+description: Get or switch the active AI model in ChatWise
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  model-name:
+    positional: true
+    type: string
+    description: "Model to switch to (e.g. gpt-4, claude-3)"
+
+columns: [Status, Model]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const desiredModel = ${{ args["model-name"] | json }};
+
+        if (!desiredModel) {
+          const selectors = ['[class*="model"] span', '[class*="Model"] span', '[data-testid*="model"]', 'button[class*="model"]', '[aria-label*="Model"]', '[aria-label*="model"]'];
+          for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el) {
+              const text = (el.textContent || el.getAttribute('title') || '').trim();
+              if (text) return [{ Status: 'Active', Model: text }];
+            }
+          }
+          return [{ Status: 'Active', Model: 'Unknown or Not Found' }];
+        } else {
+          const selectors = ['[class*="model"]', '[class*="Model"]', 'button[class*="model"]'];
+          for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el) { el.click(); break; }
+          }
+          await new Promise(r => setTimeout(r, 500));
+          const options = document.querySelectorAll('[role="option"], [role="menuitem"], [class*="dropdown-item"], li');
+          for (const opt of options) {
+            if ((opt.textContent || '').toLowerCase().includes(desiredModel.toLowerCase())) {
+              opt.click();
+              return [{ Status: 'Switched', Model: desiredModel }];
+            }
+          }
+          return [{ Status: 'Dropdown opened but model not found', Model: desiredModel }];
+        }
+      })()

@@ -1,0 +1,35 @@
+site: doubao-app
+name: send
+description: Send a message to Doubao desktop app
+domain: doubao-app
+strategy: ui
+browser: true
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Message text to send
+
+columns: [Status, Text]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const text = ${{ args.text | json }};
+        const textarea = document.querySelector('[data-testid="chat_input_input"]');
+        if (!textarea) return [{ Status: 'Error', Text: 'Could not find chat input' }];
+        textarea.focus();
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+        if (setter) setter.call(textarea, text);
+        else textarea.value = text;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 500));
+        const btn = document.querySelector('[data-testid="chat_input_send_button"]');
+        if (btn) btn.click();
+        else textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+        await new Promise(r => setTimeout(r, 1000));
+        return [{ Status: 'Sent', Text: text }];
+      })()

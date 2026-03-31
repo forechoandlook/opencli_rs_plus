@@ -1,0 +1,28 @@
+site: boss
+name: exchange
+description: "BOSS直聘交换联系方式（请求手机/微信）"
+domain: www.zhipin.com
+strategy: cookie
+browser: true
+
+args:
+  uid:
+    positional: true
+    type: string
+    required: true
+    description: Encrypted UID of the candidate
+  type:
+    type: string
+    default: phone
+    choices: [phone, wechat]
+    description: "Exchange type: phone or wechat"
+
+columns: [status, detail]
+
+pipeline:
+  - navigate: https://www.zhipin.com/web/chat/index
+  - wait: 2
+  - evaluate: |
+      (function() {
+        return [{ status: 'info', detail: 'BOSS exchange requires friend lookup + POST API chain. Use the TypeScript adapter for full functionality.' }];
+      })()

@@ -1,0 +1,45 @@
+site: sinablog
+name: article
+description: 获取新浪博客单篇文章详情
+domain: blog.sina.com.cn
+strategy: cookie
+browser: true
+
+args:
+  url:
+    required: true
+    positional: true
+    type: str
+    description: "文章URL（如 https://blog.sina.com.cn/s/blog_xxx.html）"
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const articleUrl = '${{ args.url }}';
+        location.href = articleUrl;
+        await new Promise(r => setTimeout(r, 4500));
+
+        const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+        const title = normalize(document.querySelector('.articalTitle h2, .title h2, h1, h2.titName')?.textContent);
+        const titleParts = normalize(document.title).split('_').map(p => normalize(p)).filter(Boolean);
+        const author = titleParts[1] || title.split(/[：:]/)[0] || '';
+        const timeText = normalize(document.querySelector('.time, .articalInfo .time')?.textContent).replace(/[()]/g, '');
+        const date = timeText || normalize(document.body.innerText.match(/\b\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?\b/)?.[0]);
+        const category = normalize(document.querySelector('.articalTag .blog_class a, .blog_class a')?.textContent);
+        const tags = Array.from(document.querySelectorAll('.blog_tag h3, .blog_tag a, .tag a, .artical_tag a'))
+          .map(node => normalize(node.textContent)).filter(Boolean);
+        const content = normalize(document.querySelector('.articalContent, .blog_content, .content, #sina_keyword_ad_area2')?.textContent).slice(0, 500);
+        const images = Array.from(document.querySelectorAll('.articalContent img, .blog_content img, .content img'))
+          .map(img => img.getAttribute('src') || img.getAttribute('real_src') || '')
+          .filter(src => src && !src.includes('icon')).slice(0, 5);
+        return [{
+          title, author, date, category,
+          tags: tags.join(', '),
+          readCount: '', commentCount: '',
+          content: content + (content.length >= 500 ? '...' : ''),
+          images: images.join(', '),
+          url: articleUrl,
+        }];
+      })()
+
+columns: [title, author, date, category, readCount, commentCount]

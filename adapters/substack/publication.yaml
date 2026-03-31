@@ -1,0 +1,63 @@
+site: substack
+name: publication
+description: 获取特定 Substack Newsletter 的最新文章
+domain: substack.com
+strategy: cookie
+browser: true
+
+args:
+  url:
+    required: true
+    positional: true
+    type: str
+    description: "Newsletter URL（如 https://example.substack.com）"
+  limit:
+    type: int
+    default: 20
+    description: 返回的文章数量
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const baseUrl = '${{ args.url }}'.replace(/\/$/, '');
+        location.href = baseUrl + '/archive';
+        await new Promise(r => setTimeout(r, 8000));
+
+        const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+        const limit = Math.max(1, Math.min(${{ args.limit }} || 20, 50));
+        const grouped = new Map();
+
+        for (const link of Array.from(document.querySelectorAll('a[href*="/p/"]'))) {
+          const rawHref = link.getAttribute('href') || '';
+          if (!rawHref || rawHref === '/p/upgrade') continue;
+          const url = rawHref.startsWith('http') ? rawHref : baseUrl + rawHref;
+          const text = normalize(link.textContent);
+          if (!text) continue;
+          if (/^(subscribe|paid|home|about|latest|top|discussions)$/i.test(text)) continue;
+          if (/^[\d,]+$/.test(text)) continue;
+          const entry = grouped.get(url) || { texts: new Set(), date: '' };
+          entry.texts.add(text);
+          const container = link.closest('article, section, div') || link.parentElement || link;
+          const containerText = normalize(container.textContent);
+          if (!entry.date) {
+            entry.date = containerText.match(/\b(?:[A-Z]{3}\s+\d{1,2}|[A-Z][a-z]{2}\s+\d{1,2})\b/)?.[0] || '';
+          }
+          grouped.set(url, entry);
+        }
+
+        const posts = [];
+        for (const [url, entry] of Array.from(grouped.entries())) {
+          const texts = Array.from(entry.texts).map(t => normalize(t)).filter(t => t.length > 3).sort((a, b) => a.length - b.length);
+          const title = texts[0] || '';
+          const description = texts.find(t => t !== title) || '';
+          if (!title) continue;
+          posts.push({
+            rank: posts.length + 1, title, date: entry.date,
+            description: description.slice(0, 150), url,
+          });
+          if (posts.length >= limit) break;
+        }
+        return posts;
+      })()
+
+columns: [rank, title, date, description, url]

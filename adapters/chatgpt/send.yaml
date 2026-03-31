@@ -1,0 +1,21 @@
+site: chatgpt
+name: send
+description: Send a message to the active ChatGPT Desktop App window
+domain: localhost
+strategy: public
+browser: false
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Message to send
+
+columns: [Status]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        return [{ Status: 'ChatGPT desktop send requires native macOS automation (osascript + pbcopy). Use the TypeScript adapter for full functionality.' }];
+      })()

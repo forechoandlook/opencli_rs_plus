@@ -1,0 +1,183 @@
+site: youtube
+name: transcript-group
+description: "Get YouTube transcript with speaker detection and chapter support"
+domain: www.youtube.com
+strategy: cookie
+browser: true
+
+args:
+  url:
+    positional: true
+    type: string
+    required: true
+    description: "YouTube video URL or video ID"
+  lang:
+    type: string
+    description: "Language code (e.g. en, zh-Hans). Omit to auto-select"
+
+pipeline:
+  - evaluate: |
+      (() => {
+        const input = ${{ args.url | json }};
+        if (!input.startsWith('http')) return input;
+        try {
+          const parsed = new URL(input);
+          if (parsed.searchParams.has('v')) return parsed.searchParams.get('v');
+          if (parsed.hostname === 'youtu.be') return parsed.pathname.slice(1).split('/')[0];
+          const pathMatch = parsed.pathname.match(/^\/(shorts|embed|live|v)\/([^/?]+)/);
+          if (pathMatch) return pathMatch[2];
+        } catch {}
+        return input;
+      })()
+  - navigate: https://www.youtube.com/watch?v=${{ data }}
+  - wait: 3
+  - evaluate: |
+      (async () => {
+        const videoId = ${{ data | json }};
+        const lang = ${{ args.lang | default('') | json }};
+        const cfg = window.ytcfg?.data_ || {};
+        const apiKey = cfg.INNERTUBE_API_KEY;
+        if (!apiKey) throw new Error('INNERTUBE_API_KEY not found on page');
+
+        // Get captions via Android client
+        const playerResp = await fetch('/youtubei/v1/player?key=' + apiKey + '&prettyPrint=false', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            context: { client: { clientName: 'ANDROID', clientVersion: '20.10.38' } },
+            videoId: videoId
+          })
+        });
+        if (!playerResp.ok) throw new Error('Player API HTTP ' + playerResp.status);
+        const playerData = await playerResp.json();
+        const tracks = playerData.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+        if (!tracks?.length) throw new Error('No captions available');
+
+        let track = null;
+        if (lang) {
+          track = tracks.find(t => t.languageCode === lang) || tracks.find(t => t.languageCode.startsWith(lang));
+        }
+        if (!track) track = tracks.find(t => t.kind !== 'asr') || tracks[0];
+
+        // Fetch caption XML
+        const captionResp = await fetch(track.baseUrl);
+        const xml = await captionResp.text();
+
+        function getAttr(tag, name) {
+          const needle = name + '="';
+          const idx = tag.indexOf(needle);
+          if (idx === -1) return '';
+          const valStart = idx + needle.length;
+          const valEnd = tag.indexOf('"', valStart);
+          return valEnd === -1 ? '' : tag.substring(valStart, valEnd);
+        }
+        function decodeEntities(s) {
+          return s.replaceAll('&amp;', '&').replaceAll('&lt;', '<').replaceAll('&gt;', '>')
+            .replaceAll('&quot;', '"').replaceAll('&#39;', "'");
+        }
+
+        const isFormat3 = xml.includes('<p t="');
+        const marker = isFormat3 ? '<p ' : '<text ';
+        const endMarker = isFormat3 ? '</p>' : '</text>';
+        const segments = [];
+        let pos = 0;
+        while (true) {
+          const tagStart = xml.indexOf(marker, pos);
+          if (tagStart === -1) break;
+          let contentStart = xml.indexOf('>', tagStart);
+          if (contentStart === -1) break;
+          contentStart += 1;
+          const tagEnd = xml.indexOf(endMarker, contentStart);
+          if (tagEnd === -1) break;
+          const attrStr = xml.substring(tagStart + marker.length, contentStart - 1);
+          const content = xml.substring(contentStart, tagEnd);
+          let startSec, durSec;
+          if (isFormat3) {
+            startSec = (parseFloat(getAttr(attrStr, 't')) || 0) / 1000;
+            durSec = (parseFloat(getAttr(attrStr, 'd')) || 0) / 1000;
+          } else {
+            startSec = parseFloat(getAttr(attrStr, 'start')) || 0;
+            durSec = parseFloat(getAttr(attrStr, 'dur')) || 0;
+          }
+          const text = decodeEntities(content.replace(/<[^>]+>/g, '')).split('\\n').join(' ').trim();
+          if (text) segments.push({ start: startSec, text });
+          pos = tagEnd + endMarker.length;
+        }
+        if (!segments.length) throw new Error('No segments parsed');
+
+        // Get chapters
+        let chapters = [];
+        try {
+          const nextResp = await fetch('/youtubei/v1/next?key=' + apiKey + '&prettyPrint=false', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              context: { client: { clientName: 'WEB', clientVersion: '2.20240101.00.00' } },
+              videoId: videoId
+            })
+          });
+          if (nextResp.ok) {
+            const nextData = await nextResp.json();
+            const panels = nextData.playerOverlays?.playerOverlayRenderer
+              ?.decoratedPlayerBarRenderer?.decoratedPlayerBarRenderer
+              ?.playerBar?.multiMarkersPlayerBarRenderer?.markersMap;
+            if (Array.isArray(panels)) {
+              for (const panel of panels) {
+                const markers = panel.value?.chapters;
+                if (!Array.isArray(markers)) continue;
+                for (const m of markers) {
+                  const ch = m.chapterRenderer;
+                  if (ch?.title?.simpleText && typeof ch.timeRangeStartMillis === 'number') {
+                    chapters.push({ title: ch.title.simpleText, start: ch.timeRangeStartMillis / 1000 });
+                  }
+                }
+              }
+            }
+          }
+        } catch {}
+
+        // Group by speaker or sentence
+        const SENTENCE_END = /[.!?\u3002\uFF01\uFF1F\uFF0E]["'\u2019\u201D)]*\s*$/;
+        const hasSpeakers = segments.some(s => /^>>/.test(s.text));
+
+        function fmtTime(sec) {
+          const h = Math.floor(sec / 3600);
+          const m = Math.floor((sec % 3600) / 60);
+          const s = Math.floor(sec % 60);
+          return h > 0 ? h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')
+            : m + ':' + String(s).padStart(2,'0');
+        }
+
+        // Simple sentence grouping
+        const groups = [];
+        let buf = '', bufStart = 0, lastSt = 0;
+        const flush = () => { if (buf.trim()) { groups.push({ start: bufStart, text: buf.trim() }); buf = ''; } };
+        for (const seg of segments) {
+          const cleaned = hasSpeakers ? seg.text.replace(/^>>\s*/, '').replace(/^-\s+/, '') : seg.text;
+          if (buf && seg.start - lastSt > 20) flush();
+          if (buf && seg.start - bufStart > 30) flush();
+          if (!buf) bufStart = seg.start;
+          buf += (buf ? ' ' : '') + cleaned;
+          lastSt = seg.start;
+          if (SENTENCE_END.test(cleaned)) flush();
+        }
+        flush();
+
+        // Insert chapter headings
+        const sorted = [...chapters].sort((a, b) => a.start - b.start);
+        let ci = 0;
+        const rows = [];
+        for (const g of groups) {
+          while (ci < sorted.length && sorted[ci].start <= g.start) {
+            rows.push({ timestamp: fmtTime(sorted[ci].start), speaker: '', text: '[Chapter] ' + sorted[ci].title });
+            ci++;
+          }
+          rows.push({ timestamp: fmtTime(g.start), speaker: '', text: g.text });
+        }
+
+        return rows;
+      })()
+  - map:
+      timestamp: ${{ item.timestamp }}
+      speaker: ${{ item.speaker }}
+      text: ${{ item.text }}

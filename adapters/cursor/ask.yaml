@@ -1,0 +1,68 @@
+site: cursor
+name: ask
+description: Send a prompt and wait for the AI response (send + wait + read)
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Prompt to send
+  timeout:
+    type: int
+    default: 30
+    description: Max seconds to wait for response
+
+columns: [Role, Text]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const text = ${{ args.text | json }};
+        const timeout = ${{ args.timeout }} || 30;
+
+        const beforeCount = document.querySelectorAll('[data-message-role]').length;
+
+        let editor = document.querySelector('.aislash-editor-input, [data-lexical-editor="true"], [contenteditable="true"]');
+        if (!editor) return [{ Role: 'System', Text: 'Could not find input element.' }];
+        editor.focus();
+        document.execCommand('insertText', false, text);
+        await new Promise(r => setTimeout(r, 500));
+
+        // Press Enter to submit
+        editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+
+        const pollInterval = 2;
+        const maxPolls = Math.ceil(timeout / pollInterval);
+        let response = '';
+
+        for (let i = 0; i < maxPolls; i++) {
+          await new Promise(r => setTimeout(r, pollInterval * 1000));
+
+          const msgs = document.querySelectorAll('[data-message-role]');
+          if (msgs.length <= beforeCount) continue;
+
+          const lastMsg = msgs[msgs.length - 1];
+          const role = lastMsg.getAttribute('data-message-role');
+          if (role === 'human') continue;
+
+          const root = lastMsg.querySelector('.markdown-root');
+          const t = root ? root.innerText : lastMsg.innerText;
+          if (t && t.trim()) { response = t.trim(); break; }
+        }
+
+        if (!response) {
+          return [
+            { Role: 'User', Text: text },
+            { Role: 'System', Text: 'No response received within ' + timeout + 's. The AI may still be generating.' },
+          ];
+        }
+
+        return [
+          { Role: 'User', Text: text },
+          { Role: 'Assistant', Text: response },
+        ];
+      })()

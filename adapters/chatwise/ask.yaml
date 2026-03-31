@@ -1,0 +1,70 @@
+site: chatwise
+name: ask
+description: Send a prompt and wait for the AI response (send + wait + read)
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Prompt to send
+  timeout:
+    type: int
+    default: 30
+    description: Max seconds to wait
+
+columns: [Role, Text]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const text = ${{ args.text | json }};
+        const timeout = ${{ args.timeout }} || 30;
+
+        const beforeLen = document.querySelectorAll('[data-message-id], [class*="message"], [class*="bubble"]').length;
+
+        let composer = document.querySelector('textarea');
+        if (!composer) {
+          const editables = Array.from(document.querySelectorAll('[contenteditable="true"]'));
+          composer = editables.length > 0 ? editables[editables.length - 1] : null;
+        }
+        if (!composer) return [{ Role: 'System', Text: 'Could not find input' }];
+        composer.focus();
+        if (composer.tagName === 'TEXTAREA') {
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+          setter.call(composer, text);
+          composer.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+          document.execCommand('insertText', false, text);
+        }
+        await new Promise(r => setTimeout(r, 500));
+        composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+
+        const pollInterval = 2;
+        const maxPolls = Math.ceil(timeout / pollInterval);
+        let response = '';
+
+        for (let i = 0; i < maxPolls; i++) {
+          await new Promise(r => setTimeout(r, pollInterval * 1000));
+          const msgs = document.querySelectorAll('[data-message-id], [class*="message"], [class*="bubble"]');
+          if (msgs.length <= beforeLen) continue;
+          const last = msgs[msgs.length - 1];
+          const t = last.innerText || last.textContent;
+          if (t && t.trim()) { response = t.trim(); break; }
+        }
+
+        if (!response) {
+          return [
+            { Role: 'User', Text: text },
+            { Role: 'System', Text: 'No response within ' + timeout + 's.' },
+          ];
+        }
+
+        return [
+          { Role: 'User', Text: text },
+          { Role: 'Assistant', Text: response },
+        ];
+      })()

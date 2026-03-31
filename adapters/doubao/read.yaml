@@ -1,0 +1,35 @@
+site: doubao
+name: read
+description: Read the current Doubao conversation history
+domain: www.doubao.com
+strategy: cookie
+browser: true
+
+columns: [Role, Text]
+
+pipeline:
+  - navigate: https://www.doubao.com/chat
+  - wait: 2
+  - evaluate: |
+      (function() {
+        const clean = (value) => (value || '').replace(/\u00a0/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+        const messageList = document.querySelector('[data-testid="message-list"]');
+        if (!messageList) return [{ Role: 'System', Text: 'No visible Doubao messages were found.' }];
+
+        const roots = Array.from(messageList.querySelectorAll('[data-testid="union_message"]'));
+        if (roots.length === 0) return [{ Role: 'System', Text: 'No visible Doubao messages were found.' }];
+
+        const turns = [];
+        for (const el of roots) {
+          let role = '';
+          if (el.querySelector('[data-testid="send_message"]')) role = 'User';
+          else if (el.querySelector('[data-testid="receive_message"]')) role = 'Assistant';
+          if (!role) continue;
+          const textEl = el.querySelector('[data-testid="message_text_content"]');
+          const text = textEl ? clean(textEl.innerText) : clean(el.innerText);
+          if (text) turns.push({ Role: role, Text: text });
+        }
+
+        if (turns.length === 0) return [{ Role: 'System', Text: 'No visible Doubao messages were found.' }];
+        return turns;
+      })()

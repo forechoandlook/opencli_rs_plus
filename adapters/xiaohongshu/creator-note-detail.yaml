@@ -1,0 +1,99 @@
+site: xiaohongshu
+name: creator-note-detail
+description: "小红书单篇笔记详情页数据 (笔记信息 + 核心/互动数据 + 观看来源 + 观众画像 + 趋势数据)"
+domain: creator.xiaohongshu.com
+strategy: cookie
+browser: true
+
+args:
+  note-id:
+    positional: true
+    type: string
+    required: true
+    description: "Note ID (from creator-notes or note-detail page URL)"
+
+columns: [section, metric, value, extra]
+
+pipeline:
+  - navigate: https://creator.xiaohongshu.com/statistics/note-detail?noteId=${{ args['note-id'] | urlencode }}
+  - evaluate: |
+      (async () => {
+        const noteId = ${{ args['note-id'] | json }};
+        const rows = [
+          { section: '笔记信息', metric: 'note_id', value: noteId, extra: '' },
+        ];
+
+        // Parse DOM data
+        const norm = (v) => (v || '').trim();
+        const sections = Array.from(document.querySelectorAll('.shell-container')).map(container => {
+          const text = norm(container.innerText);
+          const title = text.startsWith('互动数据') ? '互动数据'
+            : text.includes('基础数据') ? '基础数据' : '';
+          const metrics = Array.from(container.querySelectorAll('.block-container.block')).map(block => ({
+            label: norm(block.querySelector('.des')?.innerText),
+            value: norm(block.querySelector('.content')?.innerText),
+            extra: norm(block.querySelector('.text-with-fans')?.innerText),
+          })).filter(m => m.label && m.value);
+          return { title, metrics };
+        }).filter(s => s.title && s.metrics.length > 0);
+
+        const titleEl = document.querySelector('.note-title');
+        const infoEl = document.querySelector('.note-info-content');
+        rows.push({ section: '笔记信息', metric: 'title', value: norm(titleEl?.innerText), extra: '' });
+        const infoText = norm(infoEl?.innerText);
+        const publishMatch = infoText.match(/\b\d{4}-\d{2}-\d{2} \d{2}:\d{2}\b/);
+        rows.push({ section: '笔记信息', metric: 'published_at', value: publishMatch?.[0] || '', extra: '' });
+
+        const validLabels = new Set(['曝光数','观看数','封面点击率','平均观看时长','涨粉数','点赞数','评论数','收藏数','分享数']);
+        for (const section of sections) {
+          for (const m of section.metrics) {
+            if (!validLabels.has(m.label)) continue;
+            rows.push({ section: section.title, metric: m.label, value: m.value, extra: m.extra });
+          }
+        }
+
+        // Fetch API data for audience info
+        const apis = [
+          { suffix: '/api/galaxy/creator/datacenter/note/audience/source/detail', key: 'audienceSourceDetail' },
+          { suffix: '/api/galaxy/creator/datacenter/note/audience', key: 'audienceSource' },
+        ];
+
+        for (const api of apis) {
+          try {
+            const resp = await fetch(api.suffix + '?note_id=' + noteId, { credentials: 'include' });
+            if (!resp.ok) continue;
+            const json = await resp.json();
+            const data = json.data || {};
+
+            if (api.key === 'audienceSource' && data.source) {
+              for (const item of data.source) {
+                if (!item.title) continue;
+                const extras = [];
+                if (item.info?.imp_count != null) extras.push('曝光 ' + item.info.imp_count);
+                if (item.info?.view_count != null) extras.push('观看 ' + item.info.view_count);
+                rows.push({ section: '观看来源', metric: item.title, value: (item.value_with_double || '') + '%', extra: extras.join(' · ') });
+              }
+            }
+
+            if (api.key === 'audienceSourceDetail') {
+              const groups = { '性别': data.gender, '年龄': data.age, '城市': data.city, '兴趣': data.interest };
+              for (const [label, items] of Object.entries(groups)) {
+                if (!Array.isArray(items)) continue;
+                for (const item of items) {
+                  if (!item.title) continue;
+                  rows.push({ section: '观众画像', metric: label + '/' + item.title, value: (item.value || '') + '%', extra: '' });
+                }
+              }
+            }
+          } catch {}
+        }
+
+        const hasCoreMetric = rows.some(r => r.section !== '笔记信息' && r.value);
+        if (!hasCoreMetric) throw new Error('No note detail data found. Check note_id and login status.');
+        return rows;
+      })()
+  - map:
+      section: ${{ item.section }}
+      metric: ${{ item.metric }}
+      value: ${{ item.value }}
+      extra: ${{ item.extra }}

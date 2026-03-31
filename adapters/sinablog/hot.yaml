@@ -1,0 +1,65 @@
+site: sinablog
+name: hot
+description: 获取新浪博客热门文章/推荐
+domain: blog.sina.com.cn
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: 返回的文章数量
+
+pipeline:
+  - navigate: https://blog.sina.com.cn/
+
+  - evaluate: |
+      (async () => {
+        await new Promise(r => setTimeout(r, 3000));
+        const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+        const limit = Math.max(1, Math.min(${{ args.limit }} || 20, 50));
+        const abs = (href) => {
+          if (!href) return '';
+          if (href.startsWith('//')) return 'https:' + href;
+          if (href.startsWith('http')) return href;
+          return 'https://blog.sina.com.cn' + (href.startsWith('/') ? '' : '/') + href;
+        };
+        const seeds = [];
+        const seen = new Set();
+        for (const link of Array.from(document.querySelectorAll('.day-hot-rank .art-list a[href*="/s/blog_"], .hot-rank .art-list a[href*="/s/blog_"]'))) {
+          const title = normalize(link.textContent);
+          const url = abs(link.getAttribute('href') || '');
+          if (!title || !url || seen.has(url)) continue;
+          seen.add(url);
+          seeds.push({ rank: seeds.length + 1, title, url });
+          if (seeds.length >= limit) break;
+        }
+        const results = [];
+        for (const item of seeds) {
+          let merged = {
+            rank: item.rank,
+            articleId: item.url.match(/blog_([a-zA-Z0-9]+)\.html/)?.[1] || '',
+            title: item.title, author: '', date: '', readCount: '',
+            description: '', url: item.url,
+          };
+          try {
+            const resp = await fetch(item.url, { credentials: 'include' });
+            if (resp.ok) {
+              const html = await resp.text();
+              const doc = new DOMParser().parseFromString(html, 'text/html');
+              const docTitle = normalize(doc.querySelector('.articalTitle h2, .title h2, h1, h2.titName')?.textContent) || item.title;
+              const titleParts = normalize(doc.title).split('_').map(p => normalize(p)).filter(Boolean);
+              const timeText = normalize(doc.querySelector('.time, .articalInfo .time')?.textContent).replace(/[()]/g, '');
+              merged.title = docTitle;
+              merged.author = titleParts[1] || '';
+              merged.date = timeText || '';
+              merged.description = normalize(doc.querySelector('.articalContent, .blog_content, .content, #sina_keyword_ad_area2')?.textContent).slice(0, 150);
+            }
+          } catch {}
+          results.push(merged);
+        }
+        return results;
+      })()
+
+columns: [rank, title, author, date, readCount, url]

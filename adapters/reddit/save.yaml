@@ -1,0 +1,51 @@
+site: reddit
+name: save
+description: Save or unsave a Reddit post
+domain: reddit.com
+strategy: cookie
+browser: true
+
+args:
+  post-id:
+    positional: true
+    type: string
+    required: true
+    description: "Post ID (e.g. 1abc123) or fullname (t3_xxx)"
+  undo:
+    type: bool
+    default: false
+    description: Unsave instead of save
+
+columns: [status, message]
+
+pipeline:
+  - navigate: https://www.reddit.com
+  - evaluate: |
+      (async () => {
+        let postId = ${{ args['post-id'] | json }};
+        const urlMatch = postId.match(/comments\/([a-z0-9]+)/);
+        if (urlMatch) postId = urlMatch[1];
+        const fullname = postId.startsWith('t3_') || postId.startsWith('t1_')
+          ? postId : 't3_' + postId;
+
+        const undo = ${{ args.undo | json }};
+        const endpoint = undo ? '/api/unsave' : '/api/save';
+
+        const meRes = await fetch('/api/me.json', { credentials: 'include' });
+        const me = await meRes.json();
+        const modhash = me?.data?.modhash || '';
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'id=' + encodeURIComponent(fullname)
+            + (modhash ? '&uh=' + encodeURIComponent(modhash) : ''),
+        });
+
+        if (!res.ok) return [{ status: 'failed', message: 'HTTP ' + res.status }];
+        return [{ status: 'success', message: (undo ? 'Unsaved' : 'Saved') + ' ' + fullname }];
+      })()
+  - map:
+      status: ${{ item.status }}
+      message: ${{ item.message }}

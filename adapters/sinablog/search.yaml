@@ -1,0 +1,52 @@
+site: sinablog
+name: search
+description: 搜索新浪博客文章（通过新浪搜索）
+domain: blog.sina.com.cn
+strategy: public
+browser: false
+
+args:
+  keyword:
+    required: true
+    positional: true
+    type: str
+    description: 搜索关键词
+  limit:
+    type: int
+    default: 20
+    description: 返回的文章数量
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const keyword = '${{ args.keyword }}';
+        const limit = Math.max(1, Math.min(${{ args.limit }} || 20, 50));
+        const url = new URL('https://search.sina.com.cn/api/search');
+        url.searchParams.set('q', keyword);
+        url.searchParams.set('tp', 'mix');
+        url.searchParams.set('sort', '0');
+        url.searchParams.set('page', '1');
+        url.searchParams.set('size', String(Math.max(limit, 10)));
+        url.searchParams.set('from', 'search_result');
+        const resp = await fetch(url, {
+          headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+        });
+        if (!resp.ok) throw new Error('Sina blog search failed: HTTP ' + resp.status);
+        const data = await resp.json();
+        const list = Array.isArray(data?.data?.list) ? data.data.list : [];
+        const trim = (v) => typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
+        const stripHtml = (v) => v.replace(/<[^>]+>/g, '');
+        return list
+          .filter(item => trim(item?.url).includes('blog.sina.com.cn/s/blog_'))
+          .slice(0, limit)
+          .map((item, i) => ({
+            rank: i + 1,
+            title: trim(stripHtml(item?.title || '')),
+            author: trim(item?.media_show || item?.author),
+            date: trim(item?.time || item?.dataTime),
+            description: trim(item?.intro || item?.searchSummary).slice(0, 150),
+            url: trim(item?.url),
+          }));
+      })()
+
+columns: [rank, title, author, date, description, url]

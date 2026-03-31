@@ -1,0 +1,16 @@
+site: antigravity
+name: new
+description: Start a new Antigravity conversation
+domain: localhost
+strategy: ui
+browser: true
+
+columns: [Status]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', code: 'KeyN', metaKey: true, bubbles: true }));
+        await new Promise(r => setTimeout(r, 1000));
+        return [{ Status: 'Success' }];
+      })()

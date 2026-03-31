@@ -1,0 +1,20 @@
+site: yollomi
+name: models
+description: "List available Yollomi AI models (image, video, tools)"
+strategy: public
+browser: false
+
+args:
+  type:
+    type: string
+    default: all
+    choices: [all, image, video, tool]
+    description: Filter by model type
+
+columns: [type, model, credits, description]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        return [{ type: 'info', model: '-', credits: '-', description: 'Yollomi models list requires static model registry. Use the TypeScript adapter.' }];
+      })()

@@ -1,0 +1,139 @@
+site: xiaohongshu
+name: publish
+description: "小红书发布图文笔记 (creator center UI automation)"
+domain: creator.xiaohongshu.com
+strategy: cookie
+browser: true
+
+args:
+  title:
+    type: string
+    required: true
+    description: "笔记标题 (最多20字)"
+  content:
+    positional: true
+    type: string
+    required: true
+    description: "笔记正文"
+  images:
+    type: string
+    description: "图片路径，逗号分隔，最多9张 (jpg/png/gif/webp)"
+  topics:
+    type: string
+    description: "话题标签，逗号分隔，不含 # 号"
+  draft:
+    type: bool
+    default: false
+    description: "保存为草稿，不直接发布"
+
+columns: [status, detail]
+
+pipeline:
+  - navigate: https://creator.xiaohongshu.com/publish/publish?from=menu_left
+  - wait: 3
+  - evaluate: |
+      (async () => {
+        const title = ${{ args.title | json }};
+        const content = ${{ args.content | json }};
+        const isDraft = ${{ args.draft | json }};
+        const topicStr = ${{ args.topics | default('') | json }};
+        const topics = topicStr ? topicStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+        if (!title) throw new Error('--title is required');
+        if (title.length > 20) throw new Error('Title is ' + title.length + ' chars — must be <= 20');
+        if (!content) throw new Error('Positional argument <content> is required');
+
+        // Check we're on creator center
+        if (!location.href.includes('creator.xiaohongshu.com')) {
+          throw new Error('Redirected away from creator center — session may have expired.');
+        }
+
+        // Select 图文 tab if present
+        const allEls = document.querySelectorAll('[class*="tab"], [class*="note-type"], [class*="type-item"]');
+        for (const el of allEls) {
+          const text = el.innerText || el.textContent || '';
+          if ((text.includes('图文') || text.includes('图片')) && el.offsetParent !== null) {
+            el.click();
+            await new Promise(r => setTimeout(r, 1000));
+            break;
+          }
+        }
+
+        // Fill title
+        const titleSelectors = [
+          'input[maxlength="20"]', 'input[class*="title"]',
+          'input[placeholder*="标题"]', 'input[placeholder*="title" i]',
+        ];
+        let titleFilled = false;
+        for (const sel of titleSelectors) {
+          const candidates = document.querySelectorAll(sel);
+          for (const el of candidates) {
+            if (!el || el.offsetParent === null) continue;
+            el.focus();
+            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+              el.value = '';
+              document.execCommand('selectAll', false);
+              document.execCommand('insertText', false, title);
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            titleFilled = true;
+            break;
+          }
+          if (titleFilled) break;
+        }
+        if (!titleFilled) throw new Error('Could not find title input');
+        await new Promise(r => setTimeout(r, 500));
+
+        // Fill content
+        const contentSelectors = [
+          '[contenteditable="true"][class*="content"]',
+          '[contenteditable="true"][class*="editor"]',
+          '[contenteditable="true"][placeholder*="描述"]',
+          '[contenteditable="true"]:not([placeholder*="标题"])',
+        ];
+        let contentFilled = false;
+        for (const sel of contentSelectors) {
+          const candidates = document.querySelectorAll(sel);
+          for (const el of candidates) {
+            if (!el || el.offsetParent === null) continue;
+            el.focus();
+            el.textContent = '';
+            document.execCommand('selectAll', false);
+            document.execCommand('insertText', false, content);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            contentFilled = true;
+            break;
+          }
+          if (contentFilled) break;
+        }
+        if (!contentFilled) throw new Error('Could not find content input');
+        await new Promise(r => setTimeout(r, 500));
+
+        // Publish or save draft
+        const actionLabel = isDraft ? '存草稿' : '发布';
+        const buttons = document.querySelectorAll('button, [role="button"]');
+        let btnClicked = false;
+        for (const btn of buttons) {
+          const text = (btn.innerText || btn.textContent || '').trim();
+          if ((text === actionLabel || text.includes(actionLabel) || text === '发布笔记') && btn.offsetParent !== null && !btn.disabled) {
+            btn.click();
+            btnClicked = true;
+            break;
+          }
+        }
+        if (!btnClicked) throw new Error('Could not find "' + actionLabel + '" button');
+
+        await new Promise(r => setTimeout(r, 4000));
+
+        const finalUrl = location.href;
+        const navigatedAway = !finalUrl.includes('/publish/publish');
+        const verb = isDraft ? '草稿已保存' : '发布成功';
+
+        return [{
+          status: navigatedAway ? verb : '操作完成，请在浏览器中确认',
+          detail: '"' + title + '"',
+        }];
+      })()
+  - map:
+      status: ${{ item.status }}
+      detail: ${{ item.detail }}

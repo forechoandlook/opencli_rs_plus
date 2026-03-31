@@ -1,0 +1,50 @@
+site: boss
+name: detail
+description: "BOSS直聘查看职位详情"
+domain: www.zhipin.com
+strategy: cookie
+browser: true
+
+args:
+  security-id:
+    positional: true
+    type: string
+    required: true
+    description: "Security ID from search results"
+
+columns: [name, salary, experience, degree, city, district, description, skills, welfare, boss_name, boss_title, active_time, company, industry, scale, stage, address, url]
+
+pipeline:
+  - navigate: https://www.zhipin.com/web/geek/job
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        const securityId = ${{ args["security-id"] | json }};
+        const url = 'https://www.zhipin.com/wapi/zpgeek/job/detail.json?securityId=' + encodeURIComponent(securityId);
+        const resp = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', url, true);
+          xhr.withCredentials = true;
+          xhr.timeout = 15000;
+          xhr.setRequestHeader('Accept', 'application/json');
+          xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)); } catch(e) { reject(e); } };
+          xhr.onerror = () => reject(new Error('Network Error'));
+          xhr.ontimeout = () => reject(new Error('Timeout'));
+          xhr.send(null);
+        });
+        if (resp.code !== 0) return [{ name: 'Error: ' + (resp.message || ''), salary: '', experience: '', degree: '', city: '', district: '', description: '', skills: '', welfare: '', boss_name: '', boss_title: '', active_time: '', company: '', industry: '', scale: '', stage: '', address: '', url: '' }];
+        const j = resp.zpData?.jobInfo || {};
+        const b = resp.zpData?.bossInfo || {};
+        const c = resp.zpData?.brandComInfo || {};
+        return [{
+          name: j.jobName || '', salary: j.salaryDesc || '', experience: j.experienceName || '',
+          degree: j.degreeName || '', city: j.locationName || '',
+          district: [j.areaDistrict, j.businessDistrict].filter(Boolean).join('·'),
+          description: j.postDescription || '', skills: (j.showSkills || []).join(', '),
+          welfare: (c.labels || []).join(', '), boss_name: b.name || '', boss_title: b.title || '',
+          active_time: b.activeTimeDesc || '', company: c.brandName || b.brandName || '',
+          industry: c.industryName || '', scale: c.scaleName || '', stage: c.stageName || '',
+          address: j.address || '',
+          url: j.encryptId ? 'https://www.zhipin.com/job_detail/' + j.encryptId + '.html' : '',
+        }];
+      })()

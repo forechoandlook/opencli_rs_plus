@@ -1,0 +1,98 @@
+site: douban
+name: marks
+description: 导出个人观影标记
+domain: movie.douban.com
+strategy: cookie
+browser: true
+
+args:
+  status:
+    default: collect
+    description: "标记类型: collect(看过), wish(想看), do(在看), all(全部)"
+  limit:
+    type: int
+    default: 50
+    description: 导出数量，0 表示全部
+  uid:
+    description: 用户ID，不填则使用当前登录账号
+
+pipeline:
+  - navigate: https://movie.douban.com/mine
+
+  - evaluate: |
+      (async () => {
+        await new Promise(r => setTimeout(r, 2000));
+        const status = '${{ args.status }}' || 'collect';
+        const limit = ${{ args.limit }};
+        let uid = '${{ args.uid }}';
+
+        // Auto-detect uid if not provided
+        if (!uid) {
+          const links = document.querySelectorAll('a[href*="/people/"]');
+          for (const link of links) {
+            const href = link.getAttribute('href') || link.href || '';
+            const match = href.match(/people\/([^/]+)/);
+            if (match) { uid = match[1]; break; }
+          }
+          if (!uid) throw new Error('Not logged in to Douban. Please login in Chrome first.');
+        }
+
+        const statuses = status === 'all' ? ['collect', 'wish', 'do'] : [status];
+        const allMarks = [];
+        const pageSize = 30;
+
+        for (const s of statuses) {
+          if (limit > 0 && allMarks.length >= limit) break;
+          let offset = 0;
+          while (true) {
+            const url = 'https://movie.douban.com/people/' + uid + '/' + s + '?start=' + offset + '&sort=time&rating=all&filter=all&mode=grid';
+            const resp = await fetch(url, { credentials: 'include' });
+            if (!resp.ok) break;
+            const html = await resp.text();
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const items = doc.querySelectorAll('.item');
+            if (!items.length) break;
+            let count = 0;
+            items.forEach(item => {
+              const titleLink = item.querySelector('.info a[href*="/subject/"]');
+              if (!titleLink) return;
+              const titleEl = titleLink.querySelector('em');
+              const titleText = titleEl?.textContent?.trim() || titleLink.textContent?.trim() || '';
+              const title = titleText.split('/')[0].trim();
+              const href = titleLink.getAttribute('href') || '';
+              const idMatch = href.match(/subject\/(\d+)/);
+              const movieId = idMatch ? idMatch[1] : '';
+              if (!movieId || !title) return;
+              const ratingSpan = item.querySelector('span[class*="rating"]');
+              let myRating = null;
+              if (ratingSpan) {
+                const cls = ratingSpan.className || '';
+                const ratingMatch = cls.match(/rating(\d)-t/);
+                if (ratingMatch) myRating = parseInt(ratingMatch[1], 10) * 2;
+              }
+              const dateSpan = item.querySelector('.date');
+              const myDate = dateSpan?.textContent?.trim() || '';
+              const commentSpan = item.querySelector('.comment');
+              const myComment = commentSpan?.textContent?.trim() || '';
+              const introSpan = item.querySelector('.intro');
+              let year = '';
+              if (introSpan) {
+                const yearMatch = introSpan.textContent?.match(/(\d{4})/);
+                year = yearMatch ? yearMatch[1] : '';
+              }
+              allMarks.push({
+                title, year, myRating, myStatus: s, myDate, myComment,
+                url: href || 'https://movie.douban.com/subject/' + movieId
+              });
+              count++;
+            });
+            if (count < pageSize) break;
+            if (limit > 0 && allMarks.length >= limit) break;
+            offset += pageSize;
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        }
+        return limit > 0 ? allMarks.slice(0, limit) : allMarks;
+      })()
+
+columns: [title, year, myRating, myStatus, myDate, myComment, url]

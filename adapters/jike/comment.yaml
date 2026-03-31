@@ -1,0 +1,77 @@
+site: jike
+name: comment
+description: "评论即刻帖子"
+domain: web.okjike.com
+strategy: ui
+browser: true
+
+args:
+  id:
+    positional: true
+    type: string
+    required: true
+    description: "帖子 ID"
+  text:
+    positional: true
+    type: string
+    required: true
+    description: "评论内容"
+
+columns: [status, message]
+
+pipeline:
+  - navigate: https://web.okjike.com/originalPost/${{ args.id }}
+  - evaluate: |
+      (async () => {
+        const textToInsert = ${{ args.text | json }};
+
+        // Find comment input
+        const editor =
+          document.querySelector('[class*="_comment_"] [contenteditable="true"]') ||
+          document.querySelector('[contenteditable="true"]');
+        if (editor) {
+          editor.focus();
+          const dt = new DataTransfer();
+          dt.setData('text/plain', textToInsert);
+          editor.dispatchEvent(new ClipboardEvent('paste', {
+            clipboardData: dt, bubbles: true, cancelable: true,
+          }));
+          await new Promise(r => setTimeout(r, 800));
+          if (!editor.textContent?.length) {
+            return [{ status: 'failed', message: '未找到评论输入框' }];
+          }
+        } else {
+          const textareas = document.querySelectorAll('textarea');
+          let found = false;
+          for (const ta of textareas) {
+            const ph = ta.getAttribute('placeholder') || '';
+            if (ph.includes('评论') || ph.includes('回复') || ph.includes('说点什么')) {
+              ta.focus();
+              const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+              setter?.call(ta, textToInsert);
+              ta.dispatchEvent(new Event('input', { bubbles: true }));
+              found = true;
+              break;
+            }
+          }
+          if (!found) return [{ status: 'failed', message: '未找到评论输入框' }];
+          await new Promise(r => setTimeout(r, 500));
+        }
+
+        // Click submit
+        await new Promise(r => setTimeout(r, 500));
+        const btns = Array.from(document.querySelectorAll('button')).filter(btn => {
+          const text = btn.textContent?.trim() || '';
+          return (text === '回复' || text === '发布' || text === '发送' || text === '评论') && !btn.disabled;
+        });
+        if (btns.length === 0) {
+          return [{ status: 'failed', message: '未找到可用的回复按钮' }];
+        }
+        btns[0].click();
+        await new Promise(r => setTimeout(r, 3000));
+
+        return [{ status: 'success', message: '评论发布成功' }];
+      })()
+  - map:
+      status: ${{ item.status }}
+      message: ${{ item.message }}

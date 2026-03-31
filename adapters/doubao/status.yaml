@@ -1,0 +1,26 @@
+site: doubao
+name: status
+description: Check Doubao chat page availability and login state
+domain: www.doubao.com
+strategy: cookie
+browser: true
+
+columns: [Status, Login, Url, Title]
+
+pipeline:
+  - navigate: https://www.doubao.com/chat
+  - wait: 2
+  - evaluate: |
+      (function() {
+        const routerData = window._ROUTER_DATA?.loaderData?.chat_layout;
+        const isLogin = typeof routerData?.userSetting?.data?.is_login === 'boolean'
+          ? routerData.userSetting.data.is_login : null;
+        const loggedIn = isLogin === null ? 'Unknown' : isLogin ? 'Yes' : 'No';
+        const status = isLogin === false ? 'Login Required' : 'Connected';
+        return [{
+          Status: status,
+          Login: loggedIn,
+          Url: window.location.href,
+          Title: document.title || 'Doubao',
+        }];
+      })()

@@ -1,0 +1,57 @@
+site: medium
+name: feed
+description: Medium 热门文章 Feed
+domain: medium.com
+strategy: cookie
+browser: true
+
+args:
+  topic:
+    default: technology
+    description: 话题标签（如 technology, programming, ai）
+  limit:
+    type: int
+    default: 20
+    description: 返回的文章数量
+
+pipeline:
+  - navigate:
+      url: "https://medium.com/tag/${{ args.topic | urlencode }}"
+      settleMs: 5000
+
+  - evaluate: |
+      (() => {
+        const limit = Math.max(1, Math.min(args.limit || 20, 50));
+        const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+        const posts = [];
+        const seen = new Set();
+
+        for (const article of Array.from(document.querySelectorAll('article'))) {
+          try {
+            const titleEl = article.querySelector('h2, h3, h1');
+            const title = normalize(titleEl?.textContent);
+            if (!title) continue;
+            const linkEl = titleEl?.closest('a') || article.querySelector('a[href*="/@"], a[href*="/p/"]');
+            let postUrl = linkEl?.getAttribute('href') || '';
+            if (!postUrl) continue;
+            if (!postUrl.startsWith('http')) postUrl = 'https://medium.com' + postUrl;
+            if (seen.has(postUrl)) continue;
+            const author = normalize(
+              Array.from(article.querySelectorAll('a[href^="/@"]'))
+                .map(node => normalize(node.textContent))
+                .find(text => text && text !== title)
+            );
+            const allText = normalize(article.textContent);
+            const dateEl = article.querySelector('time');
+            const date = normalize(dateEl?.textContent) || dateEl?.getAttribute('datetime') || '';
+            const readTime = allText.match(/(\d+)\s*min\s*read/i)?.[0] || '';
+            const claps = allText.match(/\b(\d+(?:\.\d+)?[KkMm]?)\s*claps?\b/i)?.[1] || '';
+            seen.add(postUrl);
+            posts.push({ rank: posts.length + 1, title, author, date, readTime, claps });
+            if (posts.length >= limit) break;
+          } catch {}
+        }
+        return posts;
+      })()
+
+columns: [rank, title, author, date, readTime, claps]

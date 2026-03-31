@@ -1,0 +1,67 @@
+site: douban
+name: search
+description: 搜索豆瓣电影、图书或音乐
+domain: search.douban.com
+strategy: cookie
+browser: true
+
+args:
+  type:
+    default: movie
+    description: "搜索类型（movie=电影, book=图书, music=音乐）"
+  keyword:
+    required: true
+    positional: true
+    type: str
+    description: 搜索关键词
+  limit:
+    type: int
+    default: 20
+    description: 返回结果数量
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const type = '${{ args.type }}' || 'movie';
+        const keyword = '${{ args.keyword }}';
+        const limit = Math.max(1, Math.min(${{ args.limit }} || 20, 50));
+        const url = 'https://search.douban.com/' + encodeURIComponent(type) + '/subject_search?search_text=' + encodeURIComponent(keyword);
+
+        location.href = url;
+        await new Promise(r => setTimeout(r, 3000));
+
+        const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+        const seen = new Set();
+
+        for (let i = 0; i < 20; i += 1) {
+          if (document.querySelector('.item-root .title-text, .item-root .title a')) break;
+          await new Promise(r => setTimeout(r, 300));
+        }
+
+        const items = Array.from(document.querySelectorAll('.item-root'));
+        const results = [];
+        for (const el of items) {
+          const titleEl = el.querySelector('.title-text, .title a, a[title]');
+          const title = normalize(titleEl?.textContent) || normalize(titleEl?.getAttribute('title'));
+          let itemUrl = titleEl?.getAttribute('href') || '';
+          if (!title || !itemUrl) continue;
+          if (!itemUrl.startsWith('http')) itemUrl = 'https://search.douban.com' + itemUrl;
+          if (!itemUrl.includes('/subject/') || seen.has(itemUrl)) continue;
+          seen.add(itemUrl);
+          const ratingText = normalize(el.querySelector('.rating_nums')?.textContent);
+          const abstract = normalize(el.querySelector('.meta.abstract, .meta, .abstract, p')?.textContent);
+          results.push({
+            rank: results.length + 1,
+            id: itemUrl.match(/subject\/(\d+)/)?.[1] || '',
+            type,
+            title,
+            rating: ratingText.includes('.') ? parseFloat(ratingText) : 0,
+            abstract: abstract.slice(0, 100) + (abstract.length > 100 ? '...' : ''),
+            url: itemUrl,
+          });
+          if (results.length >= limit) break;
+        }
+        return results;
+      })()
+
+columns: [rank, title, rating, abstract, url]

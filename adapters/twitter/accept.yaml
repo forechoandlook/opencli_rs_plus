@@ -1,0 +1,161 @@
+site: twitter
+name: accept
+description: Auto-accept DM requests containing specific keywords
+domain: x.com
+strategy: cookie
+browser: true
+timeoutSeconds: 600
+
+args:
+  query:
+    type: str
+    required: true
+    positional: true
+    description: "Keywords to match (comma-separated for OR)"
+  max:
+    type: int
+    default: 20
+    description: Maximum number of requests to accept
+
+columns: [index, status, user, message]
+
+pipeline:
+  - navigate:
+      url: https://x.com/messages/requests
+      settleMs: 4000
+
+  - evaluate: |
+      (async () => {
+        const keywords = ${{ args.query | json }}.split(',').map(k => k.trim()).filter(Boolean);
+        const maxAccepts = ${{ args.max }};
+        const results = [];
+        let acceptCount = 0;
+        const visited = new Set();
+
+        for (let round = 0; round < maxAccepts + 50; round++) {
+          if (acceptCount >= maxAccepts) break;
+
+          // Navigate to DM requests page
+          if (round > 0) {
+            window.location.href = 'https://x.com/messages/requests';
+            await new Promise(r => setTimeout(r, 4000));
+          }
+
+          // Wait for conversations to load
+          let attempts = 0;
+          while (attempts < 10) {
+            const convs = document.querySelectorAll('[data-testid="conversation"]');
+            if (convs.length > 0) break;
+            await new Promise(r => setTimeout(r, 1000));
+            attempts++;
+          }
+
+          // Scroll to load more
+          const seenCount = new Set();
+          let noNewCount = 0;
+          for (let scroll = 0; scroll < 20; scroll++) {
+            const convs = Array.from(document.querySelectorAll('[data-testid="conversation"]'));
+            const prevSize = seenCount.size;
+            convs.forEach((_, i) => seenCount.add(i));
+            if (convs.length >= maxAccepts + 10) break;
+            if (convs.length > 0) {
+              convs[convs.length - 1].scrollIntoView({ behavior: 'instant', block: 'end' });
+            }
+            await new Promise(r => setTimeout(r, 1500));
+            if (seenCount.size <= prevSize) {
+              noNewCount++;
+              if (noNewCount >= 3) break;
+            } else {
+              noNewCount = 0;
+            }
+          }
+
+          const convs = Array.from(document.querySelectorAll('[data-testid="conversation"]'));
+          if (convs.length === 0) {
+            if (results.length === 0) {
+              results.push({ index: 1, status: 'info', user: 'System', message: 'No message requests found' });
+            }
+            break;
+          }
+
+          const items = convs.map((conv, idx) => {
+            const text = conv.innerText || '';
+            const link = conv.querySelector('a[href]');
+            const href = link ? link.href : '';
+            const lines = text.split('\n').filter(l => l.trim());
+            const user = lines[0] || 'Unknown';
+            return { idx, text, href, user };
+          });
+
+          let foundInThisRound = false;
+
+          for (const item of items) {
+            if (acceptCount >= maxAccepts) break;
+            const convKey = item.href || 'conv-' + item.idx;
+            if (visited.has(convKey)) continue;
+            visited.add(convKey);
+
+            const previewMatch = keywords.some(k => item.text.includes(k));
+            if (!previewMatch) continue;
+
+            // Click conversation
+            const convElements = Array.from(document.querySelectorAll('[data-testid="conversation"]'));
+            const conv = convElements[item.idx];
+            if (!conv) continue;
+            conv.click();
+            await new Promise(r => setTimeout(r, 2000));
+
+            // Read full chat and find Accept button
+            const heading = document.querySelector('[data-testid="conversation-header"]') ||
+                            document.querySelector('[data-testid="DM-conversation-header"]');
+            let username = 'Unknown';
+            if (heading) username = heading.innerText.trim().split('\n')[0];
+
+            const chatArea = document.querySelector('[data-testid="DmScrollerContainer"]') ||
+                             document.querySelector('[data-testid="DMConversationBody"]') ||
+                             document.querySelector('main');
+            const chatText = chatArea ? chatArea.innerText : '';
+            const matchedKw = keywords.filter(k => chatText.includes(k));
+            if (matchedKw.length === 0) continue;
+
+            const allBtns = Array.from(document.querySelectorAll('[role="button"]'));
+            const acceptBtn = allBtns.find(btn => {
+              const t = btn.innerText.trim().toLowerCase();
+              return t === 'accept' || t === '\u63a5\u53d7';
+            });
+
+            if (!acceptBtn) continue;
+
+            acceptBtn.click();
+            await new Promise(r => setTimeout(r, 2000));
+
+            const btnsAfter = Array.from(document.querySelectorAll('[role="button"]'));
+            const confirmBtn = btnsAfter.find(btn => {
+              const t = btn.innerText.trim().toLowerCase();
+              return (t === 'accept' || t === '\u63a5\u53d7') && btn !== acceptBtn;
+            });
+            if (confirmBtn) {
+              confirmBtn.click();
+              await new Promise(r => setTimeout(r, 1000));
+            }
+
+            acceptCount++;
+            foundInThisRound = true;
+            results.push({
+              index: acceptCount,
+              status: 'accepted',
+              user: username,
+              message: 'Accepted! Matched: ' + matchedKw.join(', '),
+            });
+            await new Promise(r => setTimeout(r, 2000));
+            break;
+          }
+
+          if (!foundInThisRound) break;
+        }
+
+        if (results.length === 0) {
+          results.push({ index: 0, status: 'info', user: 'System', message: 'No requests matched keywords "' + keywords.join(', ') + '"' });
+        }
+        return results;
+      })()

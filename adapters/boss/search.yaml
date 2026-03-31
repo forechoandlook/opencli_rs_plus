@@ -1,0 +1,68 @@
+site: boss
+name: search
+description: "BOSS直聘搜索职位"
+domain: www.zhipin.com
+strategy: cookie
+browser: true
+
+args:
+  query:
+    positional: true
+    type: string
+    required: true
+    description: "Search keyword (e.g. AI agent)"
+  city:
+    type: string
+    default: "北京"
+    description: City name or code
+  experience:
+    type: string
+    description: Experience filter
+  degree:
+    type: string
+    description: Degree filter
+  salary:
+    type: string
+    description: Salary filter
+  industry:
+    type: string
+    description: Industry code or name
+  page:
+    type: int
+    default: 1
+    description: Page number
+  limit:
+    type: int
+    default: 15
+    description: Number of results
+
+columns: [name, salary, company, area, experience, degree, skills, boss, security_id, url]
+
+pipeline:
+  - navigate: https://www.zhipin.com/web/geek/job
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        const query = ${{ args.query | json }};
+        const page = ${{ args.page }} || 1;
+        const limit = ${{ args.limit }} || 15;
+        const qs = new URLSearchParams({ scene: '1', query: query, city: '101010100', page: String(page), pageSize: '15' });
+        const url = 'https://www.zhipin.com/wapi/zpgeek/search/joblist.json?' + qs.toString();
+        const resp = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', url, true); xhr.withCredentials = true; xhr.timeout = 15000;
+          xhr.setRequestHeader('Accept', 'application/json');
+          xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)); } catch(e) { reject(e); } };
+          xhr.onerror = () => reject(new Error('Network Error'));
+          xhr.ontimeout = () => reject(new Error('Timeout'));
+          xhr.send(null);
+        });
+        if (resp.code !== 0) return [{ name: 'Error', salary: '', company: '', area: '', experience: '', degree: '', skills: '', boss: '', security_id: '', url: resp.message || '' }];
+        return (resp.zpData?.jobList || []).slice(0, limit).map(j => ({
+          name: j.jobName, salary: j.salaryDesc, company: j.brandName,
+          area: [j.cityName, j.areaDistrict, j.businessDistrict].filter(Boolean).join('·'),
+          experience: j.jobExperience, degree: j.jobDegree, skills: (j.skills || []).join(','),
+          boss: j.bossName + ' · ' + j.bossTitle, security_id: j.securityId || '',
+          url: 'https://www.zhipin.com/job_detail/' + j.encryptJobId + '.html',
+        }));
+      })()

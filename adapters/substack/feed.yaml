@@ -1,0 +1,70 @@
+site: substack
+name: feed
+description: Substack 热门文章 Feed
+domain: substack.com
+strategy: cookie
+browser: true
+
+args:
+  category:
+    default: all
+    description: "文章分类: all, tech, business, culture, politics, science, health"
+  limit:
+    type: int
+    default: 20
+    description: 返回的文章数量
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const category = '${{ args.category }}' || 'all';
+        let url;
+        if (!category || category === 'all') {
+          url = 'https://substack.com/';
+        } else {
+          const slug = category === 'tech' ? 'technology' : category;
+          url = 'https://substack.com/browse/' + slug;
+        }
+        location.href = url;
+        await new Promise(r => setTimeout(r, 8000));
+
+        const limit = Math.max(1, Math.min(${{ args.limit }} || 20, 50));
+        const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+        const posts = [];
+        const seen = new Set();
+
+        const allLinks = Array.from(document.querySelectorAll('a')).filter(link => {
+          const href = link.getAttribute('href') || '';
+          return href.includes('/home/post/') || href.includes('/p/');
+        });
+
+        for (const linkEl of allLinks) {
+          let postUrl = linkEl.getAttribute('href') || '';
+          if (!postUrl) continue;
+          if (!postUrl.startsWith('http')) postUrl = 'https://substack.com' + postUrl;
+          if (seen.has(postUrl)) continue;
+
+          const lines = (linkEl.innerText || '').split('\n').map(l => normalize(l)).filter(Boolean);
+          const readMeta = lines.find(l => /\b(read|watch|listen)\b/i.test(l)) || '';
+          if (!readMeta) continue;
+          const date = lines.find(l => /^[A-Z]{3}\s+\d{1,2}$/i.test(l)) || '';
+          const contentLines = lines.filter(l =>
+            l && l !== date && l !== readMeta &&
+            l.toLowerCase() !== 'save' && l.toLowerCase() !== 'more' &&
+            !/^(sign in|create account|get app)$/i.test(l)
+          );
+          const metaParts = readMeta.split('\u2219').map(p => normalize(p));
+          const author = metaParts[0] || '';
+          const readTime = metaParts.slice(1).join(' \u2219 ') || readMeta;
+          const title = contentLines.length >= 2 ? contentLines[1] : (contentLines[0] || '');
+          if (!title) continue;
+          seen.add(postUrl);
+          posts.push({
+            rank: posts.length + 1, title, author, date, readTime, url: postUrl,
+          });
+          if (posts.length >= limit) break;
+        }
+        return posts;
+      })()
+
+columns: [rank, title, author, date, readTime, url]

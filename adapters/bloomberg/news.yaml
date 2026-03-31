@@ -1,0 +1,97 @@
+site: bloomberg
+name: news
+description: Read a Bloomberg story/article page and return title, full content, and media links
+domain: www.bloomberg.com
+strategy: cookie
+browser: true
+
+args:
+  link:
+    positional: true
+    required: true
+    type: str
+    description: Bloomberg story/article URL or relative Bloomberg path
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const rawLink = '${{ args.link }}';
+        let url = rawLink.trim();
+        if (url.startsWith('/')) url = 'https://www.bloomberg.com' + url;
+        try { new URL(url); } catch { throw new Error('Invalid Bloomberg link: ' + rawLink); }
+
+        const resp = await fetch(url, { credentials: 'include' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const html = await resp.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+
+        const isRobot = /Are you a robot/i.test(doc.title)
+          || /unusual activity/i.test(doc.body?.innerText || '');
+        if (isRobot) throw new Error('Bloomberg served bot-protection page');
+
+        const raw = doc.querySelector('#__NEXT_DATA__')?.textContent;
+        if (!raw) throw new Error('No __NEXT_DATA__ found on page');
+
+        const parsed = JSON.parse(raw);
+        const story = parsed?.props?.pageProps?.story;
+        if (!story) throw new Error('No story data found in page');
+
+        const headline = story.headline || story.seoHeadline || story.seoTitle || doc.querySelector('h1')?.textContent?.trim() || doc.title;
+        const summary = story.summary || story.socialDescription || story.seoDescription || '';
+        const storyUrl = story.url || story.readingUrl || url;
+
+        // Render body
+        const renderInline = (nodes) => {
+          if (!Array.isArray(nodes)) return '';
+          return nodes.map(n => {
+            if (!n) return '';
+            if (typeof n === 'string') return n;
+            if (n.type === 'text') return n.value || '';
+            if (n.type === 'linebreak') return '\n';
+            if (Array.isArray(n.content)) return renderInline(n.content);
+            return n.value || '';
+          }).join('');
+        };
+        const renderBlock = (block) => {
+          if (!block || typeof block !== 'object') return '';
+          if (block.type === 'paragraph') return renderInline(block.content || []);
+          if (block.type === 'heading') return renderInline(block.content || []);
+          if (block.type === 'blockquote') return renderInline(block.content || []);
+          if (block.type === 'list') return (block.content || []).map(item => '- ' + renderInline(item?.content?.[0]?.content || item?.content || [])).join('\n');
+          if (Array.isArray(block.content)) return renderInline(block.content);
+          return '';
+        };
+        const blocks = Array.isArray(story.body?.content) ? story.body.content : [];
+        const content = blocks.map(b => renderBlock(b)).filter(Boolean).join('\n\n').trim();
+        if (!content) throw new Error('Article body was empty after parsing');
+
+        // Collect media links
+        const mediaUrls = new Set();
+        const collectMedia = (val) => {
+          if (!val) return;
+          if (typeof val === 'string' && /^https?:\/\//i.test(val) && /\.(jpg|jpeg|png|webp|gif|mp4)|assets\.bwbx\.io|resource\.bloomberg\.com/i.test(val)) {
+            mediaUrls.add(val);
+          }
+          if (Array.isArray(val)) val.forEach(collectMedia);
+          if (typeof val === 'object' && val !== null) {
+            for (const k of ['url', 'src', 'fallback', 'poster']) {
+              if (typeof val[k] === 'string') collectMedia(val[k]);
+            }
+            Object.values(val).forEach(collectMedia);
+          }
+        };
+        collectMedia(story.ledeImageUrl);
+        collectMedia(story.socialImageUrl);
+        collectMedia(story.imageAttachments);
+        collectMedia(story.videoAttachments);
+
+        return [{
+          title: headline,
+          summary,
+          link: storyUrl,
+          mediaLinks: [...mediaUrls],
+          content,
+        }];
+      })()
+
+columns: [title, summary, link, mediaLinks, content]

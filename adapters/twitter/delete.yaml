@@ -1,0 +1,60 @@
+site: twitter
+name: delete
+description: Delete a specific tweet by URL
+domain: x.com
+strategy: cookie
+browser: true
+
+args:
+  url:
+    type: str
+    required: true
+    positional: true
+    description: The URL of the tweet to delete
+
+columns: [status, message]
+
+pipeline:
+  - navigate:
+      url: ${{ args.url }}
+      settleMs: 5000
+
+  - evaluate: |
+      (async () => {
+        try {
+          const moreMenu = document.querySelector('[aria-label="More"]');
+          if (!moreMenu) {
+            return [{ status: 'failed', message: 'Could not find the "More" context menu on this tweet. Are you sure you are logged in and looking at a valid tweet?' }];
+          }
+
+          moreMenu.click();
+          await new Promise(r => setTimeout(r, 1000));
+
+          const items = document.querySelectorAll('[role="menuitem"]');
+          let deleteBtn = null;
+          for (const item of items) {
+            if (item.textContent.includes('Delete') && !item.textContent.includes('List')) {
+              deleteBtn = item;
+              break;
+            }
+          }
+
+          if (!deleteBtn) {
+            return [{ status: 'failed', message: 'This tweet does not seem to belong to you, or the Delete option is missing (not your tweet).' }];
+          }
+
+          deleteBtn.click();
+          await new Promise(r => setTimeout(r, 1000));
+
+          const confirmBtn = document.querySelector('[data-testid="confirmationSheetConfirm"]');
+          if (confirmBtn) {
+            confirmBtn.click();
+            await new Promise(r => setTimeout(r, 2000));
+            return [{ status: 'success', message: 'Tweet successfully deleted.' }];
+          } else {
+            return [{ status: 'failed', message: 'Delete confirmation dialog did not appear.' }];
+          }
+        } catch (e) {
+          return [{ status: 'failed', message: e.toString() }];
+        }
+      })()

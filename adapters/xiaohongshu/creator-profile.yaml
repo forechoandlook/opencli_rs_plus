@@ -1,0 +1,38 @@
+site: xiaohongshu
+name: creator-profile
+description: "小红书创作者账号信息 (粉丝/关注/获赞/成长等级)"
+domain: creator.xiaohongshu.com
+strategy: cookie
+browser: true
+
+args: {}
+
+columns: [field, value]
+
+pipeline:
+  - navigate: https://creator.xiaohongshu.com/new/home
+  - evaluate: |
+      (async () => {
+        const resp = await fetch('/api/galaxy/creator/home/personal_info', {
+          credentials: 'include',
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status + '. Are you logged into creator.xiaohongshu.com?');
+        const data = await resp.json();
+        if (!data?.data) throw new Error('Unexpected response structure');
+
+        const d = data.data;
+        const grow = d.grow_info || {};
+
+        return [
+          { field: 'Name', value: d.name || '' },
+          { field: 'Followers', value: String(d.fans_count || 0) },
+          { field: 'Following', value: String(d.follow_count || 0) },
+          { field: 'Likes & Collects', value: String(d.faved_count || 0) },
+          { field: 'Creator Level', value: String(grow.level || 0) },
+          { field: 'Level Progress', value: (grow.fans_count || 0) + '/' + (grow.max_fans_count || 0) + ' fans' },
+          { field: 'Bio', value: (d.personal_desc || '').replace(/\n/g, ' | ') },
+        ];
+      })()
+  - map:
+      field: ${{ item.field }}
+      value: ${{ item.value }}

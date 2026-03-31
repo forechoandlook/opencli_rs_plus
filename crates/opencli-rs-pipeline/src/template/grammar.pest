@@ -1,0 +1,61 @@
+// Template Expression Grammar for OpenCLI
+// Handles expressions inside ${{ ... }} delimiters
+
+WHITESPACE = _{ " " | "\t" }
+
+expression = { SOI ~ pipe_expr ~ EOI }
+
+pipe_expr = { ternary_expr ~ (pipe ~ filter)* }
+pipe = _{ "|" ~ !"|" }
+
+filter = { ident ~ ("(" ~ filter_args ~ ")")? }
+filter_args = { expr_atom ~ ("," ~ expr_atom)* }
+
+ternary_expr = { or_expr ~ ("?" ~ or_expr ~ ":" ~ or_expr)? }
+
+or_expr = { and_expr ~ ("||" ~ and_expr)* }
+and_expr = { comparison_expr ~ ("&&" ~ comparison_expr)* }
+
+comparison_expr = { additive_expr ~ (comp_op ~ additive_expr)? }
+comp_op = { ">=" | "<=" | "!=" | "==" | ">" | "<" }
+
+additive_expr = { multiplicative_expr ~ (add_op ~ multiplicative_expr)* }
+add_op = { "+" | "-" }
+
+multiplicative_expr = { unary_expr ~ (mul_op ~ unary_expr)* }
+mul_op = { "*" | "/" | "%" }
+
+unary_expr = { not_op? ~ postfix_expr }
+not_op = { "!" }
+
+postfix_expr = { primary ~ (dot_access | bracket_access)* }
+
+dot_access = { "." ~ ident }
+bracket_access = { "[" ~ additive_expr ~ "]" }
+
+primary = {
+    float_lit
+  | int_lit
+  | bool_lit
+  | null_lit
+  | string_lit
+  | func_call
+  | ident
+  | "(" ~ pipe_expr ~ ")"
+}
+
+func_call = { ident ~ ("." ~ ident)+ ~ "(" ~ func_args? ~ ")" }
+func_args = { pipe_expr ~ ("," ~ pipe_expr)* }
+
+expr_atom = { ternary_expr }
+
+int_lit = @{ "-"? ~ ASCII_DIGIT+ }
+float_lit = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+bool_lit = { "true" | "false" }
+null_lit = { "null" }
+
+string_lit = ${ "\"" ~ double_inner ~ "\"" | "'" ~ single_inner ~ "'" }
+double_inner = @{ (!"\"" ~ ANY)* }
+single_inner = @{ (!"'" ~ ANY)* }
+
+ident = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }

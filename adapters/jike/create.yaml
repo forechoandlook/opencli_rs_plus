@@ -1,0 +1,67 @@
+site: jike
+name: create
+description: "发布即刻动态"
+domain: web.okjike.com
+strategy: ui
+browser: true
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: "动态正文内容"
+
+columns: [status, message]
+
+pipeline:
+  - navigate: https://web.okjike.com
+  - evaluate: |
+      (async () => {
+        const textToInsert = ${{ args.text | json }};
+
+        const form = document.querySelector('[class*="_postForm_"]');
+        const editor = form
+          ? form.querySelector('[contenteditable="true"]')
+          : document.querySelector('[contenteditable="true"]');
+
+        if (editor) {
+          editor.focus();
+          const dt = new DataTransfer();
+          dt.setData('text/plain', textToInsert);
+          editor.dispatchEvent(new ClipboardEvent('paste', {
+            clipboardData: dt, bubbles: true, cancelable: true,
+          }));
+          await new Promise(r => setTimeout(r, 800));
+          if (!editor.textContent?.length) {
+            return [{ status: 'failed', message: '未找到发帖输入框' }];
+          }
+        } else {
+          const textarea = form
+            ? form.querySelector('textarea')
+            : document.querySelector('textarea');
+          if (!textarea) return [{ status: 'failed', message: '未找到发帖输入框' }];
+          textarea.focus();
+          const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+          setter?.call(textarea, textToInsert);
+          textarea.dispatchEvent(new Event('input', { bubbles: true }));
+          await new Promise(r => setTimeout(r, 500));
+        }
+
+        // Click send button
+        await new Promise(r => setTimeout(r, 500));
+        const candidates = Array.from(document.querySelectorAll('button')).filter(btn => {
+          const text = btn.textContent?.trim() || '';
+          return (text === '发送' || text === '发布') && !btn.disabled;
+        });
+        if (candidates.length === 0) {
+          return [{ status: 'failed', message: '未找到可用的发送按钮' }];
+        }
+        candidates[0].click();
+        await new Promise(r => setTimeout(r, 3000));
+
+        return [{ status: 'success', message: '动态发布成功' }];
+      })()
+  - map:
+      status: ${{ item.status }}
+      message: ${{ item.message }}

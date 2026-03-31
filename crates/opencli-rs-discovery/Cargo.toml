@@ -1,0 +1,13 @@
+[package]
+name = "opencli-rs-discovery"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+opencli-rs-core = { path = "../opencli-rs-core" }
+opencli-rs-pipeline = { path = "../opencli-rs-pipeline" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

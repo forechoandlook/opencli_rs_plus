@@ -1,0 +1,105 @@
+site: twitter
+name: followers
+description: Get accounts following a Twitter/X user
+domain: x.com
+strategy: intercept
+browser: true
+
+args:
+  user:
+    type: str
+    positional: true
+    description: Twitter screen name (defaults to logged-in user)
+  limit:
+    type: int
+    default: 50
+
+columns: [screen_name, name, bio, followers]
+
+pipeline:
+  # Step 1: Navigate to home to detect logged-in user
+  - navigate:
+      url: https://x.com/home
+      settleMs: 5000
+
+  # Step 2: Determine target user
+  - evaluate: |
+      (() => {
+        const targetUser = (args.user || '').replace(/^@/, '');
+        if (targetUser) return targetUser;
+        const link = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
+        if (!link) throw new Error('Could not detect logged-in user. Are you logged in?');
+        return link.getAttribute('href').replace('/', '');
+      })()
+
+  # Step 3: Navigate to profile page
+  - navigate:
+      url: "https://x.com/${{ data }}"
+      settleMs: 3000
+
+  # Step 4: Install interceptor for Followers API
+  - intercept:
+      pattern: Followers
+      collect: false
+
+  # Step 5: Click the followers link (SPA navigation, preserves interceptor)
+  - evaluate: |
+      (async () => {
+        const target = data;
+        const selectors = [
+          'a[href="/' + target + '/verified_followers"]',
+          'a[href="/' + target + '/followers"]',
+        ];
+        for (const sel of selectors) {
+          const link = document.querySelector(sel);
+          if (link) { link.click(); return true; }
+        }
+        // Fallback: try navigating directly via SPA
+        window.location.href = 'https://x.com/' + target + '/followers';
+        return true;
+      })()
+
+  # Step 6: Wait for content to load
+  - wait: 5
+
+  # Step 7: Scroll to trigger pagination
+  - scroll:
+      count: 3
+      delay: 2000
+
+  # Step 8: Collect and parse intercepted requests
+  - collect:
+      parse: |
+        (requests) => {
+          const results = [];
+          const seen = new Map();
+          for (const req of requests) {
+            try {
+              let instructions = req.data?.user?.result?.timeline?.timeline?.instructions;
+              if (!instructions) continue;
+              let addEntries = instructions.find(i => i.type === 'TimelineAddEntries')
+                || instructions.find(i => i.entries && Array.isArray(i.entries));
+              if (!addEntries) continue;
+              for (const entry of addEntries.entries) {
+                if (!entry.entryId.startsWith('user-')) continue;
+                const item = entry.content?.itemContent?.user_results?.result;
+                if (!item || item.__typename !== 'User') continue;
+                const core = item.core || {};
+                const legacy = item.legacy || {};
+                const sn = core.screen_name || legacy.screen_name || 'unknown';
+                if (!seen.has(sn)) {
+                  seen.set(sn, true);
+                  results.push({
+                    screen_name: sn,
+                    name: core.name || legacy.name || 'unknown',
+                    bio: legacy.description || item.profile_bio?.description || '',
+                    followers: legacy.followers_count || legacy.normal_followers_count || 0
+                  });
+                }
+              }
+            } catch {}
+          }
+          return results;
+        }
+
+  - limit: ${{ args.limit }}

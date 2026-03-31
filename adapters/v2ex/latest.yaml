@@ -1,0 +1,25 @@
+site: v2ex
+name: latest
+description: V2EX 最新话题
+domain: www.v2ex.com
+strategy: public
+browser: false
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Number of topics
+
+pipeline:
+  - fetch:
+      url: https://www.v2ex.com/api/topics/latest.json
+
+  - map:
+      rank: ${{ index + 1 }}
+      title: ${{ item.title }}
+      replies: ${{ item.replies }}
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, title, replies]

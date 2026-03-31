@@ -1,0 +1,32 @@
+site: doubao-app
+name: read
+description: Read chat history from Doubao desktop app
+domain: doubao-app
+strategy: ui
+browser: true
+
+columns: [Role, Text]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const SEL_MESSAGE = '[data-testid="message_content"]';
+        const SEL_MESSAGE_TEXT = '[data-testid="message_text_content"]';
+        const SEL_INDICATOR = '[data-testid="indicator"]';
+        const results = [];
+        const containers = document.querySelectorAll(SEL_MESSAGE);
+        for (const container of containers) {
+          const textEl = container.querySelector(SEL_MESSAGE_TEXT);
+          if (!textEl) continue;
+          if (textEl.querySelector(SEL_INDICATOR) || textEl.getAttribute('data-show-indicator') === 'true') continue;
+          const isUser = container.classList.contains('justify-end');
+          let text = '';
+          const children = textEl.querySelectorAll('div[dir]');
+          if (children.length > 0) text = Array.from(children).map(c => c.innerText || c.textContent || '').join('');
+          else text = textEl.innerText?.trim() || textEl.textContent?.trim() || '';
+          if (!text) continue;
+          results.push({ Role: isUser ? 'User' : 'Assistant', Text: text.substring(0, 2000) });
+        }
+        if (results.length === 0) return [{ Role: 'System', Text: 'No conversation found' }];
+        return results;
+      })()

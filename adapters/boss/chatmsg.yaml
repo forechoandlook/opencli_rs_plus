@@ -1,0 +1,27 @@
+site: boss
+name: chatmsg
+description: "BOSS直聘查看与候选人的聊天消息"
+domain: www.zhipin.com
+strategy: cookie
+browser: true
+
+args:
+  uid:
+    positional: true
+    type: string
+    required: true
+    description: "Encrypted UID (from chatlist)"
+  page:
+    type: int
+    default: 1
+    description: Page number
+
+columns: [from, type, text, time]
+
+pipeline:
+  - navigate: https://www.zhipin.com/web/chat/index
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        return [{ from: 'System', type: 'info', text: 'BOSS chatmsg requires friend lookup + API call chain. Use the TypeScript adapter for full functionality.', time: '' }];
+      })()

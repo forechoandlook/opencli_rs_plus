@@ -1,0 +1,14 @@
+site: chatgpt
+name: ax
+description: Read visible chat messages from ChatGPT Desktop via macOS Accessibility API
+domain: localhost
+strategy: public
+browser: false
+
+columns: [Role, Text]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        return [{ Role: 'System', Text: 'ChatGPT AX reader requires native macOS Swift accessibility API. Use the TypeScript adapter for full functionality.' }];
+      })()

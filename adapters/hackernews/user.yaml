@@ -1,0 +1,24 @@
+site: hackernews
+name: user
+description: Hacker News user profile
+domain: news.ycombinator.com
+strategy: public
+browser: false
+
+args:
+  username:
+    type: str
+    required: true
+    positional: true
+    description: HN username
+
+pipeline:
+  - fetch:
+      url: https://hacker-news.firebaseio.com/v0/user/${{ args.username }}.json
+
+  - map:
+      username: ${{ item.id }}
+      karma: ${{ item.karma }}
+      about: ${{ item.about }}
+
+columns: [username, karma, created, about]

@@ -1,0 +1,92 @@
+site: xiaohongshu
+name: user
+description: "Get public notes from a Xiaohongshu user profile"
+domain: www.xiaohongshu.com
+strategy: cookie
+browser: true
+
+args:
+  id:
+    positional: true
+    type: string
+    required: true
+    description: "User id or profile URL"
+  limit:
+    type: int
+    default: 15
+    description: Number of notes to return
+
+columns: [id, title, type, likes, url]
+
+pipeline:
+  - evaluate: |
+      (() => {
+        const input = ${{ args.id | json }};
+        const trimmed = (input || '').trim();
+        const withoutQuery = trimmed.replace(/[?#].*$/, '');
+        const matched = withoutQuery.match(/\/user\/profile\/([a-zA-Z0-9]+)/);
+        if (matched && matched[1]) return matched[1];
+        return withoutQuery.replace(/\/+$/, '').split('/').pop() || withoutQuery;
+      })()
+  - navigate: https://www.xiaohongshu.com/user/profile/${{ data }}
+  - scroll:
+      times: 3
+      delay: 1500
+  - evaluate: |
+      (() => {
+        const userId = ${{ data | json }};
+        const userStore = window.__INITIAL_STATE__?.user || {};
+        const noteGroups = userStore.notes?._value || userStore.notes || [];
+
+        function flatten(groups) {
+          if (!Array.isArray(groups)) return [];
+          const notes = [];
+          for (const group of groups) {
+            if (!group) continue;
+            if (Array.isArray(group)) {
+              for (const item of group) { if (item) notes.push(item); }
+              continue;
+            }
+            notes.push(group);
+          }
+          return notes;
+        }
+
+        const notes = flatten(noteGroups);
+        const rows = [];
+        const seen = new Set();
+
+        for (const entry of notes) {
+          const noteCard = entry?.noteCard || entry?.note_card || entry;
+          if (!noteCard || typeof noteCard !== 'object') continue;
+
+          const noteId = (noteCard.noteId || noteCard.note_id || entry?.noteId || entry?.note_id || entry?.id || '').toString().trim();
+          if (!noteId || seen.has(noteId)) continue;
+          seen.add(noteId);
+
+          const uid = (noteCard.user?.userId || noteCard.user?.user_id || userId || '').toString().trim();
+          const xsecToken = (entry?.xsecToken || entry?.xsec_token || noteCard.xsecToken || noteCard.xsec_token || '').toString().trim();
+          const likes = (noteCard.interactInfo?.likedCount || noteCard.interact_info?.liked_count || 0).toString();
+
+          let url = 'https://www.xiaohongshu.com/user/profile/' + (uid || userId) + '/' + noteId;
+          if (xsecToken) url += '?xsec_token=' + encodeURIComponent(xsecToken) + '&xsec_source=pc_user';
+
+          rows.push({
+            id: noteId,
+            title: (noteCard.displayTitle || noteCard.display_title || noteCard.title || '').toString().trim(),
+            type: (noteCard.type || '').toString().trim(),
+            likes: likes,
+            url: url,
+          });
+        }
+
+        if (rows.length === 0) throw new Error('No public notes found for this Xiaohongshu user.');
+        return rows;
+      })()
+  - map:
+      id: ${{ item.id }}
+      title: ${{ item.title }}
+      type: ${{ item.type }}
+      likes: ${{ item.likes }}
+      url: ${{ item.url }}
+  - limit: ${{ args.limit | default(15) }}

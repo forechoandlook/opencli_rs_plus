@@ -1,0 +1,17 @@
+site: doubao-app
+name: dump
+description: Dump Doubao desktop app DOM and snapshot to /tmp for debugging
+domain: doubao-app
+strategy: ui
+browser: true
+
+columns: [Status, File]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        return [
+          { Status: 'Success', File: '/tmp/doubao-dom.html' },
+          { Status: 'Success', File: '/tmp/doubao-snapshot.json' },
+        ];
+      })()

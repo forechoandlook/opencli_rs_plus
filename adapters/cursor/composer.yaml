@@ -1,0 +1,41 @@
+site: cursor
+name: composer
+description: Send a prompt directly into Cursor Composer (Cmd+I shortcut)
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Text to send into Composer
+
+columns: [Status, InjectedText]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const textToInsert = ${{ args.text | json }};
+
+        // Open/Focus Composer via shortcut
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'i', code: 'KeyI', metaKey: true, bubbles: true }));
+        await new Promise(r => setTimeout(r, 1000));
+
+        let composer = document.activeElement;
+        if (!composer || !composer.isContentEditable) {
+          composer = document.querySelector('.composer-bar [data-lexical-editor="true"], [id*="composer"] [contenteditable="true"], .aislash-editor-input');
+        }
+
+        if (!composer) return [{ Status: 'Error', InjectedText: 'Could not find Cursor Composer input element after pressing Cmd+I.' }];
+
+        composer.focus();
+        document.execCommand('insertText', false, textToInsert);
+        await new Promise(r => setTimeout(r, 500));
+
+        composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+        await new Promise(r => setTimeout(r, 1000));
+
+        return [{ Status: 'Success', InjectedText: textToInsert }];
+      })()

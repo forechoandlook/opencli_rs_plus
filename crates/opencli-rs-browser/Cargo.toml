@@ -1,0 +1,18 @@
+[package]
+name = "opencli-rs-browser"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+opencli-rs-core = { path = "../opencli-rs-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+axum = { version = "0.8", features = ["ws"] }
+uuid = { version = "1", features = ["v4"] }
+futures = "0.3"

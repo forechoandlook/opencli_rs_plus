@@ -1,0 +1,28 @@
+[package]
+name = "opencli-rs-daemon"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "opencli-daemon"
+path = "src/main.rs"
+
+[dependencies]
+opencli-rs-core = { path = "../opencli-rs-core" }
+opencli-rs-pipeline = { path = "../opencli-rs-pipeline" }
+opencli-rs-browser = { path = "../opencli-rs-browser" }
+opencli-rs-discovery = { path = "../opencli-rs-discovery" }
+opencli-rs = { path = "../opencli-rs-cli" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+directories = "5"
+dirs = "5"

@@ -1,0 +1,19 @@
+[package]
+name = "opencli-rs-pipeline"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+opencli-rs-core = { path = "../opencli-rs-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+pest = "2"
+pest_derive = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+futures = "0.3"
+base64 = "0.22"

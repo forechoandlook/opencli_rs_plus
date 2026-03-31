@@ -1,0 +1,48 @@
+site: doubao
+name: send
+description: Send a message to Doubao web chat
+domain: www.doubao.com
+strategy: cookie
+browser: true
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Message to send
+
+columns: [Status, SubmittedBy, InjectedText]
+
+pipeline:
+  - navigate: https://www.doubao.com/chat
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        const text = ${{ args.text | json }};
+        const candidates = [
+          'textarea[data-testid="chat_input_input"]',
+          'textarea[placeholder*="发消息"]',
+          'textarea',
+        ];
+        let composer = null;
+        for (const sel of candidates) {
+          const node = document.querySelector(sel);
+          if (node) { composer = node; break; }
+        }
+        if (!composer) return [{ Status: 'Error', SubmittedBy: 'none', InjectedText: 'Could not find Doubao input' }];
+
+        composer.focus();
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+        if (setter) setter.call(composer, text);
+        else composer.value = text;
+        composer.dispatchEvent(new Event('input', { bubbles: true }));
+        composer.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 500));
+
+        const root = document.querySelector('[data-testid="chat_input"]') || document.body;
+        const buttons = Array.from(root.querySelectorAll('button, [role="button"]'));
+        const lastBtn = buttons[buttons.length - 1];
+        if (lastBtn) { lastBtn.click(); return [{ Status: 'Success', SubmittedBy: 'button', InjectedText: text }]; }
+        return [{ Status: 'Success', SubmittedBy: 'enter', InjectedText: text }];
+      })()

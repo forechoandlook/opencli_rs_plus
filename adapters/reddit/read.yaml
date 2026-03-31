@@ -1,0 +1,151 @@
+site: reddit
+name: read
+description: Read a Reddit post and its comments
+domain: reddit.com
+strategy: cookie
+browser: true
+
+args:
+  post-id:
+    positional: true
+    type: string
+    required: true
+    description: "Post ID (e.g. 1abc123) or full URL"
+  sort:
+    type: string
+    default: best
+    description: "Comment sort: best, top, new, controversial, old, qa"
+  limit:
+    type: int
+    default: 25
+    description: Number of top-level comments
+  depth:
+    type: int
+    default: 2
+    description: "Max reply depth (1=no replies, 2=one level, etc.)"
+  replies:
+    type: int
+    default: 5
+    description: Max replies shown per comment at each level
+  max-length:
+    type: int
+    default: 2000
+    description: Max characters per comment body (min 100)
+
+columns: [type, author, score, text]
+
+pipeline:
+  - navigate: https://www.reddit.com
+  - evaluate: |
+      (async function() {
+        var postId = ${{ args['post-id'] | json }};
+        var urlMatch = postId.match(/comments\/([a-z0-9]+)/);
+        if (urlMatch) postId = urlMatch[1];
+
+        var sort = ${{ args.sort | json }};
+        var limit = ${{ args.limit }};
+        var maxDepth = ${{ args.depth }};
+        var maxReplies = ${{ args.replies }};
+        var maxLength = Math.max(100, ${{ args['max-length'] }});
+
+        var apiLimit = Math.max(limit * 3, 100);
+        var res = await fetch(
+          '/comments/' + postId + '.json?sort=' + sort + '&limit=' + apiLimit + '&depth=' + (maxDepth + 1) + '&raw_json=1',
+          { credentials: 'include' }
+        );
+        if (!res.ok) return { error: 'Reddit API returned HTTP ' + res.status };
+
+        var data;
+        try { data = await res.json(); } catch(e) { return { error: 'Failed to parse response' }; }
+        if (!Array.isArray(data) || data.length < 2) return { error: 'Unexpected response format' };
+
+        var results = [];
+
+        var post = data[0] && data[0].data && data[0].data.children && data[0].data.children[0] && data[0].data.children[0].data;
+        if (post) {
+          var body = post.selftext || '';
+          if (body.length > maxLength) body = body.slice(0, maxLength) + '\n... [truncated]';
+          results.push({
+            type: 'POST',
+            author: post.author || '[deleted]',
+            score: post.score || 0,
+            text: post.title + (body ? '\n\n' + body : '') + (post.url && !post.is_self ? '\n' + post.url : ''),
+          });
+        }
+
+        function walkComment(node, depth) {
+          if (!node || node.kind !== 't1') return;
+          var d = node.data;
+          var body = d.body || '';
+          if (body.length > maxLength) body = body.slice(0, maxLength) + '...';
+
+          var indent = '';
+          for (var i = 0; i < depth; i++) indent += '  ';
+          var prefix = depth === 0 ? '' : indent + '> ';
+          var indentedBody = depth === 0
+            ? body
+            : body.split('\n').map(function(line) { return prefix + line; }).join('\n');
+
+          results.push({
+            type: depth === 0 ? 'L0' : 'L' + depth,
+            author: d.author || '[deleted]',
+            score: d.score || 0,
+            text: indentedBody,
+          });
+
+          var t1Children = [];
+          var moreCount = 0;
+          if (d.replies && d.replies.data && d.replies.data.children) {
+            var children = d.replies.data.children;
+            for (var i = 0; i < children.length; i++) {
+              if (children[i].kind === 't1') t1Children.push(children[i]);
+              else if (children[i].kind === 'more') moreCount += children[i].data.count || 0;
+            }
+          }
+
+          if (depth + 1 >= maxDepth) {
+            var totalHidden = t1Children.length + moreCount;
+            if (totalHidden > 0) {
+              var cutoffIndent = '';
+              for (var j = 0; j <= depth; j++) cutoffIndent += '  ';
+              results.push({ type: 'L' + (depth + 1), author: '', score: '', text: cutoffIndent + '[+' + totalHidden + ' more replies]' });
+            }
+            return;
+          }
+
+          t1Children.sort(function(a, b) { return (b.data.score || 0) - (a.data.score || 0); });
+          var toProcess = Math.min(t1Children.length, maxReplies);
+          for (var i = 0; i < toProcess; i++) walkComment(t1Children[i], depth + 1);
+
+          var hidden = t1Children.length - toProcess + moreCount;
+          if (hidden > 0) {
+            var moreIndent = '';
+            for (var j = 0; j <= depth; j++) moreIndent += '  ';
+            results.push({ type: 'L' + (depth + 1), author: '', score: '', text: moreIndent + '[+' + hidden + ' more replies]' });
+          }
+        }
+
+        var topLevel = data[1].data.children || [];
+        var t1TopLevel = [];
+        for (var i = 0; i < topLevel.length; i++) {
+          if (topLevel[i].kind === 't1') t1TopLevel.push(topLevel[i]);
+        }
+
+        for (var i = 0; i < Math.min(t1TopLevel.length, limit); i++) {
+          walkComment(t1TopLevel[i], 0);
+        }
+
+        var moreTopLevel = topLevel.filter(function(c) { return c.kind === 'more'; })
+          .reduce(function(sum, c) { return sum + (c.data.count || 0); }, 0);
+        var hiddenTopLevel = Math.max(0, t1TopLevel.length - limit) + moreTopLevel;
+        if (hiddenTopLevel > 0) {
+          results.push({ type: '', author: '', score: '', text: '[+' + hiddenTopLevel + ' more top-level comments]' });
+        }
+
+        return results;
+      })()
+  - map:
+      type: ${{ item.type }}
+      author: ${{ item.author }}
+      score: ${{ item.score }}
+      text: ${{ item.text }}

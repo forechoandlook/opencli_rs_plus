@@ -1,0 +1,19 @@
+site: antigravity
+name: extract-code
+description: Extract multi-line code blocks from the current Antigravity conversation
+domain: localhost
+strategy: ui
+browser: true
+
+columns: [code]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        let elements = Array.from(document.querySelectorAll('pre code'));
+        if (elements.length === 0) elements = Array.from(document.querySelectorAll('.monaco-editor'));
+        if (elements.length === 0) elements = Array.from(document.querySelectorAll('code')).filter(c => c.innerText.includes('\n'));
+        const blocks = elements.map(el => el.innerText).filter(text => text.trim().length > 0);
+        if (blocks.length === 0) return [{ code: 'No code blocks found.' }];
+        return blocks.map(code => ({ code }));
+      })()

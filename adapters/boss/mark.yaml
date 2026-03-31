@@ -1,0 +1,31 @@
+site: boss
+name: mark
+description: "BOSS直聘给候选人添加标签"
+domain: www.zhipin.com
+strategy: cookie
+browser: true
+
+args:
+  uid:
+    positional: true
+    type: string
+    required: true
+    description: Encrypted UID of the candidate
+  label:
+    type: string
+    required: true
+    description: Label name or ID
+  remove:
+    type: boolean
+    default: false
+    description: Remove the label instead of adding
+
+columns: [status, detail]
+
+pipeline:
+  - navigate: https://www.zhipin.com/web/chat/index
+  - wait: 2
+  - evaluate: |
+      (function() {
+        return [{ status: 'info', detail: 'BOSS mark requires friend lookup + label API. Use the TypeScript adapter.' }];
+      })()

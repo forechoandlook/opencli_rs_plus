@@ -1,0 +1,132 @@
+site: xiaohongshu
+name: creator-notes-summary
+description: "小红书最近笔记批量摘要 (列表 + 单篇关键数据汇总)"
+domain: creator.xiaohongshu.com
+strategy: cookie
+browser: true
+timeout: 180
+
+args:
+  limit:
+    type: int
+    default: 3
+    description: Number of recent notes to summarize
+
+columns: [rank, id, title, views, likes, collects, comments, shares, avg_view_time, rise_fans, top_source, top_interest, url]
+
+pipeline:
+  - navigate: https://creator.xiaohongshu.com/statistics/data-analysis?type=0&page_size=20&page_num=1
+  - evaluate: |
+      (async () => {
+        const limit = ${{ args.limit | default(3) }};
+        const pageSize = Math.min(Math.max(limit, 10), 20);
+        const apiPath = '/api/galaxy/creator/datacenter/note/analyze/list';
+        const detailUrl = 'https://creator.xiaohongshu.com/statistics/note-detail';
+
+        const pad = (v) => String(v).padStart(2, '0');
+        const formatTime = (ts) => {
+          if (!ts) return '';
+          const d = new Date(ts + 8 * 3600000);
+          return d.getUTCFullYear() + '年' + pad(d.getUTCMonth()+1) + '月' + pad(d.getUTCDate()) + '日 ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes());
+        };
+
+        // Step 1: get note list
+        const listResp = await fetch(apiPath + '?type=0&page_size=' + pageSize + '&page_num=1', { credentials: 'include' });
+        if (!listResp.ok) throw new Error('Failed to fetch note list');
+        const listData = await listResp.json();
+        const noteInfos = (listData?.data?.note_infos || []).slice(0, limit);
+        if (!noteInfos.length) throw new Error('No notes found. Are you logged into creator.xiaohongshu.com?');
+
+        const results = [];
+
+        // Step 2: for each note, fetch detail APIs
+        const detailApis = [
+          { suffix: '/api/galaxy/creator/datacenter/note/base', key: 'noteBase' },
+          { suffix: '/api/galaxy/creator/datacenter/note/audience/source/detail', key: 'audienceSourceDetail' },
+        ];
+
+        for (let i = 0; i < noteInfos.length; i++) {
+          const note = noteInfos[i];
+          const noteId = note.id || '';
+          let views = String(note.read_count || 0);
+          let likes = String(note.like_count || 0);
+          let collects = String(note.fav_count || 0);
+          let comments = String(note.comment_count || 0);
+          let shares = '';
+          let avgViewTime = '';
+          let riseFans = '';
+          let topSource = '';
+          let topInterest = '';
+
+          if (noteId) {
+            try {
+              const baseResp = await fetch('/api/galaxy/creator/datacenter/note/base?note_id=' + noteId, { credentials: 'include' });
+              if (baseResp.ok) {
+                const baseJson = await baseResp.json();
+                const base = baseJson?.data || {};
+                // Try to extract summary metrics from day bucket
+                const day = base.day || base.hour || {};
+                const sumList = (list) => (list || []).reduce((s, p) => s + (p.count_with_double || p.count || 0), 0);
+                const viewSum = sumList(day.view_list);
+                if (viewSum) views = String(viewSum);
+                const likeSum = sumList(day.like_list);
+                if (likeSum) likes = String(likeSum);
+                const collectSum = sumList(day.collect_list);
+                if (collectSum) collects = String(collectSum);
+                const commentSum = sumList(day.comment_list);
+                if (commentSum) comments = String(commentSum);
+                const shareSum = sumList(day.share_list);
+                if (shareSum) shares = String(shareSum);
+                const fansSum = sumList(day.rise_fans_list);
+                if (fansSum) riseFans = String(fansSum);
+                const viewTimeList = day.view_time_list || [];
+                if (viewTimeList.length) {
+                  const avg = viewTimeList.reduce((s, p) => s + (p.count_with_double || p.count || 0), 0) / viewTimeList.length;
+                  avgViewTime = avg.toFixed(1) + 's';
+                }
+              }
+            } catch {}
+
+            try {
+              const srcResp = await fetch('/api/galaxy/creator/datacenter/note/audience/source/detail?note_id=' + noteId, { credentials: 'include' });
+              if (srcResp.ok) {
+                const srcJson = await srcResp.json();
+                const detail = srcJson?.data || {};
+                const interests = detail.interest || [];
+                if (interests.length) {
+                  interests.sort((a, b) => (b.value || 0) - (a.value || 0));
+                  topInterest = (interests[0].title || '') + ' ' + (interests[0].value || '') + '%';
+                }
+              }
+            } catch {}
+          }
+
+          results.push({
+            rank: i + 1,
+            id: noteId,
+            title: note.title || '',
+            views, likes, collects, comments, shares,
+            avg_view_time: avgViewTime,
+            rise_fans: riseFans,
+            top_source: topSource,
+            top_interest: topInterest,
+            url: noteId ? detailUrl + '?noteId=' + encodeURIComponent(noteId) : '',
+          });
+        }
+
+        return results;
+      })()
+  - map:
+      rank: ${{ item.rank }}
+      id: ${{ item.id }}
+      title: ${{ item.title }}
+      views: ${{ item.views }}
+      likes: ${{ item.likes }}
+      collects: ${{ item.collects }}
+      comments: ${{ item.comments }}
+      shares: ${{ item.shares }}
+      avg_view_time: ${{ item.avg_view_time }}
+      rise_fans: ${{ item.rise_fans }}
+      top_source: ${{ item.top_source }}
+      top_interest: ${{ item.top_interest }}
+      url: ${{ item.url }}

@@ -1,0 +1,28 @@
+site: antigravity
+name: send
+description: Send a message to Antigravity
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Text to send
+
+columns: [Status, InjectedText]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const text = ${{ args.text | json }};
+        let composer = document.querySelector('textarea, [contenteditable="true"]');
+        if (!composer) return [{ Status: 'Error', InjectedText: 'Could not find input' }];
+        composer.focus();
+        document.execCommand('insertText', false, text);
+        await new Promise(r => setTimeout(r, 500));
+        composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+        return [{ Status: 'Success', InjectedText: text }];
+      })()

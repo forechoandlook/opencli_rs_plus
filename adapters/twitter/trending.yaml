@@ -1,0 +1,85 @@
+site: twitter
+name: trending
+description: Twitter/X trending topics
+domain: x.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Number of trends to show
+
+columns: [rank, topic, tweets, category]
+
+pipeline:
+  - navigate:
+      url: https://x.com/explore/tabs/trending
+      settleMs: 3000
+
+  - evaluate: |
+      (async () => {
+        const limit = ${{ args.limit }};
+
+        const ct0 = document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('ct0='))?.split('=')[1] || null;
+        if (!ct0) throw new Error('Not logged into x.com (no ct0 cookie)');
+
+        // Try legacy guide.json API first
+        let trends = [];
+        try {
+          const r = await fetch('/i/api/2/guide.json?include_page_configuration=true', {
+            credentials: 'include',
+            headers: {
+              'x-twitter-active-user': 'yes',
+              'x-csrf-token': ct0,
+              'authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
+            }
+          });
+          if (r.ok) {
+            const apiData = await r.json();
+            const instructions = apiData?.timeline?.instructions || [];
+            const entries = instructions.flatMap(inst => inst?.addEntries?.entries || inst?.entries || []);
+            const apiTrends = entries
+              .filter(e => e.content?.timelineModule)
+              .flatMap(e => e.content.timelineModule.items || [])
+              .map(t => t?.item?.content?.trend)
+              .filter(Boolean);
+            trends = apiTrends.map((t, i) => ({
+              rank: i + 1,
+              topic: t.name,
+              tweets: t.tweetCount ? String(t.tweetCount) : 'N/A',
+              category: t.trendMetadata?.domainContext || '',
+            }));
+          }
+        } catch {}
+
+        // Fallback: scrape from the loaded DOM
+        if (trends.length === 0) {
+          await new Promise(r => setTimeout(r, 2000));
+          const cells = document.querySelectorAll('[data-testid="trend"]');
+          cells.forEach((cell) => {
+            const text = cell.textContent || '';
+            if (text.includes('Promoted')) return;
+            const container = cell.querySelector(':scope > div');
+            if (!container) return;
+            const divs = container.children;
+            const topicEl = divs.length >= 2 ? divs[1] : null;
+            const topic = topicEl ? topicEl.textContent.trim() : '';
+            const catEl = divs.length >= 1 ? divs[0] : null;
+            const catText = catEl ? catEl.textContent.trim() : '';
+            const category = catText.replace(/^\d+\s*/, '').replace(/^\xB7\s*/, '').trim();
+            const extraEl = divs.length >= 3 ? divs[2] : null;
+            const extra = extraEl ? extraEl.textContent.trim() : '';
+            if (topic) {
+              trends.push({ rank: trends.length + 1, topic, tweets: extra || 'N/A', category });
+            }
+          });
+        }
+
+        if (trends.length === 0) {
+          throw new Error('No trending data found. API may have changed or login may be required.');
+        }
+
+        return trends.slice(0, limit);
+      })()

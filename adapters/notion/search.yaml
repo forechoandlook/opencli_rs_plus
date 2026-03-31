@@ -1,0 +1,42 @@
+site: notion
+name: search
+description: "Search pages and databases in Notion via Quick Find (Cmd+P)"
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  query:
+    positional: true
+    type: string
+    required: true
+    description: Search query
+
+columns: [Index, Title]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const query = ${{ args.query | json }};
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', code: 'KeyP', metaKey: true, bubbles: true }));
+        await new Promise(r => setTimeout(r, 500));
+
+        const input = document.querySelector('input[placeholder*="Search"], input[type="text"]');
+        if (input) {
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          setter.call(input, query);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        await new Promise(r => setTimeout(r, 1500));
+
+        const items = document.querySelectorAll('[role="option"], [class*="searchResult"], [class*="quick-find"] [role="button"]');
+        const results = Array.from(items).slice(0, 20).map((item, i) => ({
+          Index: i + 1,
+          Title: (item.textContent || '').trim().substring(0, 120),
+        }));
+
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+
+        if (results.length === 0) return [{ Index: 0, Title: 'No results for "' + query + '"' }];
+        return results;
+      })()

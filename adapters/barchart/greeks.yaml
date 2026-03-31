@@ -1,0 +1,93 @@
+site: barchart
+name: greeks
+description: "Barchart options greeks overview (IV, delta, gamma, theta, vega)"
+domain: www.barchart.com
+strategy: cookie
+browser: true
+
+args:
+  symbol:
+    positional: true
+    type: string
+    required: true
+    description: "Stock ticker (e.g. AAPL)"
+  expiration:
+    type: string
+    description: "Expiration date (YYYY-MM-DD). Defaults to nearest available."
+  limit:
+    type: int
+    default: 10
+    description: Number of near-the-money strikes per type
+
+columns: [type, strike, last, iv, delta, gamma, theta, vega, rho, volume, openInterest, expiration]
+
+pipeline:
+  - navigate: https://www.barchart.com/stocks/quotes/${{ args.symbol | urlencode }}/options
+  - wait: 4
+  - evaluate: |
+      (async () => {
+        const sym = ${{ args.symbol | json }}.toUpperCase().trim();
+        const expDate = ${{ args.expiration | default('') | json }};
+        const limit = ${{ args.limit }};
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        const headers = { 'X-CSRF-TOKEN': csrf };
+
+        const fields = [
+          'strikePrice','lastPrice','volume','openInterest',
+          'volatility','delta','gamma','theta','vega','rho',
+          'expirationDate','optionType','percentFromLast',
+        ].join(',');
+
+        let url = '/proxies/core-api/v1/options/chain?symbol=' + encodeURIComponent(sym)
+          + '&fields=' + fields + '&raw=1';
+        if (expDate) url += '&expirationDate=' + encodeURIComponent(expDate);
+        const resp = await fetch(url, { credentials: 'include', headers });
+        if (!resp.ok) return [];
+        const d = await resp.json();
+        let items = d?.data || [];
+
+        if (!expDate) {
+          const expirations = items.map(i => (i.raw || i).expirationDate || null).filter(Boolean)
+            .sort((a, b) => Date.parse(a) - Date.parse(b));
+          const nearest = expirations[0];
+          if (nearest) items = items.filter(i => ((i.raw || i).expirationDate || null) === nearest);
+        }
+
+        const calls = items.filter(i => ((i.raw || i).optionType || '').toLowerCase() === 'call')
+          .sort((a, b) => Math.abs((a.raw || a).percentFromLast || 999) - Math.abs((b.raw || b).percentFromLast || 999))
+          .slice(0, limit);
+        const puts = items.filter(i => ((i.raw || i).optionType || '').toLowerCase() === 'put')
+          .sort((a, b) => Math.abs((a.raw || a).percentFromLast || 999) - Math.abs((b.raw || b).percentFromLast || 999))
+          .slice(0, limit);
+
+        return [...calls, ...puts].map(i => {
+          const r = i.raw || i;
+          return {
+            type: r.optionType || '',
+            strike: r.strikePrice,
+            last: r.lastPrice != null ? Number(Number(r.lastPrice).toFixed(2)) : null,
+            iv: r.volatility != null ? Number(Number(r.volatility).toFixed(2)) + '%' : null,
+            delta: r.delta != null ? Number(Number(r.delta).toFixed(4)) : null,
+            gamma: r.gamma != null ? Number(Number(r.gamma).toFixed(4)) : null,
+            theta: r.theta != null ? Number(Number(r.theta).toFixed(4)) : null,
+            vega: r.vega != null ? Number(Number(r.vega).toFixed(4)) : null,
+            rho: r.rho != null ? Number(Number(r.rho).toFixed(4)) : null,
+            volume: r.volume,
+            openInterest: r.openInterest,
+            expiration: r.expirationDate || null,
+          };
+        });
+      })()
+  - map:
+      type: ${{ item.type }}
+      strike: ${{ item.strike }}
+      last: ${{ item.last }}
+      iv: ${{ item.iv }}
+      delta: ${{ item.delta }}
+      gamma: ${{ item.gamma }}
+      theta: ${{ item.theta }}
+      vega: ${{ item.vega }}
+      rho: ${{ item.rho }}
+      volume: ${{ item.volume }}
+      openInterest: ${{ item.openInterest }}
+      expiration: ${{ item.expiration }}

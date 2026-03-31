@@ -1,0 +1,58 @@
+site: reddit
+name: comment
+description: Post a comment on a Reddit post
+domain: reddit.com
+strategy: cookie
+browser: true
+
+args:
+  post-id:
+    positional: true
+    type: string
+    required: true
+    description: "Post ID (e.g. 1abc123) or fullname (t3_xxx)"
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Comment text
+
+columns: [status, message]
+
+pipeline:
+  - navigate: https://www.reddit.com
+  - evaluate: |
+      (async () => {
+        let postId = ${{ args['post-id'] | json }};
+        const urlMatch = postId.match(/comments\/([a-z0-9]+)/);
+        if (urlMatch) postId = urlMatch[1];
+        const fullname = postId.startsWith('t3_') || postId.startsWith('t1_')
+          ? postId : 't3_' + postId;
+
+        const text = ${{ args.text | json }};
+
+        const meRes = await fetch('/api/me.json', { credentials: 'include' });
+        const me = await meRes.json();
+        const modhash = me?.data?.modhash || '';
+
+        const res = await fetch('/api/comment', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'parent=' + encodeURIComponent(fullname)
+            + '&text=' + encodeURIComponent(text)
+            + '&api_type=json'
+            + (modhash ? '&uh=' + encodeURIComponent(modhash) : ''),
+        });
+
+        if (!res.ok) return [{ status: 'failed', message: 'HTTP ' + res.status }];
+        const data = await res.json();
+        const errors = data?.json?.errors;
+        if (errors && errors.length > 0) {
+          return [{ status: 'failed', message: errors.map(e => e.join(': ')).join('; ') }];
+        }
+        return [{ status: 'success', message: 'Comment posted on ' + fullname }];
+      })()
+  - map:
+      status: ${{ item.status }}
+      message: ${{ item.message }}

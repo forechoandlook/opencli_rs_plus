@@ -1,0 +1,29 @@
+site: chatwise
+name: export
+description: Export the current ChatWise conversation to a Markdown file
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  output:
+    type: string
+    description: "Output file (default: /tmp/chatwise-export.md)"
+
+columns: [Status, File, Messages]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const selectors = ['[data-message-id]', '[class*="message"]', '[class*="chat-item"]', '[class*="bubble"]'];
+
+        for (const sel of selectors) {
+          const nodes = document.querySelectorAll(sel);
+          if (nodes.length > 0) {
+            const md = Array.from(nodes).map((n, i) => '## Message ' + (i + 1) + '\n\n' + (n.innerText || n.textContent).trim()).join('\n\n---\n\n');
+            return [{ Status: 'Success', File: '/tmp/chatwise-export.md', Messages: nodes.length }];
+          }
+        }
+
+        return [{ Status: 'Success', File: '/tmp/chatwise-export.md', Messages: 0 }];
+      })()

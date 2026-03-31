@@ -1,0 +1,48 @@
+site: discord-app
+name: search
+description: Search messages in the current Discord server/channel
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  query:
+    positional: true
+    type: string
+    required: true
+    description: Search query
+
+columns: [Index, Author, Message]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const query = ${{ args.query | json }};
+
+        // Open search
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', code: 'KeyF', metaKey: true, bubbles: true }));
+        await new Promise(r => setTimeout(r, 500));
+
+        const input = document.querySelector('[aria-label*="Search"], [class*="searchBar"] input, [placeholder*="Search"]');
+        if (input) {
+          input.focus();
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          setter.call(input, query);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+        await new Promise(r => setTimeout(r, 2000));
+
+        const items = [];
+        const resultNodes = document.querySelectorAll('[class*="searchResult_"], [id*="search-result"]');
+        resultNodes.forEach((node, i) => {
+          const author = node.querySelector('[class*="username"]')?.textContent?.trim() || '-';
+          const content = node.querySelector('[id^="message-content-"], [class*="messageContent"]')?.textContent?.trim() || node.textContent?.trim();
+          items.push({ Index: i + 1, Author: author, Message: (content || '').substring(0, 200) });
+        });
+
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+
+        if (items.length === 0) return [{ Index: 0, Author: 'System', Message: 'No results for "' + query + '"' }];
+        return items;
+      })()

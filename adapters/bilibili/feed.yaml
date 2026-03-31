@@ -1,0 +1,81 @@
+site: bilibili
+name: feed
+description: 关注的人的动态时间线
+domain: www.bilibili.com
+strategy: cookie
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Number of results
+  type:
+    default: all
+    description: "Filter: all, video, article"
+
+columns: [rank, author, title, type, url]
+
+pipeline:
+  - navigate: https://www.bilibili.com
+
+  - evaluate: |
+      (async () => {
+        const limit = ${{ args.limit }};
+        const feedType = '${{ args.type }}';
+
+        function stripHtml(s) {
+          return s.replace(/<[^>]+>/g, '').replace(/&[a-z]+;/gi, ' ').trim();
+        }
+
+        const typeMap = { all: 'all', video: 'video', article: 'article' };
+        const params = new URLSearchParams({
+          timezone_offset: '-480',
+          type: typeMap[feedType] || 'all',
+          page: '1'
+        });
+
+        const res = await fetch('https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all?' + params.toString(), {
+          credentials: 'include'
+        });
+        const payload = await res.json();
+        const items = payload?.data?.items || [];
+        const rows = [];
+
+        for (let i = 0; i < Math.min(items.length, Number(limit)); i++) {
+          const item = items[i];
+          const modules = item.modules || {};
+          const authorModule = modules.module_author || {};
+          const dynamicModule = modules.module_dynamic || {};
+          const major = dynamicModule.major || {};
+
+          let title = '';
+          let url = '';
+          let itemType = item.type || '';
+
+          if (major.archive) {
+            title = major.archive.title || '';
+            url = major.archive.jump_url ? 'https:' + major.archive.jump_url : '';
+            itemType = 'video';
+          } else if (major.article) {
+            title = major.article.title || '';
+            url = major.article.jump_url ? 'https:' + major.article.jump_url : '';
+            itemType = 'article';
+          } else if (dynamicModule.desc) {
+            title = stripHtml(dynamicModule.desc.text || '').slice(0, 60);
+            url = item.id_str ? 'https://t.bilibili.com/' + item.id_str : '';
+            itemType = 'dynamic';
+          }
+
+          if (!title) continue;
+
+          rows.push({
+            rank: rows.length + 1,
+            author: authorModule.name || '',
+            title,
+            type: itemType,
+            url
+          });
+        }
+
+        return rows;
+      })()

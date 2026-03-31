@@ -1,0 +1,137 @@
+site: gemini
+name: image
+description: Generate an image with Gemini and save to ~/Downloads
+domain: gemini.google.com
+strategy: cookie
+browser: true
+timeoutSeconds: 180
+
+args:
+  prompt:
+    positional: true
+    type: string
+    required: true
+    description: Image description prompt
+  style:
+    type: string
+    default: ""
+    description: Image style (e.g. photorealistic, anime, oil painting)
+  output:
+    type: string
+    default: ""
+    description: Output directory (default ~/Downloads)
+
+columns: [response, size]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const prompt = ${{ args.prompt | json }};
+        const style = ${{ args.style | json }};
+        const fullPrompt = style ? prompt + ', ' + style : prompt;
+
+        // Helper: capture generated image and convert to base64
+        const captureImage = () => {
+          // Find the actual generated image: blob URL with alt "AI generated"
+          const img = Array.from(document.querySelectorAll('img')).find(i => {
+            const isBlob = (i.src || '').startsWith('blob:');
+            const isGenerated = (i.alt || '').includes('AI generated');
+            return isBlob && isGenerated && (i.naturalWidth || i.width || 0) > 500;
+          });
+
+          if (!img || !img.complete) {
+            console.log('[image] Generated image not found or not loaded');
+            return null;
+          }
+
+          try {
+            const w = img.naturalWidth || img.width;
+            const h = img.naturalHeight || img.height;
+            console.log('[image] Capturing:', w, 'x', h, 'from', img.src.substring(0, 50));
+
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const dataUrl = canvas.toDataURL('image/png');
+
+            if (!dataUrl || dataUrl === 'data:,') {
+              console.log('[image] Canvas capture returned empty');
+              return null;
+            }
+            console.log('[image] Canvas capture success:', dataUrl.length, 'chars');
+            return dataUrl;
+          } catch (e) {
+            console.log('[image] capture error:', e.message);
+            return null;
+          }
+        };
+
+        // Check if image already generated (retry scenario)
+        const existing = captureImage();
+        if (existing) {
+          console.log('[image] Found existing generated image');
+          return [{ response: existing, filename: 'gemini_' + Date.now() + '.png' }];
+        }
+
+        // Wait for "Create image" button and click it
+        let imgBtn = null;
+        for (let i = 0; i < 24; i++) {
+          imgBtn = Array.from(document.querySelectorAll('button')).find(b =>
+            (b.textContent || '').toLowerCase().includes('create image'));
+          if (imgBtn) break;
+          await new Promise(r => setTimeout(r, 500));
+        }
+        if (!imgBtn) {
+          return [{ response: '[ERROR] Create image button not found', filename: '' }];
+        }
+        imgBtn.click();
+        console.log('[image] Clicked Create image button');
+        await new Promise(r => setTimeout(r, 2000));
+
+        // Find and fill image prompt box
+        let box = null;
+        for (let i = 0; i < 24; i++) {
+          box = document.querySelector('div[aria-label="Enter a prompt for Gemini"]');
+          if (box) break;
+          await new Promise(r => setTimeout(r, 500));
+        }
+        if (!box) {
+          return [{ response: '[ERROR] Image prompt box not found', filename: '' }];
+        }
+
+        box.focus();
+        await new Promise(r => setTimeout(r, 300));
+        document.execCommand('selectAll');
+        document.execCommand('insertText', false, fullPrompt);
+        console.log('[image] Entered prompt:', fullPrompt.substring(0, 50));
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Click send button
+        const sendBtn = document.querySelector('button[aria-label="Send message"]');
+        if (sendBtn && !sendBtn.disabled) {
+          sendBtn.click();
+        } else {
+          box.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true
+          }));
+        }
+        console.log('[image] Sent message');
+
+        // Poll for generated image (120s timeout)
+        const start = Date.now();
+        while (Date.now() - start < 120000) {
+          await new Promise(r => setTimeout(r, 2000));
+          const data = captureImage();
+          if (data) {
+            console.log('[image] Generation complete, captured:', data.length, 'chars');
+            return [{ response: data, filename: 'gemini_' + Date.now() + '.png' }];
+          }
+        }
+        return [{ response: '[TIMEOUT] Image generation took longer than 120s', filename: '' }];
+      })()
+  - download:
+      type: base64
+      filename: ${{ data[0].filename }}
+      output: ${{ args.output }}

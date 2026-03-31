@@ -1,0 +1,90 @@
+site: barchart
+name: quote
+description: "Barchart stock quote with price, volume, and key metrics"
+domain: www.barchart.com
+strategy: cookie
+browser: true
+
+args:
+  symbol:
+    positional: true
+    type: string
+    required: true
+    description: "Stock ticker (e.g. AAPL, MSFT, TSLA)"
+
+columns: [symbol, name, price, change, changePct, open, high, low, prevClose, volume, avgVolume, marketCap, peRatio, eps]
+
+pipeline:
+  - navigate: https://www.barchart.com/stocks/quotes/${{ args.symbol | urlencode }}/overview
+  - wait: 4
+  - evaluate: |
+      (async () => {
+        const sym = ${{ args.symbol | json }}.toUpperCase().trim();
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+        // Strategy 1: API
+        try {
+          const fields = [
+            'symbol','symbolName','lastPrice','priceChange','percentChange',
+            'highPrice','lowPrice','openPrice','previousPrice','volume','averageVolume',
+            'marketCap','peRatio','earningsPerShare','tradeTime',
+          ].join(',');
+          const url = '/proxies/core-api/v1/quotes/get?symbol=' + encodeURIComponent(sym) + '&fields=' + fields;
+          const resp = await fetch(url, {
+            credentials: 'include',
+            headers: { 'X-CSRF-TOKEN': csrf },
+          });
+          if (resp.ok) {
+            const d = await resp.json();
+            const r = d?.data?.[0] || null;
+            if (r) {
+              const raw = r.raw || {};
+              return [{
+                symbol: r.symbol || sym,
+                name: r.symbolName || sym,
+                price: r.lastPrice || null,
+                change: r.priceChange || null,
+                changePct: r.percentChange || null,
+                open: r.openPrice || null,
+                high: r.highPrice || null,
+                low: r.lowPrice || null,
+                prevClose: r.previousPrice || null,
+                volume: r.volume || null,
+                avgVolume: r.averageVolume || null,
+                marketCap: r.marketCap || null,
+                peRatio: r.peRatio || null,
+                eps: r.earningsPerShare || null,
+              }];
+            }
+          }
+        } catch(e) {}
+
+        // Strategy 2: DOM fallback
+        const priceEl = document.querySelector('span.last-change');
+        const price = priceEl ? priceEl.textContent.trim() : null;
+        const name = document.querySelector('h1 span.symbol');
+
+        return [{
+          symbol: sym,
+          name: name ? name.textContent.trim() : sym,
+          price: price,
+          change: null, changePct: null,
+          open: null, high: null, low: null, prevClose: null,
+          volume: null, avgVolume: null, marketCap: null, peRatio: null, eps: null,
+        }];
+      })()
+  - map:
+      symbol: ${{ item.symbol }}
+      name: ${{ item.name }}
+      price: ${{ item.price }}
+      change: ${{ item.change }}
+      changePct: ${{ item.changePct }}
+      open: ${{ item.open }}
+      high: ${{ item.high }}
+      low: ${{ item.low }}
+      prevClose: ${{ item.prevClose }}
+      volume: ${{ item.volume }}
+      avgVolume: ${{ item.avgVolume }}
+      marketCap: ${{ item.marketCap }}
+      peRatio: ${{ item.peRatio }}
+      eps: ${{ item.eps }}

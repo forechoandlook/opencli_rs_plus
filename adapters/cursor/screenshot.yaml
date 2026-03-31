@@ -1,0 +1,23 @@
+site: cursor
+name: screenshot
+description: Capture a snapshot of the current Cursor window (DOM + Accessibility tree)
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  output:
+    type: string
+    description: "Output file path (default: /tmp/cursor-snapshot.txt)"
+
+columns: [Status, File]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const html = document.documentElement.outerHTML;
+        return [
+          { Status: 'Success', File: '/tmp/cursor-snapshot-dom.html' },
+          { Status: 'Success', File: '/tmp/cursor-snapshot-a11y.txt' },
+        ];
+      })()

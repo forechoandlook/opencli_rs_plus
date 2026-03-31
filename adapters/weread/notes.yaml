@@ -1,0 +1,63 @@
+site: weread
+name: notes
+description: List your notes (thoughts) on a book
+domain: weread.qq.com
+strategy: cookie
+browser: true
+
+args:
+  bookid:
+    positional: true
+    required: true
+    type: str
+    description: "Book hash ID from reader URL (open book in weread.qq.com, copy ID from address bar)"
+  limit:
+    type: int
+    default: 20
+    description: Max results
+
+pipeline:
+  - navigate:
+      url: "https://weread.qq.com/web/reader/${{ args.bookid }}"
+      settleMs: 6000
+
+  - evaluate: |
+      (async () => {
+        const limit = ${{ args.limit }} || 20;
+        const reviewUrl = performance.getEntriesByType('resource')
+          .map(e => e.name)
+          .find(u => u.includes('/web/review/list'));
+        if (!reviewUrl) {
+          const anyUrl = performance.getEntriesByType('resource')
+            .map(e => e.name)
+            .find(u => u.includes('/web/book/') && u.includes('bookId='));
+          if (!anyUrl) throw new Error('No book API found - ensure the book hash ID is correct');
+          const numBookId = new URL(anyUrl).searchParams.get('bookId');
+          const res = await fetch('/web/review/list/best?bookId=' + numBookId + '&synckey=0&maxIdx=0&count=' + limit, { credentials: 'include' });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const data = await res.json();
+          const items = data?.reviews || [];
+          const fmt = (ts) => ts ? new Date(ts * 1000 + 8 * 3600000).toISOString().slice(0, 10) : '-';
+          return items.slice(0, limit).map(item => ({
+            chapter: item.review?.chapterName || '',
+            text: (item.review?.abstract || '').substring(0, 100),
+            review: (item.review?.content || '').substring(0, 200),
+            createTime: fmt(item.review?.createTime),
+          }));
+        }
+        const url = new URL(reviewUrl);
+        url.searchParams.set('count', String(limit));
+        const res = await fetch(url.toString(), { credentials: 'include' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const items = data?.reviews || [];
+        const fmt = (ts) => ts ? new Date(ts * 1000 + 8 * 3600000).toISOString().slice(0, 10) : '-';
+        return items.slice(0, limit).map(item => ({
+          chapter: item.review?.chapterName || '',
+          text: (item.review?.abstract || '').substring(0, 100),
+          review: (item.review?.content || '').substring(0, 200),
+          createTime: fmt(item.review?.createTime),
+        }));
+      })()
+
+columns: [chapter, text, review, createTime]

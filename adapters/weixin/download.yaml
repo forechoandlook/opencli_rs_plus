@@ -1,0 +1,156 @@
+site: weixin
+name: download
+description: "下载微信公众号文章为 Markdown 格式"
+domain: mp.weixin.qq.com
+strategy: cookie
+browser: true
+
+args:
+  url:
+    type: str
+    required: true
+    positional: true
+    description: "WeChat article URL (mp.weixin.qq.com/s/xxx)"
+  output:
+    default: ./weixin-articles
+    description: Output directory
+
+columns: [title, author, status, size]
+
+pipeline:
+  - navigate:
+      url: "${{ args.url }}"
+      settleMs: 5000
+
+  - evaluate: |
+      (() => {
+        const title = document.querySelector('#activity-name')?.textContent?.trim() || 'untitled';
+        const author = document.querySelector('#js_name')?.textContent?.trim() || 'unknown';
+
+        // Extract publish time from script tags
+        let publishTime = '';
+        const htmlStr = document.documentElement.innerHTML;
+        let timeMatch = htmlStr.match(/create_time\s*:\s*JsDecode\('([^']+)'\)/);
+        if (!timeMatch) timeMatch = htmlStr.match(/create_time\s*:\s*'(\d+)'/);
+        if (!timeMatch) timeMatch = htmlStr.match(/create_time\s*[:=]\s*["']?(\d+)["']?/);
+        if (timeMatch) {
+          const ts = parseInt(timeMatch[1], 10);
+          if (ts > 0) {
+            const d = new Date(ts * 1000 + 8 * 3600 * 1000);
+            const pad = n => String(n).padStart(2, '0');
+            publishTime = d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) + ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes());
+          }
+        }
+
+        const contentEl = document.querySelector('#js_content');
+        if (!contentEl) return [{ title, author, status: 'failed', size: 'No content found' }];
+
+        // Fix lazy-loaded images
+        contentEl.querySelectorAll('img').forEach(img => {
+          const dataSrc = img.getAttribute('data-src');
+          if (dataSrc) img.setAttribute('src', dataSrc);
+        });
+
+        // Extract code blocks
+        const codeBlocks = [];
+        contentEl.querySelectorAll('.code-snippet__fix').forEach(el => {
+          el.querySelectorAll('.code-snippet__line-index').forEach(li => li.remove());
+          const pre = el.querySelector('pre[data-lang]');
+          const lang = pre ? (pre.getAttribute('data-lang') || '') : '';
+          const lines = [];
+          el.querySelectorAll('code').forEach(codeTag => {
+            const text = codeTag.textContent;
+            if (/^[ce]?ounter\(line/.test(text)) return;
+            lines.push(text);
+          });
+          if (lines.length === 0) lines.push(el.textContent);
+          const placeholder = 'CODEBLOCK-' + codeBlocks.length;
+          codeBlocks.push({ lang, code: lines.join('\n') });
+          const p = document.createElement('p');
+          p.textContent = placeholder;
+          el.replaceWith(p);
+        });
+
+        // Remove noise
+        ['script', 'style', '.qr_code_pc', '.reward_area'].forEach(sel => {
+          contentEl.querySelectorAll(sel).forEach(tag => tag.remove());
+        });
+
+        // HTML to Markdown
+        function htmlToMd(el) {
+          let md = '';
+          for (const node of el.childNodes) {
+            if (node.nodeType === 3) { md += node.textContent; continue; }
+            if (node.nodeType !== 1) continue;
+            const tag = node.tagName.toLowerCase();
+            if (tag === 'h1') md += '\n# ' + node.textContent.trim() + '\n\n';
+            else if (tag === 'h2') md += '\n## ' + node.textContent.trim() + '\n\n';
+            else if (tag === 'h3') md += '\n### ' + node.textContent.trim() + '\n\n';
+            else if (tag === 'p' || tag === 'section') {
+              const text = node.textContent.trim();
+              // Check for code block placeholder
+              const cbMatch = text.match(/^CODEBLOCK-(\d+)$/);
+              if (cbMatch) {
+                const idx = parseInt(cbMatch[1]);
+                if (codeBlocks[idx]) {
+                  md += '\n```' + codeBlocks[idx].lang + '\n' + codeBlocks[idx].code + '\n```\n\n';
+                }
+              } else {
+                // Recurse into children to preserve img/strong/em/a tags
+                const inner = htmlToMd(node).trim();
+                if (inner) md += inner + '\n\n';
+              }
+            }
+            else if (tag === 'br') md += '\n';
+            else if (tag === 'strong' || tag === 'b') md += '**' + node.textContent + '**';
+            else if (tag === 'em' || tag === 'i') md += '*' + node.textContent + '*';
+            else if (tag === 'a') md += '[' + node.textContent + '](' + (node.href || '') + ')';
+            else if (tag === 'img') {
+              const src = node.src || '';
+              if (src && !src.includes('data:image')) md += '![image](' + src + ')\n\n';
+            }
+            else if (tag === 'blockquote') md += '\n> ' + node.textContent.trim().replace(/\n/g, '\n> ') + '\n\n';
+            else if (tag === 'pre') md += '\n```\n' + node.textContent + '\n```\n\n';
+            else if (tag === 'ul' || tag === 'ol') {
+              let idx = 0;
+              for (const li of node.querySelectorAll(':scope > li')) {
+                idx++;
+                md += (tag === 'ol' ? idx + '. ' : '- ') + li.textContent.trim() + '\n';
+              }
+              md += '\n';
+            }
+            else md += htmlToMd(node);
+          }
+          return md;
+        }
+
+        const markdown = htmlToMd(contentEl);
+
+        // Extract image URLs from generated markdown to ensure exact URL match for replacement
+        const imageUrls = [];
+        const imgRe = /!\[([^\]]*)\]\(([^)]+)\)/g;
+        let m;
+        while ((m = imgRe.exec(markdown)) !== null) {
+          if (!imageUrls.includes(m[2])) imageUrls.push(m[2]);
+        }
+        const safeTitle = title.replace(/[\/\\:*?"<>|]/g, '_').slice(0, 80);
+        const output = args.output || './weixin-articles';
+        const content = '---\ntitle: "' + title.replace(/"/g, '\\"') + '"\n公众号: "' + author.replace(/"/g, '\\"') + '"\n' + (publishTime ? 'date: "' + publishTime + '"\n' : '') + 'source: "' + args.url + '"\n---\n\n' + markdown;
+
+        return {
+          title: title,
+          author: author,
+          filename: safeTitle + '.md',
+          content: content,
+          output: output,
+          imageUrls: imageUrls,
+          referer: 'https://mp.weixin.qq.com/',
+        };
+      })()
+
+  - download:
+      type: article
+      title: "${{ data.title }}"
+      output: "${{ data.output }}"
+      filename: "${{ data.filename }}"
+      content: "${{ data.content }}"

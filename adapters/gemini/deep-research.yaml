@@ -1,0 +1,80 @@
+site: gemini
+name: deep-research
+description: Run deep research on a topic with Gemini
+domain: gemini.google.com
+strategy: cookie
+browser: true
+
+args:
+  topic:
+    positional: true
+    type: string
+    required: true
+    description: Research topic or question
+  timeout:
+    type: int
+    default: 300
+    description: Max seconds to wait for deep research
+
+columns: [response]
+
+pipeline:
+  - navigate: https://gemini.google.com/
+  - wait:
+      time: 3
+  - evaluate: |
+      (async () => {
+        const topic = ${{ args.topic | json }};
+        const timeoutMs = (${{ args.timeout }} || 300) * 1000;
+
+        // Open Tools menu and enable Deep research
+        const toolsBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.trim() === 'Tools');
+        if (toolsBtn) toolsBtn.click();
+        await new Promise(r => setTimeout(r, 1000));
+
+        const deepResearchBtn = Array.from(document.querySelectorAll('[role=menuitemcheckbox]')).find(el => el.innerText.includes('Deep research'));
+        if (!deepResearchBtn) return [{ response: '[FAILED] Deep research option not found in Tools menu' }];
+        deepResearchBtn.click();
+        await new Promise(r => setTimeout(r, 500));
+        // Close menu by clicking elsewhere
+        document.body.click();
+
+        // Type in the input
+        const box = document.querySelector('div[aria-label="Enter a prompt for Gemini"]');
+        if (!box) return [{ response: '[FAILED] Input box not found' }];
+        box.focus();
+        await new Promise(r => setTimeout(r, 300));
+        document.execCommand('selectAll');
+        document.execCommand('insertText', false, topic);
+        await new Promise(r => setTimeout(r, 1500));
+
+        // Send
+        const sendBtn = document.querySelector('button[aria-label="Send message"]');
+        if (sendBtn && !sendBtn.disabled) sendBtn.click();
+        else box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+
+        const startTime = Date.now();
+        let lastText = '';
+        let stableCount = 0;
+
+        while (Date.now() - startTime < timeoutMs) {
+          await new Promise(r => setTimeout(r, 5000));
+          const responses = document.querySelectorAll('.model-response-text');
+          if (responses.length === 0) continue;
+          const last = responses[responses.length - 1];
+          const text = (last.innerText || '').trim();
+          if (!text || text.length < 10) continue;
+
+          // Check if research is complete
+          if (text === lastText) {
+            stableCount++;
+            if (stableCount >= 2) return [{ response: text }];
+          } else {
+            stableCount = 0;
+          }
+          lastText = text;
+        }
+
+        if (lastText) return [{ response: lastText }];
+        return [{ response: '[TIMEOUT] Deep research timed out after ' + Math.round(timeoutMs / 1000) + 's' }];
+      })()

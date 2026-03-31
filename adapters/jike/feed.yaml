@@ -1,0 +1,69 @@
+site: jike
+name: feed
+description: "即刻首页动态流"
+domain: web.okjike.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Number of posts
+
+columns: [author, content, likes, comments, time, url]
+
+pipeline:
+  - navigate: https://web.okjike.com
+  - scroll:
+      times: 3
+      delay: 2000
+  - evaluate: |
+      (() => {
+        function getPostData(element) {
+          for (const key of Object.keys(element)) {
+            if (key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$')) {
+              let fiber = element[key];
+              for (let i = 0; i < 10 && fiber; i++) {
+                const props = fiber.memoizedProps || fiber.pendingProps;
+                if (props && props.data && props.data.id) return props.data;
+                fiber = fiber.return;
+              }
+            }
+          }
+          return null;
+        }
+
+        const results = [];
+        const seen = new Set();
+        const elements = document.querySelectorAll('[class*="_post_"]');
+
+        for (const el of elements) {
+          const data = getPostData(el);
+          if (!data || !data.id || seen.has(data.id)) continue;
+          seen.add(data.id);
+
+          const author = data.user?.screenName || data.target?.user?.screenName || '';
+          const content = data.content || data.target?.content || '';
+          if (!author && !content) continue;
+
+          results.push({
+            author,
+            content: content.replace(/\n/g, ' ').slice(0, 120),
+            likes: data.likeCount || 0,
+            comments: data.commentCount || 0,
+            time: data.actionTime || data.createdAt || '',
+            url: 'https://web.okjike.com/originalPost/' + data.id,
+          });
+        }
+
+        return results;
+      })()
+  - map:
+      author: ${{ item.author }}
+      content: ${{ item.content }}
+      likes: ${{ item.likes }}
+      comments: ${{ item.comments }}
+      time: ${{ item.time }}
+      url: ${{ item.url }}
+  - limit: ${{ args.limit | default(20) }}

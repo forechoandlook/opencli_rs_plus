@@ -1,0 +1,27 @@
+site: doubao
+name: new
+description: Start a new conversation in Doubao web chat
+domain: www.doubao.com
+strategy: cookie
+browser: true
+
+columns: [Status, Action]
+
+pipeline:
+  - navigate: https://www.doubao.com/chat
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        const labels = ['新对话', 'New Chat'];
+        const buttons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+        for (const button of buttons) {
+          const text = (button.innerText || '').trim();
+          const aria = (button.getAttribute('aria-label') || '').trim();
+          if (labels.some(l => text.includes(l) || aria.includes(l))) {
+            button.click();
+            await new Promise(r => setTimeout(r, 1500));
+            return [{ Status: 'Success', Action: 'Clicked ' + text }];
+          }
+        }
+        return [{ Status: 'Success', Action: 'Navigated to /chat as fallback' }];
+      })()

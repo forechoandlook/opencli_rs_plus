@@ -1,0 +1,53 @@
+site: reddit
+name: upvote
+description: Upvote or downvote a Reddit post
+domain: reddit.com
+strategy: cookie
+browser: true
+
+args:
+  post-id:
+    positional: true
+    type: string
+    required: true
+    description: "Post ID (e.g. 1abc123) or fullname (t3_xxx)"
+  direction:
+    type: string
+    default: up
+    description: "Vote direction: up, down, none"
+
+columns: [status, message]
+
+pipeline:
+  - navigate: https://www.reddit.com
+  - evaluate: |
+      (async () => {
+        let postId = ${{ args['post-id'] | json }};
+        const urlMatch = postId.match(/comments\/([a-z0-9]+)/);
+        if (urlMatch) postId = urlMatch[1];
+        const fullname = postId.startsWith('t3_') || postId.startsWith('t1_')
+          ? postId : 't3_' + postId;
+
+        const dir = ${{ args.direction | json }};
+        const direction = dir === 'down' ? -1 : dir === 'none' ? 0 : 1;
+
+        const meRes = await fetch('/api/me.json', { credentials: 'include' });
+        const me = await meRes.json();
+        const modhash = me?.data?.modhash || '';
+
+        const res = await fetch('/api/vote', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'id=' + encodeURIComponent(fullname)
+            + '&dir=' + direction
+            + (modhash ? '&uh=' + encodeURIComponent(modhash) : ''),
+        });
+
+        if (!res.ok) return [{ status: 'failed', message: 'HTTP ' + res.status }];
+        const labels = { '1': 'Upvoted', '-1': 'Downvoted', '0': 'Vote removed' };
+        return [{ status: 'success', message: (labels[String(direction)] || 'Voted') + ' ' + fullname }];
+      })()
+  - map:
+      status: ${{ item.status }}
+      message: ${{ item.message }}

@@ -1,0 +1,38 @@
+site: codex
+name: extract-diff
+description: Extract visual code review diff patches from Codex
+domain: localhost
+strategy: ui
+browser: true
+
+columns: [File, Diff]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const results = [];
+        const diffBlocks = document.querySelectorAll('.diff-editor, .monaco-diff-editor, [data-testid="diff-view"]');
+
+        diffBlocks.forEach((block, index) => {
+          results.push({
+            File: block.getAttribute('data-filename') || 'DiffBlock_' + (index + 1),
+            Diff: block.innerText || block.textContent
+          });
+        });
+
+        if (results.length === 0) {
+          const codeBlocks = document.querySelectorAll('pre code.language-diff, pre code.language-patch');
+          codeBlocks.forEach((code, index) => {
+            results.push({
+              File: 'Patch_' + (index + 1),
+              Diff: code.innerText || code.textContent
+            });
+          });
+        }
+
+        if (results.length === 0) {
+          return [{ File: 'No diffs found', Diff: 'Try running opencli codex send "/review" first' }];
+        }
+
+        return results;
+      })()

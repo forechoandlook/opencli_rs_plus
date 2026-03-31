@@ -1,0 +1,106 @@
+site: douban
+name: reviews
+description: 导出个人影评
+domain: movie.douban.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: 导出数量
+  uid:
+    description: 用户ID，不填则使用当前登录账号
+  full:
+    type: bool
+    default: false
+    description: 获取完整影评内容
+
+pipeline:
+  - navigate: https://movie.douban.com/mine
+
+  - evaluate: |
+      (async () => {
+        await new Promise(r => setTimeout(r, 2000));
+        const limit = ${{ args.limit }} || 20;
+        const full = ${{ args.full }};
+        let uid = '${{ args.uid }}';
+
+        if (!uid) {
+          const links = document.querySelectorAll('a[href*="/people/"]');
+          for (const link of links) {
+            const href = link.getAttribute('href') || link.href || '';
+            const match = href.match(/people\/([^/]+)/);
+            if (match) { uid = match[1]; break; }
+          }
+          if (!uid) throw new Error('Not logged in to Douban. Please login in Chrome first.');
+        }
+
+        const reviews = [];
+        let start = 0;
+        const pageSize = 20;
+
+        while (true) {
+          const url = 'https://movie.douban.com/people/' + uid + '/reviews?start=' + start + '&sort=time';
+          const resp = await fetch(url, { credentials: 'include' });
+          if (!resp.ok) break;
+          const html = await resp.text();
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          const items = doc.querySelectorAll('.tlst');
+          if (!items.length) break;
+          let count = 0;
+          items.forEach(el => {
+            const movieLinkEl = el.querySelector('.ilst a');
+            const reviewTitleEl = el.querySelector('.nlst a[title]');
+            const ratingEl = el.querySelector('.clst span[class*="allstar"]');
+            const contentEl = el.querySelector('.review-short span');
+            const votesEl = el.querySelector('.review-short .pl span');
+            const movieHref = movieLinkEl?.getAttribute('href') || '';
+            const movieTitle = movieLinkEl?.getAttribute('title') || movieLinkEl?.textContent?.trim() || '';
+            const reviewHref = reviewTitleEl?.getAttribute('href') || '';
+            const title = reviewTitleEl?.textContent?.trim() || '';
+            let myRating = 0;
+            if (ratingEl) {
+              const cls = ratingEl.className || '';
+              const ratingMatch = cls.match(/allstar(\d)0/);
+              if (ratingMatch) myRating = parseInt(ratingMatch[1], 10) * 2;
+            }
+            const votesText = votesEl?.textContent || '';
+            const votesMatch = votesText.match(/(\d+)/);
+            const votes = votesMatch ? parseInt(votesMatch[1], 10) : 0;
+            reviews.push({
+              movieTitle, title, myRating, votes,
+              content: contentEl?.textContent?.trim() || '',
+              url: reviewHref,
+            });
+            count++;
+          });
+          if (count < pageSize) break;
+          if (limit > 0 && reviews.length >= limit) break;
+          start += pageSize;
+          await new Promise(r => setTimeout(r, 1000));
+        }
+
+        const result = reviews.slice(0, limit > 0 ? limit : undefined);
+
+        if (full) {
+          for (const review of result) {
+            if (review.url) {
+              try {
+                const resp = await fetch(review.url, { credentials: 'include' });
+                if (resp.ok) {
+                  const html = await resp.text();
+                  const doc = new DOMParser().parseFromString(html, 'text/html');
+                  const contentEl = doc.querySelector('.review-content');
+                  if (contentEl) review.content = contentEl.textContent?.trim() || review.content;
+                }
+              } catch {}
+            }
+          }
+        }
+
+        return result;
+      })()
+
+columns: [movieTitle, title, myRating, votes, content, url]

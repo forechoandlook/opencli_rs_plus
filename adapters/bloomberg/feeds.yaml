@@ -1,0 +1,24 @@
+site: bloomberg
+name: feeds
+description: List the Bloomberg RSS feed aliases used by the adapter
+domain: feeds.bloomberg.com
+strategy: public
+browser: false
+
+pipeline:
+  - evaluate: |
+      (() => {
+        const feeds = {
+          main: 'https://feeds.bloomberg.com/news.rss',
+          markets: 'https://feeds.bloomberg.com/markets/news.rss',
+          economics: 'https://feeds.bloomberg.com/economics/news.rss',
+          industries: 'https://feeds.bloomberg.com/industries/news.rss',
+          tech: 'https://feeds.bloomberg.com/technology/news.rss',
+          politics: 'https://feeds.bloomberg.com/politics/news.rss',
+          businessweek: 'https://feeds.bloomberg.com/businessweek/news.rss',
+          opinions: 'https://feeds.bloomberg.com/bview/news.rss',
+        };
+        return Object.entries(feeds).map(([name, url]) => ({ name, url }));
+      })()
+
+columns: [name, url]

@@ -1,0 +1,73 @@
+site: google
+name: news
+domain: news.google.com
+description: Get Google News headlines
+strategy: public
+browser: false
+
+args:
+  keyword:
+    type: str
+    positional: true
+    required: false
+    description: Search query (omit for top stories)
+  limit:
+    type: int
+    default: 10
+    description: Number of results
+  lang:
+    type: str
+    default: en
+    description: "Language short code (e.g. en, zh)"
+  region:
+    type: str
+    default: US
+    description: "Region code (e.g. US, CN)"
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const limit = Math.max(1, Math.min(Number(args.limit), 100));
+        const lang = encodeURIComponent(args.lang);
+        const region = encodeURIComponent(args.region);
+        const ceid = `${args.region}:${args.lang}`;
+
+        const base = args.keyword
+          ? `https://news.google.com/rss/search?q=${encodeURIComponent(args.keyword)}&hl=${lang}&gl=${region}&ceid=${ceid}`
+          : `https://news.google.com/rss?hl=${lang}&gl=${region}&ceid=${ceid}`;
+
+        const resp = await fetch(base);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const xml = await resp.text();
+
+        function parseRssItems(xml, fields) {
+          const items = xml.match(/<item>([\s\S]*?)<\/item>/g) || [];
+          return items.map(block => {
+            const record = {};
+            for (const field of fields) {
+              const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const match = block.match(new RegExp(`<${escaped}(?:\\s[^>]*)?>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${escaped}>`));
+              record[field] = match ? match[1].trim() : '';
+            }
+            return record;
+          });
+        }
+
+        const items = parseRssItems(xml, ['title', 'link', 'pubDate', 'source']);
+        if (!items.length) throw new Error('No news articles found');
+
+        return items.slice(0, limit).map(item => {
+          let title = item.title || '';
+          let source = item.source || '';
+          if (!source) {
+            const idx = title.lastIndexOf(' - ');
+            if (idx !== -1) {
+              source = title.slice(idx + 3);
+              title = title.slice(0, idx);
+            }
+          }
+          return { title, source, date: item.pubDate || '', url: item.link || '' };
+        });
+      })()
+
+columns: [title, source, date, url]

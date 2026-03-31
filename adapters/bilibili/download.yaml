@@ -1,0 +1,50 @@
+site: bilibili
+name: download
+description: 下载B站视频（需要 yt-dlp）
+domain: www.bilibili.com
+strategy: cookie
+
+args:
+  bvid:
+    required: true
+    positional: true
+    description: Video BV ID (e.g., BV1xxx)
+  output:
+    default: ./bilibili-downloads
+    description: Output directory
+  quality:
+    default: best
+    description: "Video quality (best, 1080p, 720p, 480p)"
+
+columns: [bvid, title, status, size]
+
+pipeline:
+  - navigate:
+      url: "https://www.bilibili.com/video/${{ args.bvid }}"
+      settleMs: 3000
+
+  - evaluate: |
+      (async () => {
+        const bvid = args.bvid;
+        const title = document.querySelector('h1.video-title, .video-title')?.textContent?.trim() || 'video';
+        const author = document.querySelector('.up-name, .username')?.textContent?.trim() || 'unknown';
+
+        // Get cookies as Netscape format for yt-dlp
+        const cookies = document.cookie;
+
+        return {
+          bvid: bvid,
+          title: title,
+          author: author,
+          cookies: cookies,
+          url: 'https://www.bilibili.com/video/' + bvid,
+        };
+      })()
+
+  - download:
+      type: video
+      tool: yt-dlp
+      url: "${{ data.url }}"
+      title: "${{ data.title }}"
+      output: "${{ args.output }}"
+      quality: "${{ args.quality }}"

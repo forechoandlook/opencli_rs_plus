@@ -1,0 +1,43 @@
+site: yollomi
+name: video
+description: "Generate videos with AI (text-to-video or image-to-video)"
+domain: yollomi.com
+strategy: cookie
+browser: true
+
+args:
+  prompt:
+    positional: true
+    type: string
+    required: true
+    description: Text prompt describing the video
+  model:
+    type: string
+    default: kling-2-1
+    description: "Model (kling-2-1, openai-sora-2, etc.)"
+  image:
+    type: string
+    description: Input image URL for image-to-video
+  ratio:
+    type: string
+    default: "16:9"
+    choices: ["1:1", "16:9", "9:16", "4:3", "3:4"]
+    description: Aspect ratio
+  output:
+    type: string
+    default: ./yollomi-output
+    description: Output directory
+  no-download:
+    type: boolean
+    default: false
+    description: Only show URL, skip download
+
+columns: [status, file, size, credits, url]
+
+pipeline:
+  - navigate: https://yollomi.com
+  - wait: 2
+  - evaluate: |
+      (function() {
+        return [{ status: 'info', file: '-', size: '-', credits: '-', url: 'Yollomi video requires cookie API POST. Use the TypeScript adapter.' }];
+      })()

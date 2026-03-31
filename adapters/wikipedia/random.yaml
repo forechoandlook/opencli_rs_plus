@@ -1,0 +1,33 @@
+site: wikipedia
+name: random
+domain: en.wikipedia.org
+description: Get a random Wikipedia article
+strategy: public
+browser: false
+
+args:
+  lang:
+    type: str
+    default: en
+    description: "Language code (e.g. en, zh, ja)"
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const lang = args.lang || 'en';
+        const url = `https://${lang}.wikipedia.org/api/rest_v1/page/random/summary`;
+        const resp = await fetch(url, {
+          headers: { 'User-Agent': 'opencli/1.0 (https://github.com/jackwener/opencli)' }
+        });
+        if (!resp.ok) throw new Error(`Wikipedia API HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (!data?.title) throw new Error('No random article returned');
+        return [{
+          title: data.title,
+          description: data.description ?? '-',
+          extract: (data.extract ?? '').slice(0, 300),
+          url: data.content_urls?.desktop?.page ?? `https://${lang}.wikipedia.org`
+        }];
+      })()
+
+columns: [title, description, extract, url]

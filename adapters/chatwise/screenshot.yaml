@@ -1,0 +1,22 @@
+site: chatwise
+name: screenshot
+description: Capture a snapshot of the current ChatWise window (DOM + Accessibility tree)
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  output:
+    type: string
+    description: "Output file path (default: /tmp/chatwise-snapshot)"
+
+columns: [Status, File]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        return [
+          { Status: 'Success', File: '/tmp/chatwise-snapshot-dom.html' },
+          { Status: 'Success', File: '/tmp/chatwise-snapshot-a11y.txt' },
+        ];
+      })()

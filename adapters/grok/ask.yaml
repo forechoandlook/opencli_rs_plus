@@ -1,0 +1,69 @@
+site: grok
+name: ask
+description: Send a message to Grok and get response
+domain: grok.com
+strategy: cookie
+browser: true
+
+args:
+  prompt:
+    positional: true
+    type: string
+    required: true
+    description: Prompt to send to Grok
+  timeout:
+    type: int
+    default: 120
+    description: Max seconds to wait for response
+  new:
+    type: boolean
+    default: false
+    description: Start a new chat before sending
+  web:
+    type: boolean
+    default: false
+    description: Use the explicit grok.com consumer web flow
+
+columns: [response]
+
+pipeline:
+  - navigate: https://grok.com/
+  - wait: 3
+  - evaluate: |
+      (async () => {
+        const prompt = ${{ args.prompt | json }};
+        const timeoutMs = (${{ args.timeout }} || 120) * 1000;
+        const RESPONSE_SELECTOR = 'div.message-bubble, [data-testid="message-bubble"]';
+
+        // Try to send via textarea
+        const box = document.querySelector('textarea');
+        if (!box) return [{ response: '[SEND FAILED] No textarea found on grok.com' }];
+        box.focus(); box.value = '';
+        document.execCommand('selectAll');
+        document.execCommand('insertText', false, prompt);
+        await new Promise(r => setTimeout(r, 1500));
+
+        // Try submit button
+        const btn = document.querySelector('button[aria-label="Submit"]') || document.querySelector('button[type="submit"]');
+        if (btn && !btn.disabled) btn.click();
+        else box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+
+        const startTime = Date.now();
+        let lastText = '';
+        let stableCount = 0;
+
+        while (Date.now() - startTime < timeoutMs) {
+          await new Promise(r => setTimeout(r, 3000));
+          const bubbles = document.querySelectorAll(RESPONSE_SELECTOR);
+          if (bubbles.length < 2) continue;
+          const last = bubbles[bubbles.length - 1];
+          const text = (last.innerText || '').trim();
+          if (!text || text.length < 2) continue;
+          if (text === lastText) { stableCount++; if (stableCount >= 2) return [{ response: text }]; }
+          else stableCount = 0;
+          lastText = text;
+        }
+
+        if (lastText) return [{ response: lastText }];
+        return [{ response: '[NO RESPONSE] No new assistant message within ' + Math.round(timeoutMs / 1000) + 's.' }];
+      })()

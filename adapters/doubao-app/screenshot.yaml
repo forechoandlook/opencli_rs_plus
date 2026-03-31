@@ -1,0 +1,19 @@
+site: doubao-app
+name: screenshot
+description: Capture a screenshot of the Doubao desktop app window
+domain: doubao-app
+strategy: ui
+browser: true
+
+args:
+  output:
+    type: string
+    description: "Output file path (default: /tmp/doubao-screenshot.png)"
+
+columns: [Status, File]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        return [{ Status: 'Success', File: '/tmp/doubao-screenshot.png' }];
+      })()

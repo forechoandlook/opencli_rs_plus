@@ -1,0 +1,104 @@
+site: youtube
+name: video
+description: "Get YouTube video metadata (title, views, description, etc.)"
+domain: www.youtube.com
+strategy: cookie
+browser: true
+
+args:
+  url:
+    positional: true
+    type: string
+    required: true
+    description: "YouTube video URL or video ID"
+
+columns: [field, value]
+
+pipeline:
+  - evaluate: |
+      (() => {
+        const input = ${{ args.url | json }};
+        if (!input.startsWith('http')) return input;
+        try {
+          const parsed = new URL(input);
+          if (parsed.searchParams.has('v')) return parsed.searchParams.get('v');
+          if (parsed.hostname === 'youtu.be') return parsed.pathname.slice(1).split('/')[0];
+          const pathMatch = parsed.pathname.match(/^\/(shorts|embed|live|v)\/([^/?]+)/);
+          if (pathMatch) return pathMatch[2];
+        } catch {}
+        return input;
+      })()
+  - navigate: https://www.youtube.com/watch?v=${{ data }}
+  - wait: 3
+  - evaluate: |
+      (async () => {
+        const player = window.ytInitialPlayerResponse;
+        const yt = window.ytInitialData;
+        if (!player) throw new Error('ytInitialPlayerResponse not found');
+
+        const details = player.videoDetails || {};
+        const microformat = player.microformat?.playerMicroformatRenderer || {};
+
+        let fullDescription = details.shortDescription || '';
+        try {
+          const contents = yt?.contents?.twoColumnWatchNextResults?.results?.results?.contents;
+          if (contents) {
+            for (const c of contents) {
+              const desc = c.videoSecondaryInfoRenderer?.attributedDescription?.content;
+              if (desc) { fullDescription = desc; break; }
+            }
+          }
+        } catch {}
+
+        let likes = '';
+        try {
+          const contents = yt?.contents?.twoColumnWatchNextResults?.results?.results?.contents;
+          if (contents) {
+            for (const c of contents) {
+              const buttons = c.videoPrimaryInfoRenderer?.videoActions?.menuRenderer?.topLevelButtons;
+              if (buttons) {
+                for (const b of buttons) {
+                  const toggle = b.segmentedLikeDislikeButtonViewModel
+                    ?.likeButtonViewModel?.likeButtonViewModel?.toggleButtonViewModel
+                    ?.toggleButtonViewModel?.defaultButtonViewModel?.buttonViewModel;
+                  if (toggle?.title) { likes = toggle.title; break; }
+                }
+              }
+            }
+          }
+        } catch {}
+
+        const publishDate = microformat.publishDate || microformat.uploadDate || details.publishDate || '';
+        const category = microformat.category || '';
+
+        let subscribers = '';
+        try {
+          const contents = yt?.contents?.twoColumnWatchNextResults?.results?.results?.contents;
+          if (contents) {
+            for (const c of contents) {
+              const owner = c.videoSecondaryInfoRenderer?.owner?.videoOwnerRenderer?.subscriberCountText?.simpleText;
+              if (owner) { subscribers = owner; break; }
+            }
+          }
+        } catch {}
+
+        const data = {
+          title: details.title || '',
+          channel: details.author || '',
+          channelId: details.channelId || '',
+          videoId: details.videoId || '',
+          views: details.viewCount || '',
+          likes, subscribers,
+          duration: details.lengthSeconds ? details.lengthSeconds + 's' : '',
+          publishDate, category,
+          description: fullDescription,
+          keywords: (details.keywords || []).join(', '),
+          isLive: String(details.isLiveContent || false),
+          thumbnail: details.thumbnail?.thumbnails?.slice(-1)?.[0]?.url || '',
+        };
+
+        return Object.entries(data).map(([field, value]) => ({ field, value: String(value) }));
+      })()
+  - map:
+      field: ${{ item.field }}
+      value: ${{ item.value }}

@@ -1,0 +1,37 @@
+site: gemini
+name: mystuff
+description: List saved content from Gemini My stuff
+domain: gemini.google.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Max number of items to list
+
+columns: [title, type, link]
+
+pipeline:
+  - navigate: https://gemini.google.com/mystuff
+  - wait:
+      time: 4
+  - evaluate: |
+      (async () => {
+        const limit = ${{ args.limit }} || 20;
+        const items = [];
+        const links = document.querySelectorAll('a[href]');
+        for (const link of links) {
+          if (items.length >= limit) break;
+          const href = link.getAttribute('href');
+          if (!href || !href.includes('mystuff')) continue;
+          const text = (link.innerText || '').trim();
+          if (text && text.length > 2) {
+            const fullHref = href.startsWith('http') ? href : 'https://gemini.google.com' + href;
+            const type = text.includes('.pdf') ? 'PDF' : text.includes('.doc') ? 'Doc' : 'Saved';
+            items.push({ title: text.slice(0, 200), type, link: fullHref });
+          }
+        }
+        return items;
+      })()

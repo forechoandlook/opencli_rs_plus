@@ -1,0 +1,112 @@
+site: google
+name: search
+description: Search Google
+domain: google.com
+strategy: public
+browser: true
+
+args:
+  keyword:
+    type: str
+    required: true
+    positional: true
+    description: Search query
+  limit:
+    type: int
+    default: 10
+    description: Number of results (1-100)
+  lang:
+    type: str
+    default: en
+    description: "Language short code (e.g. en, zh)"
+
+pipeline:
+  - navigate:
+      url: "https://www.google.com/search?q=${{ args.keyword | urlencode }}&hl=${{ args.lang | urlencode }}&num=${{ args.limit }}"
+      settleMs: 2000
+
+  - evaluate: |
+      (function() {
+        var results = [];
+        var seenUrls = {};
+        var rso = document.querySelector('#rso');
+        if (!rso) return results;
+
+        // Featured snippet
+        var featuredEl = rso.querySelector('.xpdopen .hgKElc')
+                      || rso.querySelector('.IZ6rdc');
+        if (featuredEl) {
+          var parentBlock = featuredEl.closest('[data-hveid]') || featuredEl.parentElement;
+          var fLink = parentBlock ? parentBlock.querySelector('a[href]') : null;
+          var fUrl = fLink ? fLink.href : '';
+          if (fUrl) seenUrls[fUrl] = true;
+          results.push({
+            type: 'snippet',
+            title: featuredEl.textContent.trim().slice(0, 200),
+            url: fUrl,
+            snippet: ''
+          });
+        }
+
+        // Standard search results
+        var allLinks = rso.querySelectorAll('a');
+        for (var i = 0; i < allLinks.length; i++) {
+          var link = allLinks[i];
+          var h3 = link.querySelector('h3');
+          if (!h3) continue;
+
+          var href = link.href || '';
+          if (!href.match(/^https?:\/\//)) continue;
+          if (href.indexOf('google.com/search') !== -1) continue;
+          if (seenUrls[href]) continue;
+          seenUrls[href] = true;
+
+          var container = link;
+          for (var j = 0; j < 6; j++) {
+            if (container.parentElement && container.parentElement !== rso) {
+              container = container.parentElement;
+            }
+            if (container.getAttribute && container.getAttribute('data-hveid')) break;
+          }
+
+          var snippetText = '';
+          var titleText = h3.textContent.trim();
+          var candidates = container.querySelectorAll('span, div');
+          for (var k = 0; k < candidates.length; k++) {
+            var el = candidates[k];
+            if (el.querySelector('h3') || el.querySelector('a[href]')) continue;
+            var text = el.textContent.trim();
+            if (text.length < 40 || text.length > 500) continue;
+            if (text === titleText) continue;
+            if (text.indexOf('\u203A') !== -1) continue;
+            if (new RegExp('https?://').test(text.slice(0, 60))) continue;
+            snippetText = text;
+            break;
+          }
+
+          results.push({
+            type: 'result',
+            title: h3.textContent.trim(),
+            url: href,
+            snippet: snippetText.slice(0, 300)
+          });
+        }
+
+        // People Also Ask
+        var paaContainers = document.querySelectorAll('[data-sgrd="true"]');
+        for (var i = 0; i < paaContainers.length; i++) {
+          var questionEl = paaContainers[i].querySelector('span.CSkcDe');
+          if (questionEl) {
+            results.push({
+              type: 'paa',
+              title: questionEl.textContent.trim(),
+              url: '',
+              snippet: ''
+            });
+          }
+        }
+
+        return results;
+      })()
+
+columns: [type, title, url, snippet]

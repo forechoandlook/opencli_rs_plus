@@ -1,0 +1,54 @@
+site: sinablog
+name: user
+description: 获取新浪博客用户的文章列表
+domain: blog.sina.com.cn
+strategy: cookie
+browser: true
+
+args:
+  uid:
+    required: true
+    positional: true
+    type: str
+    description: 新浪博客用户ID（如 1234567890）
+  limit:
+    type: int
+    default: 20
+    description: 返回的文章数量
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const uid = '${{ args.uid }}';
+        const url = 'https://blog.sina.com.cn/s/articlelist_' + encodeURIComponent(uid) + '_0_1.html';
+        location.href = url;
+        await new Promise(r => setTimeout(r, 4000));
+
+        const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+        const limit = Math.max(1, Math.min(${{ args.limit }} || 20, 50));
+        const author = normalize(document.title).split('_').map(p => normalize(p)).filter(Boolean)[1] || '';
+        const abs = (href) => {
+          if (!href) return '';
+          if (href.startsWith('//')) return 'https:' + href;
+          if (href.startsWith('http')) return href;
+          return 'https://blog.sina.com.cn' + (href.startsWith('/') ? '' : '/') + href;
+        };
+        const results = [];
+        for (const item of Array.from(document.querySelectorAll('.articleList .articleCell'))) {
+          const link = item.querySelector('.atc_title a[href*="/s/blog_"]');
+          const title = normalize(link?.textContent);
+          const articleUrl = abs(link?.getAttribute('href') || '');
+          if (!title || !articleUrl) continue;
+          results.push({
+            rank: results.length + 1,
+            articleId: articleUrl.match(/blog_([a-zA-Z0-9]+)\.html/)?.[1] || '',
+            title, author,
+            date: normalize(item.querySelector('.atc_tm')?.textContent),
+            readCount: '', url: articleUrl,
+          });
+          if (results.length >= limit) break;
+        }
+        return results;
+      })()
+
+columns: [rank, title, author, date, readCount, url]

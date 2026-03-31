@@ -1,0 +1,37 @@
+site: apple-podcasts
+name: search
+domain: itunes.apple.com
+description: Search Apple Podcasts
+strategy: public
+browser: false
+
+args:
+  query:
+    type: str
+    required: true
+    positional: true
+    description: Search keyword
+  limit:
+    type: int
+    default: 10
+    description: Max results
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const term = encodeURIComponent(args.query);
+        const limit = Math.max(1, Math.min(Number(args.limit), 25));
+        const resp = await fetch(`https://itunes.apple.com/search?term=${term}&media=podcast&limit=${limit}`);
+        if (!resp.ok) throw new Error(`iTunes API HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (!data.results?.length) throw new Error('No podcasts found');
+        return data.results.map(p => ({
+          id: p.collectionId,
+          title: p.collectionName,
+          author: p.artistName,
+          episodes: p.trackCount ?? '-',
+          genre: p.primaryGenreName ?? '-'
+        }));
+      })()
+
+columns: [id, title, author, episodes, genre]

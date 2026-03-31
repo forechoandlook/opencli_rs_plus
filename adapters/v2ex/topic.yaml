@@ -1,0 +1,28 @@
+site: v2ex
+name: topic
+description: V2EX 主题详情和回复
+domain: www.v2ex.com
+strategy: public
+browser: false
+
+args:
+  id:
+    positional: true
+    type: str
+    required: true
+    description: Topic ID
+
+pipeline:
+  - fetch:
+      url: https://www.v2ex.com/api/topics/show.json
+      params:
+        id: ${{ args.id }}
+
+  - map:
+      title: ${{ item.title }}
+      replies: ${{ item.replies }}
+      url: ${{ item.url }}
+
+  - limit: 1
+
+columns: [title, replies, url]

@@ -1,0 +1,33 @@
+site: cursor
+name: send
+description: Send a prompt directly into Cursor Composer/Chat
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Text to send into Cursor
+
+columns: [Status, InjectedText]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const textToInsert = ${{ args.text | json }};
+
+        let composer = document.querySelector('.aislash-editor-input, [data-lexical-editor="true"], [contenteditable="true"]');
+        if (!composer) return [{ Status: 'Error', InjectedText: 'Could not find Cursor Composer input element.' }];
+
+        composer.focus();
+        document.execCommand('insertText', false, textToInsert);
+        await new Promise(r => setTimeout(r, 500));
+
+        composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+        await new Promise(r => setTimeout(r, 1000));
+
+        return [{ Status: 'Success', InjectedText: textToInsert }];
+      })()

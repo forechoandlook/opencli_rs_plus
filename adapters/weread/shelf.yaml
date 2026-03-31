@@ -1,0 +1,38 @@
+site: weread
+name: shelf
+description: List books on your WeRead bookshelf
+domain: weread.qq.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Max results
+
+pipeline:
+  - navigate:
+      url: https://weread.qq.com
+      settleMs: 3000
+
+  - evaluate: |
+      (async () => {
+        const limit = ${{ args.limit }} || 20;
+        const res = await fetch('/web/shelf/sync?synckey=0&lectureSynckey=0', { credentials: 'include' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (data?.errCode === -2010) throw new Error('Not logged in to WeRead');
+        const books = data?.books || [];
+        const progress = data?.bookProgress || [];
+        const progressMap = {};
+        progress.forEach(p => { progressMap[p.bookId] = p.progress; });
+        return books.slice(0, limit).map(item => ({
+          title: item.title || '',
+          author: item.author || '',
+          progress: progressMap[item.bookId] != null ? progressMap[item.bookId] + '%' : '-',
+          bookId: item.bookId || '',
+        }));
+      })()
+
+columns: [title, author, progress, bookId]

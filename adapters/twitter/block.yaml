@@ -1,0 +1,78 @@
+site: twitter
+name: block
+description: Block a Twitter user
+domain: x.com
+strategy: cookie
+browser: true
+
+args:
+  username:
+    type: str
+    positional: true
+    required: true
+    description: Twitter screen name (without @)
+
+columns: [status, message]
+
+pipeline:
+  - navigate:
+      url: https://x.com/${{ args.username }}
+      settleMs: 5000
+
+  - evaluate: |
+      (async () => {
+        try {
+          const username = ${{ args.username | json }}.replace(/^@/, '');
+          let attempts = 0;
+
+          while (attempts < 20) {
+            const blockedIndicator = document.querySelector('[data-testid$="-unblock"]');
+            if (blockedIndicator) {
+              return [{ status: 'success', message: 'Already blocking @' + username + '.' }];
+            }
+            const moreBtn = document.querySelector('[data-testid="userActions"]');
+            if (moreBtn) break;
+            await new Promise(r => setTimeout(r, 500));
+            attempts++;
+          }
+
+          const moreBtn = document.querySelector('[data-testid="userActions"]');
+          if (!moreBtn) {
+            return [{ status: 'failed', message: 'Could not find user actions menu. Are you logged in?' }];
+          }
+
+          moreBtn.click();
+          await new Promise(r => setTimeout(r, 1000));
+
+          const menuItems = document.querySelectorAll('[role="menuitem"]');
+          let blockItem = null;
+          for (const item of menuItems) {
+            if (item.textContent && item.textContent.includes('Block')) {
+              blockItem = item;
+              break;
+            }
+          }
+
+          if (!blockItem) {
+            return [{ status: 'failed', message: 'Could not find Block option in menu.' }];
+          }
+
+          blockItem.click();
+          await new Promise(r => setTimeout(r, 1000));
+
+          const confirmBtn = document.querySelector('[data-testid="confirmationSheetConfirm"]');
+          if (confirmBtn) {
+            confirmBtn.click();
+            await new Promise(r => setTimeout(r, 1500));
+          }
+
+          const verify = document.querySelector('[data-testid$="-unblock"]');
+          if (verify) {
+            return [{ status: 'success', message: 'Successfully blocked @' + username + '.' }];
+          } else {
+            return [{ status: 'failed', message: 'Block action initiated but UI did not update.' }];
+          }
+        } catch (e) {
+          return [{ status: 'failed', message: e.toString() }];
+        }
+      })()

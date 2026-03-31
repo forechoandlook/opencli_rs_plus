@@ -1,0 +1,58 @@
+site: arxiv
+name: search
+domain: export.arxiv.org
+description: Search arXiv papers
+strategy: public
+browser: false
+
+args:
+  query:
+    type: str
+    required: true
+    positional: true
+    description: 'Search keyword (e.g. "attention is all you need")'
+  limit:
+    type: int
+    default: 10
+    description: Max results (max 25)
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const limit = Math.max(1, Math.min(Number(args.limit), 25));
+        const query = encodeURIComponent(`all:${args.query}`);
+        const resp = await fetch(`https://export.arxiv.org/api/query?search_query=${query}&max_results=${limit}&sortBy=relevance`);
+        if (!resp.ok) throw new Error(`arXiv API HTTP ${resp.status}`);
+        const xml = await resp.text();
+
+        function extract(block, tag) {
+          const m = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
+          return m ? m[1].trim() : '';
+        }
+        function extractAll(block, tag) {
+          const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'g');
+          const results = [];
+          let m;
+          while ((m = re.exec(block)) !== null) results.push(m[1].trim());
+          return results;
+        }
+
+        const entryRe = /<entry>([\s\S]*?)<\/entry>/g;
+        const entries = [];
+        let m;
+        while ((m = entryRe.exec(xml)) !== null) {
+          const e = m[1];
+          const rawId = extract(e, 'id');
+          const arxivId = rawId.replace(/^https?:\/\/arxiv\.org\/abs\//, '').replace(/v\d+$/, '');
+          entries.push({
+            id: arxivId,
+            title: extract(e, 'title').replace(/\s+/g, ' '),
+            authors: extractAll(e, 'name').slice(0, 3).join(', '),
+            published: extract(e, 'published').slice(0, 10)
+          });
+        }
+        if (!entries.length) throw new Error('No papers found');
+        return entries;
+      })()
+
+columns: [id, title, authors, published]

@@ -1,0 +1,27 @@
+site: chatwise
+name: read
+description: Read the current ChatWise conversation history
+domain: localhost
+strategy: ui
+browser: true
+
+columns: [Content]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const selectors = ['[data-message-id]', '[class*="message"]', '[class*="chat-item"]', '[class*="bubble"]', '[role="log"] > *'];
+
+        for (const sel of selectors) {
+          const nodes = document.querySelectorAll(sel);
+          if (nodes.length > 0) {
+            const content = Array.from(nodes).map(n => (n.innerText || n.textContent).trim()).filter(Boolean).join('\n\n---\n\n');
+            return [{ Content: content }];
+          }
+        }
+
+        const main = document.querySelector('main, [role="main"], [class*="chat-container"], [class*="conversation"]');
+        if (main) return [{ Content: main.innerText || main.textContent }];
+
+        return [{ Content: document.body.innerText }];
+      })()

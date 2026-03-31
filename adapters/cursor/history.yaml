@@ -1,0 +1,37 @@
+site: cursor
+name: history
+description: List recent chat sessions from the Cursor sidebar
+domain: localhost
+strategy: ui
+browser: true
+
+columns: [Index, Title]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const results = [];
+        const entries = document.querySelectorAll('.agent-sidebar-list-item, [data-testid="chat-history-item"], .chat-history-item, .tree-item');
+
+        entries.forEach((item, i) => {
+          const title = (item.textContent || item.innerText || '').trim().substring(0, 100);
+          if (title) results.push({ Index: i + 1, Title: title });
+        });
+
+        if (results.length === 0) {
+          const sidebar = document.querySelector('.sidebar, [class*="sidebar"], .agent-sidebar, .side-bar-container');
+          if (sidebar) {
+            const links = sidebar.querySelectorAll('a, [role="treeitem"], [role="option"]');
+            links.forEach((link, i) => {
+              const text = (link.textContent || '').trim().substring(0, 100);
+              if (text) results.push({ Index: i + 1, Title: text });
+            });
+          }
+        }
+
+        if (results.length === 0) {
+          return [{ Index: 0, Title: 'No chat history found. Open the AI sidebar first.' }];
+        }
+
+        return results;
+      })()

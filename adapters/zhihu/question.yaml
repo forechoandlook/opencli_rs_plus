@@ -1,0 +1,66 @@
+site: zhihu
+name: question
+description: 知乎问题详情和回答
+domain: www.zhihu.com
+strategy: cookie
+browser: true
+
+args:
+  id:
+    type: str
+    required: true
+    positional: true
+    description: "Question ID (numeric)"
+  limit:
+    type: int
+    default: 5
+    description: Number of answers
+
+columns: [rank, author, votes, content]
+
+pipeline:
+  - navigate:
+      url: "https://www.zhihu.com/question/${{ args.id }}"
+      settleMs: 3000
+  - evaluate: |
+      (async () => {
+        const limit = args.limit || 5;
+        const stripHtml = (html) =>
+          (html || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();
+
+        // Try extracting from initial page data (SSR data)
+        const initData = window.__INITIAL_DATA__ || window.__NEXT_DATA__;
+        if (initData) {
+          try {
+            // Navigate the SSR data structure to find answers
+            const answers = initData?.initialState?.entities?.answers || {};
+            const answerList = Object.values(answers);
+            if (answerList.length > 0) {
+              return answerList.slice(0, limit).map((ans, i) => ({
+                rank: i + 1,
+                author: ans.author?.name || 'anonymous',
+                votes: ans.voteupCount || 0,
+                content: stripHtml(ans.content || '').slice(0, 200),
+              }));
+            }
+          } catch {}
+        }
+
+        // Fallback: extract from DOM
+        const answerItems = document.querySelectorAll('.AnswerItem, .List-item');
+        const results = [];
+        for (let i = 0; i < Math.min(answerItems.length, limit); i++) {
+          const item = answerItems[i];
+          const authorEl = item.querySelector('.AuthorInfo-name a, .UserLink-link');
+          const voteEl = item.querySelector('.VoteButton--up');
+          const contentEl = item.querySelector('.RichContent-inner, .RichText');
+          results.push({
+            rank: i + 1,
+            author: authorEl?.textContent?.trim() || 'anonymous',
+            votes: parseInt(voteEl?.textContent?.replace(/[^0-9]/g, '') || '0') || 0,
+            content: (contentEl?.innerText?.trim() || '').slice(0, 200),
+          });
+        }
+        if (results.length === 0) throw new Error('No answers found. Are you logged in?');
+        return results;
+      })()

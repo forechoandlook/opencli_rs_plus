@@ -1,0 +1,51 @@
+site: google
+name: trends
+domain: trends.google.com
+description: Get Google Trends daily trending searches
+strategy: public
+browser: false
+
+args:
+  region:
+    type: str
+    default: US
+    description: "Region code (e.g. US, CN, JP)"
+  limit:
+    type: int
+    default: 20
+    description: Number of results
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const limit = Math.max(1, Math.min(Number(args.limit), 100));
+        const region = encodeURIComponent(args.region);
+        const url = `https://trends.google.com/trending/rss?geo=${region}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const xml = await resp.text();
+
+        function parseRssItems(xml, fields) {
+          const items = xml.match(/<item>([\s\S]*?)<\/item>/g) || [];
+          return items.map(block => {
+            const record = {};
+            for (const field of fields) {
+              const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const match = block.match(new RegExp(`<${escaped}(?:\\s[^>]*)?>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${escaped}>`));
+              record[field] = match ? match[1].trim() : '';
+            }
+            return record;
+          });
+        }
+
+        const items = parseRssItems(xml, ['title', 'pubDate', 'ht:approx_traffic']);
+        if (!items.length) throw new Error('No trending data found');
+
+        return items.slice(0, limit).map(item => ({
+          title: item.title,
+          traffic: item['ht:approx_traffic'],
+          date: item.pubDate
+        }));
+      })()
+
+columns: [title, traffic, date]

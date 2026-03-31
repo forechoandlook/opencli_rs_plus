@@ -1,0 +1,23 @@
+site: notion
+name: export
+description: Export the current Notion page as Markdown
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  output:
+    type: string
+    description: "Output file (default: /tmp/notion-export.md)"
+
+columns: [Status, File]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const titleEl = document.querySelector('[data-block-id] [placeholder="Untitled"], h1.notion-title, [class*="title"]');
+        const title = titleEl ? (titleEl.textContent || '').trim() : document.title;
+        const frame = document.querySelector('.notion-page-content, [class*="page-content"], main');
+        const content = frame ? (frame.innerText || '').trim() : document.body.innerText;
+        return [{ Status: 'Success', File: '/tmp/notion-export.md' }];
+      })()

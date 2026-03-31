@@ -1,0 +1,31 @@
+site: cursor
+name: model
+description: Get or switch the currently active AI model in Cursor
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  model-name:
+    positional: true
+    type: string
+    description: The ID of the model to switch to (e.g. claude-3.5-sonnet)
+
+columns: [Status, Model]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const desiredModel = ${{ args["model-name"] | json }};
+
+        if (!desiredModel) {
+          const m = document.querySelector('.composer-unified-dropdown-model span, [class*="unifiedmodeldropdown"] span');
+          const currentModel = m ? m.textContent.trim() : 'Unknown or Not Found';
+          return [{ Status: 'Active', Model: currentModel }];
+        } else {
+          const dropdown = document.querySelector('.composer-unified-dropdown-model, [class*="unifiedmodeldropdown"]');
+          if (!dropdown) return [{ Status: 'Dropdown not found', Model: desiredModel }];
+          dropdown.click();
+          return [{ Status: 'Dropdown opened. Automated switching is not fully generic.', Model: desiredModel }];
+        }
+      })()

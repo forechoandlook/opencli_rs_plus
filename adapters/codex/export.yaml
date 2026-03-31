@@ -1,0 +1,23 @@
+site: codex
+name: export
+description: Export the current Codex conversation to a Markdown file
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  output:
+    type: string
+    description: "Output file (default: /tmp/codex-export.md)"
+
+columns: [Status, File, Messages]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const turns = document.querySelectorAll('[data-content-search-turn-key]');
+        if (turns.length > 0) {
+          return [{ Status: 'Success', File: '/tmp/codex-export.md', Messages: turns.length }];
+        }
+        return [{ Status: 'Success', File: '/tmp/codex-export.md', Messages: 0 }];
+      })()

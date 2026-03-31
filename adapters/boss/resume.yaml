@@ -1,0 +1,23 @@
+site: boss
+name: resume
+description: "BOSS直聘查看候选人简历（招聘端）"
+domain: www.zhipin.com
+strategy: cookie
+browser: true
+
+args:
+  uid:
+    positional: true
+    type: string
+    required: true
+    description: "Encrypted UID of the candidate (from chatlist)"
+
+columns: [name, gender, age, experience, degree, active_time, work_history, education, job_chatting, expect]
+
+pipeline:
+  - navigate: https://www.zhipin.com/web/chat/index
+  - wait: 3
+  - evaluate: |
+      (function() {
+        return [{ name: 'info', gender: '', age: '', experience: '', degree: '', active_time: '', work_history: '', education: '', job_chatting: '', expect: 'BOSS resume requires friend lookup + UI click + DOM scraping. Use the TypeScript adapter.' }];
+      })()

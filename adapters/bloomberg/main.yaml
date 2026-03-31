@@ -1,0 +1,56 @@
+site: bloomberg
+name: main
+description: Bloomberg homepage top stories (RSS)
+domain: feeds.bloomberg.com
+strategy: public
+browser: false
+
+args:
+  limit:
+    type: int
+    default: 1
+    description: Number of feed items to return (max 20)
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const limit = Math.max(1, Math.min(${{ args.limit }} || 1, 20));
+        const resp = await fetch('https://feeds.bloomberg.com/news.rss', {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; opencli)' }
+        });
+        if (!resp.ok) throw new Error('Bloomberg RSS HTTP ' + resp.status);
+        const xml = await resp.text();
+        const items = [];
+        const itemRegex = /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
+        let match;
+        const extractTag = (block, tag) => {
+          const m = block.match(new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)</' + tag + '>', 'i'));
+          if (!m) return '';
+          return m[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+        };
+        const extractMedia = (block) => {
+          const links = [];
+          const mediaRegex = /<(?:media:content|media:thumbnail|enclosure)\b[^>]*\burl="([^"]+)"[^>]*>/gi;
+          let m;
+          while ((m = mediaRegex.exec(block))) {
+            const url = m[1].trim();
+            if (url) links.push(url);
+          }
+          return links;
+        };
+        while ((match = itemRegex.exec(xml))) {
+          const block = match[1];
+          const title = extractTag(block, 'title');
+          const link = extractTag(block, 'link') || extractTag(block, 'guid');
+          if (!title || !link) continue;
+          items.push({
+            title,
+            summary: extractTag(block, 'description'),
+            link,
+            mediaLinks: extractMedia(block),
+          });
+        }
+        return items.slice(0, limit);
+      })()
+
+columns: [title, summary, link, mediaLinks]

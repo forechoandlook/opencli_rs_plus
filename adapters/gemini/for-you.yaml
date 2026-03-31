@@ -1,0 +1,52 @@
+site: gemini
+name: for-you
+description: Get personalized For You recommendations from Gemini
+domain: gemini.google.com
+strategy: cookie
+browser: true
+
+args:
+  timeout:
+    type: int
+    default: 120
+    description: Max seconds to wait
+
+columns: [response]
+
+pipeline:
+  - navigate: https://gemini.google.com/
+  - wait:
+      time: 3
+  - evaluate: |
+      (async () => {
+        const timeoutMs = (${{ args.timeout }} || 120) * 1000;
+
+        // Click For you card
+        const forYouBtn = document.querySelector('button[aria-label*="For you"]');
+        if (!forYouBtn) return [{ response: '[FAILED] For you button not found' }];
+        forYouBtn.click();
+        await new Promise(r => setTimeout(r, 2000));
+
+        const startTime = Date.now();
+        let lastText = '';
+        let stableCount = 0;
+
+        while (Date.now() - startTime < timeoutMs) {
+          await new Promise(r => setTimeout(r, 4000));
+          const responses = document.querySelectorAll('.model-response-text');
+          if (responses.length === 0) continue;
+          const last = responses[responses.length - 1];
+          const text = (last.innerText || '').trim();
+          if (!text || text.length < 5) continue;
+          if (text === lastText) {
+            stableCount++;
+            if (stableCount >= 2) return [{ response: text }];
+          } else {
+            stableCount = 0;
+          }
+          lastText = text;
+        }
+
+        if (lastText) return [{ response: lastText }];
+        return [{ response: '[TIMEOUT] For you timed out' }];
+      })()

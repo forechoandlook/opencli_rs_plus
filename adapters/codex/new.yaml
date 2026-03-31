@@ -1,0 +1,16 @@
+site: codex
+name: new
+description: Start a new Codex conversation thread / isolated workspace
+domain: localhost
+strategy: ui
+browser: true
+
+columns: [Status, Action]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', code: 'KeyN', metaKey: true, bubbles: true }));
+        await new Promise(r => setTimeout(r, 1000));
+        return [{ Status: 'Success', Action: 'Pressed Meta+N to trigger New Thread' }];
+      })()

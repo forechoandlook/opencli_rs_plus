@@ -1,0 +1,34 @@
+site: weibo
+name: hot
+description: 微博热搜
+domain: weibo.com
+
+args:
+  limit:
+    type: int
+    default: 30
+    description: Number of items (max 50)
+
+pipeline:
+  - navigate: https://weibo.com
+
+  - evaluate: |
+      (async () => {
+        const resp = await fetch('/ajax/statuses/hot_band', {credentials: 'include'});
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        if (!data.ok) return [];
+        const bandList = data.data?.band_list || [];
+        return bandList.map((item, i) => ({
+          rank: item.realpos || (i + 1),
+          word: item.word,
+          hot_value: item.num || 0,
+          category: item.category || '',
+          label: item.label_name || '',
+          url: 'https://s.weibo.com/weibo?q=' + encodeURIComponent('#' + item.word + '#')
+        }));
+      })()
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, word, hot_value, category, label, url]

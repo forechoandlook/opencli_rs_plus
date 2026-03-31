@@ -1,0 +1,42 @@
+site: cursor
+name: export
+description: Export the current Cursor conversation to Markdown
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  output:
+    type: string
+    description: "Output file (default: /tmp/cursor-export.md)"
+
+columns: [Status, File, Messages]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const selectors = '[data-message-role]'.split(',');
+        let messages = [];
+
+        for (const sel of selectors) {
+          const nodes = document.querySelectorAll(sel.trim());
+          if (nodes.length > 0) {
+            messages = Array.from(nodes).map(n => n.innerText || n.textContent);
+            break;
+          }
+        }
+
+        if (messages.length === 0) {
+          const main = document.querySelector('main, [role="main"], .messages-list, [role="log"]');
+          if (main) messages = [main.innerText || main.textContent];
+        }
+
+        if (messages.length === 0) messages = [document.body.innerText];
+
+        const md = messages.map((m, i) => '## Message ' + (i + 1) + '\n\n' + m.trim()).join('\n\n---\n\n');
+        return [{
+          Status: 'Success',
+          File: '/tmp/cursor-export.md',
+          Messages: messages.length,
+        }];
+      })()

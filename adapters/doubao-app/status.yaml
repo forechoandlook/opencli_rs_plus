@@ -1,0 +1,14 @@
+site: doubao-app
+name: status
+description: Check CDP connection to Doubao desktop app
+domain: doubao-app
+strategy: ui
+browser: true
+
+columns: [Status, Url, Title]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        return [{ Status: 'Connected', Url: window.location.href, Title: document.title }];
+      })()

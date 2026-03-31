@@ -1,0 +1,111 @@
+site: zhihu
+name: download
+description: 导出知乎文章为 Markdown 格式
+domain: www.zhihu.com
+strategy: cookie
+browser: true
+
+args:
+  url:
+    type: str
+    required: true
+    positional: true
+    description: "Article or answer URL"
+  output:
+    default: ./zhihu-articles
+    description: Output directory
+
+columns: [title, author, status, size]
+
+pipeline:
+  - navigate:
+      url: "${{ args.url }}"
+      settleMs: 3000
+
+  - evaluate: |
+      (() => {
+        const title = document.querySelector('.Post-Title, h1.ContentItem-title, .ArticleTitle, .QuestionHeader-title')?.textContent?.trim() || 'untitled';
+        const author = document.querySelector('.AuthorInfo-name, .UserLink-link')?.textContent?.trim() || 'unknown';
+        const timeEl = document.querySelector('.ContentItem-time, .Post-Time');
+        const publishTime = timeEl?.textContent?.trim() || '';
+        const contentEl = document.querySelector('.Post-RichTextContainer, .RichContent-inner, .RichText');
+        if (!contentEl) return [{ title, author, status: 'failed', size: 'No content found' }];
+
+        function htmlToMd(el) {
+          let md = '';
+          for (const node of el.childNodes) {
+            if (node.nodeType === 3) { md += node.textContent; continue; }
+            if (node.nodeType !== 1) continue;
+            const tag = node.tagName.toLowerCase();
+            if (tag === 'h1') md += '\n# ' + node.textContent.trim() + '\n\n';
+            else if (tag === 'h2') md += '\n## ' + node.textContent.trim() + '\n\n';
+            else if (tag === 'h3') md += '\n### ' + node.textContent.trim() + '\n\n';
+            else if (tag === 'p') md += htmlToMd(node).trim() + '\n\n';
+            else if (tag === 'br') md += '\n';
+            else if (tag === 'strong' || tag === 'b') md += '**' + node.textContent + '**';
+            else if (tag === 'em' || tag === 'i') md += '*' + node.textContent + '*';
+            else if (tag === 'a') md += '[' + node.textContent + '](' + (node.href || '') + ')';
+            else if (tag === 'img') {
+              const src = node.getAttribute('data-original') || node.getAttribute('data-actualsrc') || node.getAttribute('data-src') || node.getAttribute('data-lazy-src') || node.src || '';
+              if (src && !src.includes('data:image')) {
+                let imgSrc = src;
+                if (imgSrc.startsWith('//')) imgSrc = 'https:' + imgSrc;
+                md += '\n![image](' + imgSrc + ')\n\n';
+              }
+            }
+            else if (tag === 'noscript') {
+              // zhihu wraps real img inside noscript for lazy loading
+              const inner = node.textContent || node.innerHTML || '';
+              const srcMatch = inner.match(/src=["']([^"']+)["']/);
+              if (srcMatch) {
+                let imgSrc = srcMatch[1];
+                if (imgSrc.startsWith('//')) imgSrc = 'https:' + imgSrc;
+                if (!imgSrc.includes('data:image')) md += '\n![image](' + imgSrc + ')\n\n';
+              }
+            }
+            else if (tag === 'blockquote') md += '\n> ' + node.textContent.trim().replace(/\n/g, '\n> ') + '\n\n';
+            else if (tag === 'pre' || tag === 'code') md += '\n```\n' + node.textContent + '\n```\n\n';
+            else if (tag === 'ul' || tag === 'ol') {
+              let idx = 0;
+              for (const li of node.querySelectorAll(':scope > li')) {
+                idx++;
+                md += (tag === 'ol' ? idx + '. ' : '- ') + li.textContent.trim() + '\n';
+              }
+              md += '\n';
+            }
+            else if (tag === 'figure' || tag === 'div' || tag === 'span') md += htmlToMd(node);
+            else md += node.textContent;
+          }
+          return md;
+        }
+
+        const markdown = htmlToMd(contentEl);
+
+        // Extract image URLs from the generated markdown to ensure exact match
+        const imageUrls = [];
+        const imgRe = /!\[([^\]]*)\]\(([^)]+)\)/g;
+        let m;
+        while ((m = imgRe.exec(markdown)) !== null) {
+          if (!imageUrls.includes(m[2])) imageUrls.push(m[2]);
+        }
+        const safeTitle = title.replace(/[\/\\:*?"<>|]/g, '_').slice(0, 80);
+        const output = args.output || './zhihu-articles';
+        const content = '---\ntitle: "' + title.replace(/"/g, '\\"') + '"\nauthor: "' + author.replace(/"/g, '\\"') + '"\n' + (publishTime ? 'date: "' + publishTime + '"\n' : '') + 'source: "' + args.url + '"\n---\n\n' + markdown;
+
+        return {
+          title: title,
+          author: author,
+          filename: safeTitle + '.md',
+          imageUrls: imageUrls,
+          referer: 'https://zhuanlan.zhihu.com/',
+          content: content,
+          output: output,
+        };
+      })()
+
+  - download:
+      type: article
+      title: "${{ data.title }}"
+      output: "${{ data.output }}"
+      filename: "${{ data.filename }}"
+      content: "${{ data.content }}"

@@ -1,0 +1,87 @@
+site: barchart
+name: flow
+description: "Barchart unusual options activity / options flow"
+domain: www.barchart.com
+strategy: cookie
+browser: true
+
+args:
+  type:
+    type: string
+    default: all
+    description: "Filter: all, call, or put"
+  limit:
+    type: int
+    default: 20
+    description: Number of results
+
+columns: [symbol, type, strike, expiration, last, volume, openInterest, volOiRatio, iv]
+
+pipeline:
+  - navigate: https://www.barchart.com/options/unusual-activity/stocks
+  - wait: 5
+  - evaluate: |
+      (async () => {
+        const limit = ${{ args.limit }};
+        const typeFilter = ${{ args.type | json }}.toLowerCase();
+
+        let csrf = '';
+        for (let i = 0; i < 10; i++) {
+          csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+          if (csrf) break;
+          await new Promise(r => setTimeout(r, 500));
+        }
+        if (!csrf) throw new Error('Could not extract CSRF token from barchart.com. Make sure you are logged in.');
+
+        const headers = { 'X-CSRF-TOKEN': csrf };
+        const fields = [
+          'baseSymbol','strikePrice','expirationDate','optionType',
+          'lastPrice','volume','openInterest','volumeOpenInterestRatio','volatility',
+        ].join(',');
+
+        const fetchLimit = typeFilter !== 'all' ? limit * 3 : limit;
+        const lists = ['options.unusual_activity.stocks.us', 'options.mostActive.us'];
+
+        for (const list of lists) {
+          try {
+            const url = '/proxies/core-api/v1/options/get?list=' + list
+              + '&fields=' + fields
+              + '&orderBy=volumeOpenInterestRatio&orderDir=desc'
+              + '&raw=1&limit=' + fetchLimit;
+            const resp = await fetch(url, { credentials: 'include', headers });
+            if (!resp.ok) continue;
+            const d = await resp.json();
+            let items = d?.data || [];
+            if (items.length === 0) continue;
+
+            if (typeFilter !== 'all') {
+              items = items.filter(i => ((i.raw || i).optionType || '').toLowerCase() === typeFilter);
+            }
+            return items.slice(0, limit).map(i => {
+              const r = i.raw || i;
+              return {
+                symbol: r.baseSymbol || r.symbol || '',
+                type: r.optionType || '',
+                strike: r.strikePrice,
+                expiration: r.expirationDate || null,
+                last: r.lastPrice != null ? Number(Number(r.lastPrice).toFixed(2)) : null,
+                volume: r.volume,
+                openInterest: r.openInterest,
+                volOiRatio: r.volumeOpenInterestRatio != null ? Number(Number(r.volumeOpenInterestRatio).toFixed(2)) : null,
+                iv: r.volatility != null ? Number(Number(r.volatility).toFixed(2)) + '%' : null,
+              };
+            });
+          } catch(e) {}
+        }
+        return [];
+      })()
+  - map:
+      symbol: ${{ item.symbol }}
+      type: ${{ item.type }}
+      strike: ${{ item.strike }}
+      expiration: ${{ item.expiration }}
+      last: ${{ item.last }}
+      volume: ${{ item.volume }}
+      openInterest: ${{ item.openInterest }}
+      volOiRatio: ${{ item.volOiRatio }}
+      iv: ${{ item.iv }}

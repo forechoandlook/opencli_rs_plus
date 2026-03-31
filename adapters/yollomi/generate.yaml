@@ -1,0 +1,43 @@
+site: yollomi
+name: generate
+description: "Generate images with AI (text-to-image or image-to-image)"
+domain: yollomi.com
+strategy: cookie
+browser: true
+
+args:
+  prompt:
+    positional: true
+    type: string
+    required: true
+    description: Text prompt describing the image
+  model:
+    type: string
+    default: z-image-turbo
+    description: "Model name"
+  image:
+    type: string
+    description: "Input image URL for image-to-image"
+  ratio:
+    type: string
+    default: "1:1"
+    choices: ["1:1", "16:9", "9:16", "4:3", "3:4"]
+    description: Aspect ratio
+  output:
+    type: string
+    default: ./yollomi-output
+    description: Output directory
+  no-download:
+    type: boolean
+    default: false
+    description: Only show URL
+
+columns: [status, file, size, credits, url]
+
+pipeline:
+  - navigate: https://yollomi.com
+  - wait: 2
+  - evaluate: |
+      (function() {
+        return [{ status: 'info', file: '-', size: '-', credits: '-', url: 'Yollomi generate requires cookie API POST. Use the TypeScript adapter.' }];
+      })()

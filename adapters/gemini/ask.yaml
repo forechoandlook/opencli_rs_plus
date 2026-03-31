@@ -1,0 +1,83 @@
+site: gemini
+name: ask
+description: Send a prompt to Gemini and get response
+domain: gemini.google.com
+strategy: cookie
+browser: true
+
+args:
+  prompt:
+    positional: true
+    type: string
+    required: true
+    description: Prompt to send to Gemini
+  timeout:
+    type: int
+    default: 120
+    description: Max seconds to wait for response
+  new:
+    type: boolean
+    default: false
+    description: Start a new chat before sending
+
+columns: [response]
+
+pipeline:
+  - navigate: https://gemini.google.com/
+  - wait: 3
+  - evaluate: |
+      (async () => {
+        const prompt = ${{ args.prompt | json }};
+        const timeoutMs = (${{ args.timeout }} || 120) * 1000;
+
+        // Start new chat if requested
+        if (${{ args.new }}) {
+          const newBtn = document.querySelector('a[href="/app"], button[aria-label="New chat"]');
+          if (newBtn) newBtn.click();
+          await new Promise(r => setTimeout(r, 2000));
+        }
+
+        // Focus and type in the input box
+        const INPUT_SELECTOR = 'div[aria-label="Enter a prompt for Gemini"]';
+        const SEND_SELECTOR = 'button[aria-label="Send message"]';
+
+        let box = document.querySelector(INPUT_SELECTOR);
+        if (!box) return [{ response: '[SEND FAILED] No input box found on gemini.google.com' }];
+
+        box.focus();
+        await new Promise(r => setTimeout(r, 300));
+        document.execCommand('selectAll');
+        document.execCommand('insertText', false, prompt);
+        await new Promise(r => setTimeout(r, 1500));
+
+        // Click send button
+        const btn = document.querySelector(SEND_SELECTOR);
+        if (btn && !btn.disabled) btn.click();
+        else box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+
+        const startTime = Date.now();
+        let lastText = '';
+        let stableCount = 0;
+
+        while (Date.now() - startTime < timeoutMs) {
+          await new Promise(r => setTimeout(r, 3000));
+
+          // Find the last response text (model-response-text elements)
+          const responses = document.querySelectorAll('.model-response-text');
+          if (responses.length === 0) continue;
+
+          const last = responses[responses.length - 1];
+          const text = (last.innerText || '').trim();
+          if (!text || text.length < 2) continue;
+          if (text === lastText) {
+            stableCount++;
+            if (stableCount >= 2) return [{ response: text }];
+          } else {
+            stableCount = 0;
+          }
+          lastText = text;
+        }
+
+        if (lastText) return [{ response: lastText }];
+        return [{ response: '[NO RESPONSE] No new assistant message within ' + Math.round(timeoutMs / 1000) + 's.' }];
+      })()

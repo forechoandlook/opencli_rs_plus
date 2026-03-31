@@ -1,0 +1,50 @@
+site: reddit
+name: subscribe
+description: Subscribe or unsubscribe to a subreddit
+domain: reddit.com
+strategy: cookie
+browser: true
+
+args:
+  subreddit:
+    positional: true
+    type: string
+    required: true
+    description: "Subreddit name (e.g. python)"
+  undo:
+    type: bool
+    default: false
+    description: Unsubscribe instead of subscribe
+
+columns: [status, message]
+
+pipeline:
+  - navigate: https://www.reddit.com
+  - evaluate: |
+      (async () => {
+        let sub = ${{ args.subreddit | json }};
+        if (sub.startsWith('r/')) sub = sub.slice(2);
+
+        const undo = ${{ args.undo | json }};
+        const action = undo ? 'unsub' : 'sub';
+
+        const meRes = await fetch('/api/me.json', { credentials: 'include' });
+        const me = await meRes.json();
+        const modhash = me?.data?.modhash || '';
+
+        const res = await fetch('/api/subscribe', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'sr_name=' + encodeURIComponent(sub)
+            + '&action=' + action
+            + (modhash ? '&uh=' + encodeURIComponent(modhash) : ''),
+        });
+
+        if (!res.ok) return [{ status: 'failed', message: 'HTTP ' + res.status }];
+        const label = undo ? 'Unsubscribed from' : 'Subscribed to';
+        return [{ status: 'success', message: label + ' r/' + sub }];
+      })()
+  - map:
+      status: ${{ item.status }}
+      message: ${{ item.message }}

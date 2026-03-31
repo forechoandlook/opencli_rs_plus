@@ -1,0 +1,42 @@
+site: chatwise
+name: send
+description: Send a message to the active ChatWise conversation
+domain: localhost
+strategy: ui
+browser: true
+
+args:
+  text:
+    positional: true
+    type: string
+    required: true
+    description: Message to send
+
+columns: [Status, InjectedText]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const text = ${{ args.text | json }};
+
+        let composer = document.querySelector('textarea');
+        if (!composer) {
+          const editables = Array.from(document.querySelectorAll('[contenteditable="true"]'));
+          composer = editables.length > 0 ? editables[editables.length - 1] : null;
+        }
+        if (!composer) return [{ Status: 'Error', InjectedText: 'Could not find ChatWise input element' }];
+
+        composer.focus();
+        if (composer.tagName === 'TEXTAREA') {
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+          nativeInputValueSetter.call(composer, text);
+          composer.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+          document.execCommand('insertText', false, text);
+        }
+
+        await new Promise(r => setTimeout(r, 500));
+        composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+
+        return [{ Status: 'Success', InjectedText: text }];
+      })()

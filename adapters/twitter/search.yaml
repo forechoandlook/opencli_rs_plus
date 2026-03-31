@@ -1,0 +1,76 @@
+site: twitter
+name: search
+description: Search Twitter/X for tweets
+domain: x.com
+strategy: intercept
+browser: true
+
+args:
+  query:
+    type: str
+    required: true
+    positional: true
+  limit:
+    type: int
+    default: 15
+
+columns: [id, author, text, likes, views, url]
+
+pipeline:
+  - navigate:
+      url: https://x.com/explore
+      settleMs: 3000
+
+  - intercept:
+      pattern: SearchTimeline
+      collect: false
+
+  - evaluate: |
+      (() => {
+        const searchUrl = '/search?q=' + encodeURIComponent(${{ args.query | json }}) + '&f=top';
+        window.history.pushState({}, '', searchUrl);
+        window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
+      })()
+
+  - wait: 5
+
+  - scroll:
+      times: 3
+      delayMs: 2000
+
+  - collect:
+      parse: |
+        (requests) => {
+          let results = [];
+          const seen = new Set();
+          for (const req of requests) {
+            try {
+              const insts = req?.data?.search_by_raw_query?.search_timeline?.timeline?.instructions || [];
+              const addEntries = insts.find(i => i.type === 'TimelineAddEntries')
+                || insts.find(i => i.entries && Array.isArray(i.entries));
+              if (!addEntries?.entries) continue;
+              for (const entry of addEntries.entries) {
+                if (!entry.entryId.startsWith('tweet-')) continue;
+                let tweet = entry.content?.itemContent?.tweet_results?.result;
+                if (!tweet) continue;
+                if (tweet.__typename === 'TweetWithVisibilityResults' && tweet.tweet) {
+                  tweet = tweet.tweet;
+                }
+                if (!tweet.rest_id || seen.has(tweet.rest_id)) continue;
+                seen.add(tweet.rest_id);
+                const tweetUser = tweet.core?.user_results?.result;
+                results.push({
+                  id: tweet.rest_id,
+                  author: tweetUser?.core?.screen_name || tweetUser?.legacy?.screen_name || 'unknown',
+                  text: tweet.note_tweet?.note_tweet_results?.result?.text || tweet.legacy?.full_text || '',
+                  likes: tweet.legacy?.favorite_count || 0,
+                  views: tweet.views?.count || '0',
+                  url: 'https://x.com/i/status/' + tweet.rest_id,
+                });
+              }
+            } catch (e) {}
+          }
+          return results;
+        }
+
+  - limit: ${{ args.limit }}

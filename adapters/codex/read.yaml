@@ -1,0 +1,24 @@
+site: codex
+name: read
+description: Read the contents of the current Codex conversation thread
+domain: localhost
+strategy: ui
+browser: true
+
+columns: [Content]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const turns = Array.from(document.querySelectorAll('[data-content-search-turn-key]'));
+        if (turns.length > 0) {
+          return [{ Content: turns.map(t => t.innerText || t.textContent).join('\n\n---\n\n') }];
+        }
+
+        const threadContainer = document.querySelector('[role="log"], [data-testid="conversation"], .thread-container, .messages-list, main');
+        if (threadContainer) {
+          return [{ Content: threadContainer.innerText || threadContainer.textContent }];
+        }
+
+        return [{ Content: document.body.innerText }];
+      })()

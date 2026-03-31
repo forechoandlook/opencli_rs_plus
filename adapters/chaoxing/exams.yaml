@@ -1,0 +1,31 @@
+site: chaoxing
+name: exams
+description: "学习通考试列表"
+domain: mooc2-ans.chaoxing.com
+strategy: cookie
+browser: true
+timeoutSeconds: 90
+
+args:
+  course:
+    type: string
+    description: "按课程名过滤（模糊匹配）"
+  status:
+    type: string
+    default: all
+    choices: [all, upcoming, ongoing, finished]
+    description: "按状态过滤"
+  limit:
+    type: int
+    default: 20
+    description: "最大返回数量"
+
+columns: [rank, course, title, start, end, status, score]
+
+pipeline:
+  - navigate: https://mooc2-ans.chaoxing.com/mooc2-ans/visit/interaction
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        return [{ rank: 1, course: 'info', title: 'Chaoxing exams requires multi-course iframe navigation chain.', start: '', end: '', status: 'Use the TypeScript adapter for full functionality.', score: '' }];
+      })()

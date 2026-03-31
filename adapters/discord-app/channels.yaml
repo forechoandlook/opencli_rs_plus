@@ -1,0 +1,35 @@
+site: discord-app
+name: channels
+description: List channels in the current Discord server
+domain: localhost
+strategy: ui
+browser: true
+
+columns: [Index, Channel, Type]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const results = [];
+        const links = document.querySelectorAll('a[href*="/channels/"][data-list-item-id^="channels___"]');
+        links.forEach(function(el) {
+          var label = el.getAttribute('aria-label') || '';
+          if (!label) return;
+          if (/[（(]category[）)]/i.test(label)) return;
+          var commaIdx = label.search(/[,，]/);
+          var cleaned = commaIdx !== -1 ? label.slice(commaIdx + 1).trimStart() : label;
+          var m = cleaned.match(/^(.+?)\s*[（(](.+?)[）)]\s*$/);
+          if (!m) return;
+          var name = m[1].trim();
+          var rawType = m[2].toLowerCase();
+          if (!name || !/^[\x20-\x7E]+$/.test(name)) return;
+          var type = 'Text';
+          if (rawType.includes('voice')) type = 'Voice';
+          else if (rawType.includes('forum')) type = 'Forum';
+          else if (rawType.includes('announcement')) type = 'Announcement';
+          else if (rawType.includes('stage')) type = 'Stage';
+          results.push({ Index: results.length + 1, Channel: name, Type: type });
+        });
+        if (results.length === 0) return [{ Index: 0, Channel: 'No channels found', Type: '-' }];
+        return results;
+      })()

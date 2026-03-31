@@ -1,0 +1,18 @@
+site: chatwise
+name: status
+description: Check active CDP connection to ChatWise Desktop
+domain: localhost
+strategy: ui
+browser: true
+
+columns: [Status, Url, Title]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        return [{
+          Status: 'Connected',
+          Url: window.location.href,
+          Title: document.title,
+        }];
+      })()

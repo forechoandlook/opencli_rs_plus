@@ -1,0 +1,64 @@
+site: ctrip
+name: search
+description: "携程旅行搜索"
+domain: www.ctrip.com
+strategy: cookie
+browser: true
+
+args:
+  query:
+    positional: true
+    type: string
+    required: true
+    description: "Search keyword (city or attraction)"
+  limit:
+    type: int
+    default: 15
+    description: Number of results
+
+columns: [rank, name, type, score, price, url]
+
+pipeline:
+  - navigate: https://www.ctrip.com
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        const query = ${{ args.query | json }};
+        const limit = ${{ args.limit }};
+
+        try {
+          const suggestUrl = 'https://m.ctrip.com/restapi/h5api/searchapp/search?action=onekeyali&keyword=' + encodeURIComponent(query);
+          const resp = await fetch(suggestUrl, {credentials: 'include'});
+          if (resp.ok) {
+            const d = await resp.json();
+            const raw = d.data || d.result || d;
+            if (raw && typeof raw === 'object') {
+              const items = [];
+              for (const key of Object.keys(raw)) {
+                const list = Array.isArray(raw[key]) ? raw[key] : [];
+                for (const item of list) {
+                  if (items.length >= limit) break;
+                  items.push({
+                    rank: items.length + 1,
+                    name: item.word || item.name || item.title || '',
+                    type: item.type || item.tpName || key,
+                    score: item.score || '',
+                    price: item.price || item.minPrice || '',
+                    url: item.url || item.surl || '',
+                  });
+                }
+              }
+              if (items.length > 0) return items;
+            }
+          }
+        } catch(e) {}
+
+        return [];
+      })()
+  - map:
+      rank: ${{ item.rank }}
+      name: ${{ item.name }}
+      type: ${{ item.type }}
+      score: ${{ item.score }}
+      price: ${{ item.price }}
+      url: ${{ item.url }}

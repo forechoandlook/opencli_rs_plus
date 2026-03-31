@@ -1,0 +1,19 @@
+site: antigravity
+name: read
+description: Read the current Antigravity conversation
+domain: localhost
+strategy: ui
+browser: true
+
+columns: [Role, Text]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const messages = Array.from(document.querySelectorAll('[data-message-role], [class*="message"], [class*="bubble"]'));
+        if (messages.length === 0) return [{ Role: 'System', Text: 'No conversation found.' }];
+        return messages.map(msg => {
+          const text = (msg.innerText || msg.textContent || '').trim();
+          return { Role: 'Message', Text: text };
+        }).filter(m => m.Text);
+      })()

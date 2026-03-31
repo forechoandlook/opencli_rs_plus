@@ -1,0 +1,23 @@
+site: yollomi
+name: upload
+description: "Upload an image or video to Yollomi (returns URL for other commands)"
+domain: yollomi.com
+strategy: cookie
+browser: true
+
+args:
+  file:
+    positional: true
+    type: string
+    required: true
+    description: Local file path to upload
+
+columns: [status, url, size]
+
+pipeline:
+  - navigate: https://yollomi.com
+  - wait: 2
+  - evaluate: |
+      (function() {
+        return [{ status: 'info', url: '-', size: 'Yollomi upload requires FormData POST with file reading. Use the TypeScript adapter.' }];
+      })()

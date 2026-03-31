@@ -1,0 +1,55 @@
+site: arxiv
+name: paper
+domain: export.arxiv.org
+description: Get arXiv paper details by ID
+strategy: public
+browser: false
+
+args:
+  id:
+    type: str
+    required: true
+    positional: true
+    description: "arXiv paper ID (e.g. 1706.03762)"
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const resp = await fetch(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(args.id)}`);
+        if (!resp.ok) throw new Error(`arXiv API HTTP ${resp.status}`);
+        const xml = await resp.text();
+
+        function extract(block, tag) {
+          const m = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
+          return m ? m[1].trim() : '';
+        }
+        function extractAll(block, tag) {
+          const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'g');
+          const results = [];
+          let m;
+          while ((m = re.exec(block)) !== null) results.push(m[1].trim());
+          return results;
+        }
+
+        const entryRe = /<entry>([\s\S]*?)<\/entry>/g;
+        const entries = [];
+        let m;
+        while ((m = entryRe.exec(xml)) !== null) {
+          const e = m[1];
+          const rawId = extract(e, 'id');
+          const arxivId = rawId.replace(/^https?:\/\/arxiv\.org\/abs\//, '').replace(/v\d+$/, '');
+          const abs = extract(e, 'summary').replace(/\s+/g, ' ');
+          entries.push({
+            id: arxivId,
+            title: extract(e, 'title').replace(/\s+/g, ' '),
+            authors: extractAll(e, 'name').slice(0, 3).join(', '),
+            published: extract(e, 'published').slice(0, 10),
+            abstract: abs.length > 200 ? abs.slice(0, 200) + '...' : abs,
+            url: `https://arxiv.org/abs/${arxivId}`
+          });
+        }
+        if (!entries.length) throw new Error(`Paper ${args.id} not found`);
+        return entries;
+      })()
+
+columns: [id, title, authors, published, abstract, url]

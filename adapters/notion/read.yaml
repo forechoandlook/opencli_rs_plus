@@ -1,0 +1,18 @@
+site: notion
+name: read
+description: Read the content of the currently open Notion page
+domain: localhost
+strategy: ui
+browser: true
+
+columns: [Title, Content]
+
+pipeline:
+  - evaluate: |
+      (function() {
+        const titleEl = document.querySelector('[data-block-id] [placeholder="Untitled"], .notion-page-block .notranslate, h1.notion-title, [class*="title"]');
+        const title = titleEl ? (titleEl.textContent || '').trim() : document.title;
+        const frame = document.querySelector('.notion-page-content, [class*="page-content"], .layout-content, main');
+        const content = frame ? (frame.innerText || frame.textContent || '').trim() : '';
+        return [{ Title: title || 'Untitled', Content: content || '(empty page)' }];
+      })()

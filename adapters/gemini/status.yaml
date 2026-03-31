@@ -1,0 +1,33 @@
+site: gemini
+name: status
+description: Check Gemini login and account status
+domain: gemini.google.com
+strategy: cookie
+browser: true
+
+columns: [field, value]
+
+pipeline:
+  - navigate: https://gemini.google.com/
+  - wait:
+      time: 5
+  - evaluate: |
+      (async () => {
+        const accountBtn = document.querySelector('[aria-label*="Google Account"]');
+        const isLoggedIn = !!accountBtn;
+        const accountText = accountBtn ? accountBtn.getAttribute('aria-label') : 'Not logged in';
+
+        // Check PRO badge: button with class gds-pillbox-button containing "PRO"
+        const pillbox = document.querySelector('.gds-pillbox-button');
+        const hasPro = pillbox && pillbox.textContent.includes('PRO');
+
+        // Also check aria-label
+        const proBtn = document.querySelector('[aria-label="PRO"]');
+        const plan = (hasPro || proBtn) ? 'Pro' : 'Free';
+
+        return [
+          { field: 'logged_in', value: isLoggedIn ? 'Yes' : 'No' },
+          { field: 'account', value: accountText },
+          { field: 'plan', value: plan }
+        ];
+      })()

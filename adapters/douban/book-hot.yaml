@@ -1,0 +1,55 @@
+site: douban
+name: book-hot
+description: 豆瓣图书热门榜单
+domain: book.douban.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: 返回的图书数量
+
+pipeline:
+  - navigate: https://book.douban.com/chart
+
+  - evaluate: |
+      (async () => {
+        await new Promise(r => setTimeout(r, 4000));
+        const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+        const limit = Math.max(1, Math.min(${{ args.limit }} || 20, 50));
+        const books = [];
+        for (const el of Array.from(document.querySelectorAll('.media.clearfix'))) {
+          try {
+            const titleEl = el.querySelector('h2 a[href*="/subject/"]');
+            const title = normalize(titleEl?.textContent);
+            let url = titleEl?.getAttribute('href') || '';
+            if (!title || !url) continue;
+            if (!url.startsWith('http')) url = 'https://book.douban.com' + url;
+
+            const info = normalize(el.querySelector('.subject-abstract, .pl, .pub')?.textContent);
+            const infoParts = info.split('/').map((part) => part.trim()).filter(Boolean);
+            const ratingText = normalize(el.querySelector('.subject-rating .font-small, .rating_nums, .rating')?.textContent);
+            const quote = Array.from(el.querySelectorAll('.subject-tags .tag'))
+              .map((node) => normalize(node.textContent))
+              .filter(Boolean)
+              .join(' / ');
+
+            books.push({
+              rank: parseInt(normalize(el.querySelector('.green-num-box')?.textContent), 10) || books.length + 1,
+              title,
+              rating: parseFloat(ratingText) || 0,
+              quote,
+              author: infoParts[0] || '',
+              publisher: infoParts.find((part) => /出版社|出版公司|Press/i.test(part)) || infoParts[2] || '',
+              year: infoParts.find((part) => /\d{4}(?:-\d{1,2})?/.test(part))?.match(/\d{4}/)?.[0] || '',
+              url,
+            });
+            if (books.length >= limit) break;
+          } catch {}
+        }
+        return books;
+      })()
+
+columns: [rank, title, rating, quote, author, publisher, year, url]
