@@ -117,9 +117,133 @@ fn build_cli(registry: &Registry, external_clis: &[ExternalCli]) -> Command {
                 .arg(Arg::new("url").required(true).help("URL to generate adapter for"))
                 .arg(Arg::new("goal").long("goal").help("What you want (e.g. hot, search, trending)"))
                 .arg(Arg::new("site").long("site").help("Override site name")),
+        )
+        .subcommand(
+            Command::new("summary")
+                .about("Show adapter summaries")
+                .subcommand(Command::new("show").about("Show details of a specific adapter").arg(Arg::new("adapter").required(true).help("Adapter name"))),
         );
 
     app
+}
+
+fn find_summaries_dir() -> Option<std::path::PathBuf> {
+    // 1. Local ./summaries/ in dev mode
+    let local = std::path::PathBuf::from("summaries");
+    if local.exists() && local.is_dir() {
+        return Some(local);
+    }
+    // 2. ~/.opencli-rs/summaries/
+    if let Ok(home) = std::env::var("HOME") {
+        let user = std::path::PathBuf::from(home).join(".opencli-rs").join("summaries");
+        if user.exists() && user.is_dir() {
+            return Some(user);
+        }
+    }
+    None
+}
+
+fn read_summary_content(summaries_dir: &std::path::Path, adapter: &str) -> Option<String> {
+    let path = summaries_dir.join(format!("{}.md", adapter));
+    std::fs::read_to_string(&path).ok()
+}
+
+fn run_summary() {
+    let mut adapters_sorted: Vec<(String, String)> = Vec::new();
+
+    // 1. Scan summaries/ directory
+    if let Some(dir) = find_summaries_dir() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("md") {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let adapter_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                        let description = parse_description_from_summary(&content);
+                        if !description.is_empty() {
+                            adapters_sorted.push((adapter_name.to_string(), description));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Scan adapters/{name}/summary.md files
+    let adapter_dirs = std::path::PathBuf::from("adapters");
+    if adapter_dirs.exists() {
+        if let Ok(entries) = std::fs::read_dir(&adapter_dirs) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let summary_path = path.join("summary.md");
+                    if summary_path.exists() {
+                        if let Ok(content) = std::fs::read_to_string(&summary_path) {
+                            let adapter_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                            let description = parse_description_from_summary(&content);
+                            if !description.is_empty() {
+                                adapters_sorted.push((adapter_name.to_string(), description));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    adapters_sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    adapters_sorted.dedup_by(|a, b| a.0 == b.0);
+
+    for (name, desc) in adapters_sorted {
+        println!("{}: {}", name, desc);
+    }
+}
+
+fn parse_description_from_summary(content: &str) -> String {
+    content
+        .lines()
+        .find(|l| l.trim().starts_with("description:"))
+        .and_then(|l| l.splitn(2, ':').nth(1))
+        .map(|s| s.trim().trim_matches('"').trim())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn run_summary_show(adapter: &str) {
+    // 1. Try ./summaries/{adapter}.md or ~/.opencli-rs/summaries/{adapter}.md
+    if let Some(dir) = find_summaries_dir() {
+        if let Some(content) = read_summary_content(&dir, adapter) {
+            println!("{}", content);
+            return;
+        }
+    }
+
+    // 2. Try ./adapters/{adapter}/summary.md (local dev)
+    let local = std::path::PathBuf::from("adapters").join(adapter).join("summary.md");
+    if local.exists() {
+        if let Ok(content) = std::fs::read_to_string(&local) {
+            println!("{}", content);
+            return;
+        }
+    }
+
+    // 3. Try ~/.opencli-rs/adapters/{adapter}/summary.md
+    if let Ok(home) = std::env::var("HOME") {
+        let user = std::path::PathBuf::from(home)
+            .join(".opencli-rs")
+            .join("adapters")
+            .join(adapter)
+            .join("summary.md");
+        if user.exists() {
+            if let Ok(content) = std::fs::read_to_string(&user) {
+                println!("{}", content);
+                return;
+            }
+        }
+    }
+
+    eprintln!("Adapter '{}' not found in summaries.", adapter);
+    std::process::exit(1);
 }
 
 fn print_error(err: &opencli_rs_core::CliError) {
@@ -309,6 +433,20 @@ async fn main() {
                     }
                     Err(e) => { print_error(&e); std::process::exit(1); }
                 }
+                return;
+            }
+            "summary" => {
+                if let Some((sub_name, sub_matches)) = site_matches.subcommand() {
+                    match sub_name {
+                        "show" => {
+                            let adapter = sub_matches.get_one::<String>("adapter").unwrap();
+                            run_summary_show(adapter);
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+                run_summary();
                 return;
             }
             "generate" => {
