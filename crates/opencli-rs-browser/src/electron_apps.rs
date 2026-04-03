@@ -24,14 +24,70 @@ pub struct ElectronApp {
 /// Builtin Electron app registry (mirrors TS electron-apps.ts).
 pub fn builtin_apps() -> HashMap<&'static str, ElectronApp> {
     let mut m = HashMap::new();
-    m.insert("cursor",      ElectronApp { port: 9226, process_name: "Cursor",      display_name: "Cursor" });
-    m.insert("codex",       ElectronApp { port: 9222, process_name: "Codex",        display_name: "Codex" });
-    m.insert("chatwise",    ElectronApp { port: 9228, process_name: "ChatWise",     display_name: "ChatWise" });
-    m.insert("notion",      ElectronApp { port: 9230, process_name: "Notion",       display_name: "Notion" });
-    m.insert("discord-app", ElectronApp { port: 9232, process_name: "Discord",      display_name: "Discord" });
-    m.insert("doubao-app",  ElectronApp { port: 9225, process_name: "Doubao",       display_name: "Doubao" });
-    m.insert("antigravity", ElectronApp { port: 9234, process_name: "Antigravity",  display_name: "Antigravity" });
-    m.insert("chatgpt",     ElectronApp { port: 9236, process_name: "ChatGPT",      display_name: "ChatGPT" });
+    m.insert(
+        "cursor",
+        ElectronApp {
+            port: 9226,
+            process_name: "Cursor",
+            display_name: "Cursor",
+        },
+    );
+    m.insert(
+        "codex",
+        ElectronApp {
+            port: 9222,
+            process_name: "Codex",
+            display_name: "Codex",
+        },
+    );
+    m.insert(
+        "chatwise",
+        ElectronApp {
+            port: 9228,
+            process_name: "ChatWise",
+            display_name: "ChatWise",
+        },
+    );
+    m.insert(
+        "notion",
+        ElectronApp {
+            port: 9230,
+            process_name: "Notion",
+            display_name: "Notion",
+        },
+    );
+    m.insert(
+        "discord-app",
+        ElectronApp {
+            port: 9232,
+            process_name: "Discord",
+            display_name: "Discord",
+        },
+    );
+    m.insert(
+        "doubao-app",
+        ElectronApp {
+            port: 9225,
+            process_name: "Doubao",
+            display_name: "Doubao",
+        },
+    );
+    m.insert(
+        "antigravity",
+        ElectronApp {
+            port: 9234,
+            process_name: "Antigravity",
+            display_name: "Antigravity",
+        },
+    );
+    m.insert(
+        "chatgpt",
+        ElectronApp {
+            port: 9236,
+            process_name: "ChatGPT",
+            display_name: "ChatGPT",
+        },
+    );
     m
 }
 
@@ -39,9 +95,61 @@ pub fn builtin_apps() -> HashMap<&'static str, ElectronApp> {
 #[derive(Debug, Deserialize)]
 struct UserApp {
     port: u16,
+    #[allow(dead_code)]
     process_name: String,
     #[serde(default)]
+    #[allow(dead_code)]
     display_name: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_builtin_apps() {
+        let apps = builtin_apps();
+        assert!(apps.contains_key("cursor"));
+        assert_eq!(apps.get("cursor").unwrap().port, 9226);
+        assert_eq!(apps.get("cursor").unwrap().process_name, "Cursor");
+
+        assert!(apps.contains_key("notion"));
+        assert_eq!(apps.get("notion").unwrap().port, 9230);
+    }
+
+    #[test]
+    fn test_get_app_port_builtin() {
+        assert_eq!(get_app_port("discord-app"), Some(9232));
+        assert_eq!(get_app_port("unknown-app"), None);
+    }
+
+    #[test]
+    fn test_user_app_parsing() {
+        let yaml = "
+my-custom-app:
+  port: 12345
+  process_name: MyCustomApp
+  display_name: Custom App
+my-other-app:
+  port: 54321
+  process_name: OtherApp
+";
+        let map: HashMap<String, UserApp> = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(map.get("my-custom-app").unwrap().port, 12345);
+        assert_eq!(
+            map.get("my-custom-app").unwrap().process_name,
+            "MyCustomApp"
+        );
+        assert_eq!(
+            map.get("my-custom-app").unwrap().display_name.as_deref(),
+            Some("Custom App")
+        );
+
+        assert_eq!(map.get("my-other-app").unwrap().port, 54321);
+        assert_eq!(map.get("my-other-app").unwrap().display_name, None);
+    }
 }
 
 /// Look up the CDP port for a site. Checks builtin registry first, then
@@ -90,20 +198,27 @@ pub async fn probe_cdp(port: u16) -> Result<String, CliError> {
         ))
     })?;
 
-    let targets: Vec<CdpTarget> = resp.json().await.map_err(|e| {
-        CliError::browser_connect(format!("Failed to parse CDP targets: {e}"))
-    })?;
+    let targets: Vec<CdpTarget> = resp
+        .json()
+        .await
+        .map_err(|e| CliError::browser_connect(format!("Failed to parse CDP targets: {e}")))?;
 
     // Pick best target: prefer page type, skip devtools/extension urls
-    let best = targets.iter().find(|t| {
-        t.ws_url.is_some()
-            && t.target_type.as_deref() == Some("page")
-            && !t.url.as_deref().unwrap_or("").starts_with("devtools://")
-            && !t.url.as_deref().unwrap_or("").starts_with("chrome-extension://")
-    }).or_else(|| targets.iter().find(|t| t.ws_url.is_some()));
+    let best = targets
+        .iter()
+        .find(|t| {
+            t.ws_url.is_some()
+                && t.target_type.as_deref() == Some("page")
+                && !t.url.as_deref().unwrap_or("").starts_with("devtools://")
+                && !t
+                    .url
+                    .as_deref()
+                    .unwrap_or("")
+                    .starts_with("chrome-extension://")
+        })
+        .or_else(|| targets.iter().find(|t| t.ws_url.is_some()));
 
-    best.and_then(|t| t.ws_url.clone())
-        .ok_or_else(|| CliError::browser_connect(
-            format!("No inspectable targets found on port {port}")
-        ))
+    best.and_then(|t| t.ws_url.clone()).ok_or_else(|| {
+        CliError::browser_connect(format!("No inspectable targets found on port {port}"))
+    })
 }

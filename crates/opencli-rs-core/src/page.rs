@@ -165,10 +165,7 @@ pub trait IPage: Send + Sync {
     async fn set_cookies(&self, cookies: Vec<Cookie>) -> Result<(), CliError>;
 
     /// Take a screenshot
-    async fn screenshot(
-        &self,
-        options: Option<ScreenshotOptions>,
-    ) -> Result<Vec<u8>, CliError>;
+    async fn screenshot(&self, options: Option<ScreenshotOptions>) -> Result<Vec<u8>, CliError>;
 
     /// Get an accessibility snapshot of the page
     async fn snapshot(&self, options: Option<SnapshotOptions>) -> Result<Value, CliError>;

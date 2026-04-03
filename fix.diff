@@ -1,0 +1,108 @@
+<<<<<<< SEARCH
+    pub fn set_done(&self, id: &str, result: Option<&str>) -> Result<Option<DateTime<Utc>>> {
+        let now = Utc::now();
+        let conn = self.conn.lock().unwrap();
+        let next_run_at: Option<DateTime<Utc>> = conn.query_row(
+            "SELECT interval_seconds FROM jobs WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, Option<i64>>(0).map(|opt| opt.map(|i| now + chrono::Duration::seconds(i)))
+        )?;
+
+        if let Some(next) = next_run_at {
+            // Reschedule for next interval
+            conn.execute(
+                "UPDATE jobs SET status = 'pending', result = ?1, error = NULL, end_at = ?2,
+                 run_at = ?3, updated_at = ?2 WHERE id = ?4",
+                params![result, now.to_rfc3339(), next.to_rfc3339(), id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE jobs SET status = 'done', result = ?1, error = NULL, end_at = ?2, updated_at = ?2 WHERE id = ?3",
+                params![result, now.to_rfc3339(), id],
+            )?;
+        }
+        Ok(next_run_at)
+    }
+
+    pub fn set_failed(&self, id: &str, error: &str, retry_count: i32, max_retries: i32) -> Result<bool> {
+        let now = Utc::now();
+        let should_retry = retry_count < max_retries;
+        let status = if should_retry { "pending" } else { "failed" };
+        let next_run = if should_retry {
+            // Exponential backoff: 2^retry * 30 seconds
+            let delay_secs = 30 * 2_i64.pow(retry_count as u32);
+            (now + chrono::Duration::seconds(delay_secs)).to_rfc3339()
+        } else {
+            now.to_rfc3339()
+        };
+
+        let conn = self.conn.lock().unwrap();
+        if should_retry {
+            conn.execute(
+                "UPDATE jobs SET status = ?1, error = ?2, retry_count = ?3, run_at = ?4, updated_at = ?4 WHERE id = ?5",
+                params![status, error, retry_count + 1, next_run, id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE jobs SET status = ?1, error = ?2, retry_count = ?3, end_at = ?4, updated_at = ?4 WHERE id = ?5",
+                params![status, error, retry_count + 1, now.to_rfc3339(), id],
+            )?;
+        }
+        Ok(should_retry)
+    }
+=======
+    pub fn set_done(&self, id: &str, result: Option<&str>) -> Result<Option<DateTime<Utc>>> {
+        let now = Utc::now();
+        let conn = self.conn.lock().unwrap();
+
+        let interval: Option<i64> = conn.query_row(
+            "SELECT interval_seconds FROM jobs WHERE id = ?1",
+            params![id],
+            |row| row.get(0)
+        )?;
+
+        let next_run_at = interval.filter(|&i| i > 0).map(|i| now + chrono::Duration::seconds(i));
+
+        if let Some(next) = next_run_at {
+            // Reschedule for next interval
+            conn.execute(
+                "UPDATE jobs SET status = 'pending', result = ?1, error = NULL, end_at = ?2,
+                 run_at = ?3, updated_at = ?2 WHERE id = ?4",
+                params![result, now.to_rfc3339(), next.to_rfc3339(), id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE jobs SET status = 'done', result = ?1, error = NULL, end_at = ?2, updated_at = ?2 WHERE id = ?3",
+                params![result, now.to_rfc3339(), id],
+            )?;
+        }
+        Ok(next_run_at)
+    }
+
+    pub fn set_failed(&self, id: &str, error: &str, retry_count: i32, max_retries: i32) -> Result<bool> {
+        let now = Utc::now();
+        let should_retry = retry_count < max_retries;
+        let status = if should_retry { "pending" } else { "failed" };
+        let next_run = if should_retry {
+            // Exponential backoff: 2^retry * 30 seconds
+            let delay_secs = 30 * 2_i64.pow(retry_count as u32);
+            (now + chrono::Duration::seconds(delay_secs)).to_rfc3339()
+        } else {
+            now.to_rfc3339()
+        };
+
+        let conn = self.conn.lock().unwrap();
+        if should_retry {
+            conn.execute(
+                "UPDATE jobs SET status = ?1, error = ?2, retry_count = ?3, run_at = ?4, updated_at = ?4 WHERE id = ?5",
+                params![status, error, retry_count + 1, next_run, id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE jobs SET status = ?1, error = ?2, retry_count = ?3, end_at = ?4, updated_at = ?4 WHERE id = ?5",
+                params![status, error, retry_count + 1, now.to_rfc3339(), id],
+            )?;
+        }
+        Ok(should_retry)
+    }
+>>>>>>> REPLACE

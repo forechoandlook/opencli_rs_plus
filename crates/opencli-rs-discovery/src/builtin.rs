@@ -167,7 +167,11 @@ pub fn discover_adapters(registry: &mut Registry) -> Result<usize, CliError> {
     let dir = adapters_dir();
 
     // Empty or missing directory — nothing to load
-    if !dir.exists() || fs::read_dir(&dir).map(|mut d| d.next().is_none()).unwrap_or(true) {
+    if !dir.exists()
+        || fs::read_dir(&dir)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true)
+    {
         return Ok(0);
     }
 

@@ -38,14 +38,8 @@ impl StepHandler for SelectStep {
         let mut current = data.clone();
         for segment in parse_path_segments(path) {
             current = match segment {
-                PathSegment::Key(key) => current
-                    .get(&key)
-                    .cloned()
-                    .unwrap_or(Value::Null),
-                PathSegment::Index(idx) => current
-                    .get(idx)
-                    .cloned()
-                    .unwrap_or(Value::Null),
+                PathSegment::Key(key) => current.get(&key).cloned().unwrap_or(Value::Null),
+                PathSegment::Index(idx) => current.get(idx).cloned().unwrap_or(Value::Null),
             };
         }
 
@@ -332,8 +326,9 @@ impl StepHandler for DumpStep {
         // Create parent directories if needed
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| CliError::pipeline(format!("dump: failed to create directory: {e}")))?;
+                fs::create_dir_all(parent).map_err(|e| {
+                    CliError::pipeline(format!("dump: failed to create directory: {e}"))
+                })?;
             }
         }
 
@@ -402,10 +397,15 @@ impl StepHandler for LimitStep {
                 let val = render_template_str(s, &ctx)?;
                 val.as_u64()
                     .or_else(|| val.as_str().and_then(|s| s.parse::<u64>().ok()))
-                    .ok_or_else(|| CliError::pipeline("limit: template did not resolve to a number"))?
-                    as usize
+                    .ok_or_else(|| {
+                        CliError::pipeline("limit: template did not resolve to a number")
+                    })? as usize
             }
-            _ => return Err(CliError::pipeline("limit: params must be a number or template string")),
+            _ => {
+                return Err(CliError::pipeline(
+                    "limit: params must be a number or template string",
+                ))
+            }
         };
 
         let truncated: Vec<Value> = arr.iter().take(n).cloned().collect();
@@ -547,7 +547,12 @@ mod tests {
         let step = DumpStep;
         let data = json!([{"title": "Hello"}, {"title": "World"}]);
         let result = step
-            .execute(None, &json!(file_path.to_string_lossy().as_ref()), &data, &empty_args())
+            .execute(
+                None,
+                &json!(file_path.to_string_lossy().as_ref()),
+                &data,
+                &empty_args(),
+            )
             .await
             .unwrap();
 
@@ -556,9 +561,11 @@ mod tests {
 
         // File should be written (path contains resolved timestamp)
         let entries = fs::read_dir(&tmp_dir).unwrap();
-        let written: Option<_> = entries
-            .filter_map(|e| e.ok())
-            .find(|e| e.file_name().to_string_lossy().starts_with("opencli_test_dump_"));
+        let written: Option<_> = entries.filter_map(|e| e.ok()).find(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("opencli_test_dump_")
+        });
 
         assert!(written.is_some(), "dump file was not created");
         let written_path = written.unwrap().path();
