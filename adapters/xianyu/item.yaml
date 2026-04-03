@@ -1,0 +1,77 @@
+site: xianyu
+name: item
+description: 查看闲鱼商品详情
+domain: www.goofish.com
+strategy: cookie
+browser: true
+
+args:
+  item_id:
+    type: str
+    required: true
+    positional: true
+    description: 闲鱼商品 item_id
+
+pipeline:
+  - navigate: https://www.goofish.com/item?id=${{ args.item_id }}
+
+  - wait: 2
+
+  - evaluate: |
+      (async () => {
+        const itemId = ${{ args.item_id | json }};
+        const waitFor = async (predicate, ms = 5000) => {
+          const start = Date.now();
+          while (Date.now() - start < ms) {
+            if (predicate()) return true;
+            await new Promise(r => setTimeout(r, 150));
+          }
+          return false;
+        };
+        await waitFor(() => window.lib?.mtop?.request);
+        if (!window.lib?.mtop?.request) return [{ error: 'mtop-not-ready' }];
+        let response;
+        try {
+          response = await window.lib.mtop.request({
+            api: 'mtop.taobao.idle.pc.detail',
+            data: { itemId },
+            type: 'POST',
+            v: '1.0',
+            dataType: 'json',
+            needLogin: false,
+            needLoginPC: false,
+            sessionOption: 'AutoLoginOnly',
+            ecode: 0,
+          });
+        } catch(e) { return [{ error: 'request-failed', message: String(e?.ret || e?.message || e) }]; }
+        const data = response?.data || {};
+        const item = data.itemDO || {};
+        const seller = data.sellerDO || {};
+        const labels = Array.isArray(item.itemLabelExtList) ? item.itemLabelExtList : [];
+        const findLabel = (name) => labels.find(l => (l.propertyText || '').trim() === name)?.text || '';
+        const clean = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+        return [{
+          item_id: clean(item.itemId || itemId),
+          title: clean(item.title || ''),
+          price: item.soldPrice ? ('¥' + item.soldPrice) : (item.defaultPrice ? '¥' + item.defaultPrice : ''),
+          original_price: clean(item.originalPrice || ''),
+          condition: clean(findLabel('成色')),
+          brand: clean(findLabel('品牌')),
+          location: clean(seller.publishCity || seller.city || ''),
+          seller_name: clean(seller.nick || seller.uniqueName || ''),
+          want_count: String(item.wantCnt ?? ''),
+          status: clean(item.itemStatusStr || ''),
+        }];
+      })()
+
+  - map:
+      item_id: ${{ item.item_id }}
+      title: ${{ item.title }}
+      price: ${{ item.price }}
+      condition: ${{ item.condition }}
+      brand: ${{ item.brand }}
+      location: ${{ item.location }}
+      seller_name: ${{ item.seller_name }}
+      want_count: ${{ item.want_count }}
+
+columns: [item_id, title, price, condition, brand, location, seller_name, want_count]

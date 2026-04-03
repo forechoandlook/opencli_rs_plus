@@ -1,0 +1,69 @@
+site: imdb
+name: search
+description: Search IMDb for movies, TV shows, and people
+domain: www.imdb.com
+strategy: public
+browser: true
+
+args:
+  query:
+    type: str
+    required: true
+    positional: true
+    description: Search query
+  limit:
+    type: int
+    default: 20
+    description: Number of results (max 50)
+
+pipeline:
+  - navigate: https://www.imdb.com/find/?q=${{ args.query | urlencode }}&ref_=nv_sr_sm&accept-language=en-US
+
+  - wait: 2
+
+  - evaluate: |
+      (() => {
+        const limit = ${{ args.limit | json }};
+        const results = [];
+        const nextDataEl = document.getElementById('__NEXT_DATA__');
+        if (nextDataEl) {
+          try {
+            const nextData = JSON.parse(nextDataEl.textContent || 'null');
+            const pageProps = nextData && nextData.props && nextData.props.pageProps;
+            if (pageProps) {
+              const titleResults = (pageProps.titleResults && pageProps.titleResults.results) || [];
+              for (const tr of titleResults) {
+                const tItem = tr.listItem || {};
+                const tId = tr.index || '';
+                let tTitle = typeof tItem.originalTitleText === 'string' ? tItem.originalTitleText : (tItem.originalTitleText && tItem.originalTitleText.text) || '';
+                if (!tTitle) tTitle = typeof tItem.titleText === 'string' ? tItem.titleText : (tItem.titleText && tItem.titleText.text) || '';
+                let tYear = '';
+                if (typeof tItem.releaseYear === 'number' || typeof tItem.releaseYear === 'string') tYear = String(tItem.releaseYear);
+                else if (tItem.releaseYear && typeof tItem.releaseYear === 'object') tYear = String(tItem.releaseYear.year || '');
+                results.push({ id: tId, title: tTitle, year: tYear, type: tItem.titleType || '', url: tId ? 'https://www.imdb.com/title/' + tId + '/' : '' });
+              }
+              const nameResults = (pageProps.nameResults && pageProps.nameResults.results) || [];
+              for (const nr of nameResults) {
+                const nItem = nr.listItem || {};
+                const nId = nr.index || '';
+                let nTitle = typeof nItem.nameText === 'string' ? nItem.nameText : (nItem.nameText && nItem.nameText.text) || '';
+                const nType = Array.isArray(nItem.primaryProfessions) && nItem.primaryProfessions.length > 0 ? String(nItem.primaryProfessions[0]) : 'Person';
+                results.push({ id: nId, title: nTitle, year: '', type: nType, url: nId ? 'https://www.imdb.com/name/' + nId + '/' : '' });
+              }
+            }
+          } catch(e) {}
+        }
+        return results.slice(0, limit).map((item, i) => ({ rank: i + 1, ...item }));
+      })()
+
+  - map:
+      rank: ${{ item.rank }}
+      id: ${{ item.id }}
+      title: ${{ item.title }}
+      year: ${{ item.year }}
+      type: ${{ item.type }}
+      url: ${{ item.url }}
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, id, title, year, type]

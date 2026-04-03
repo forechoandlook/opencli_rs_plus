@@ -1,6 +1,7 @@
 mod adapter_manager;
 mod index;
 mod issues;
+mod plugin;
 mod scheduler;
 mod socket;
 mod store;
@@ -70,11 +71,14 @@ async fn main() -> Result<()> {
         sched.run_loop().await;
     });
 
+    let plugin_manager = adapter_manager.plugin_manager();
+
     let socket_state = Arc::new(SocketState {
         adapter_manager,
         scheduler,
         job_store,
         issue_store,
+        plugin_manager,
     });
 
     let addr_clone = addr.clone();

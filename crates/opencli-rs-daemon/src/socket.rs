@@ -3,6 +3,7 @@
 
 use crate::adapter_manager::{is_chrome_running, AdapterManager};
 use crate::issues::{IssueKind, IssueStatus, IssueStore};
+use crate::plugin::PluginManager;
 use crate::scheduler::Scheduler;
 use crate::store::{Job, JobStatus, JobStore};
 use anyhow::Result;
@@ -22,6 +23,7 @@ pub struct SocketState {
     pub scheduler: Arc<Scheduler>,
     pub job_store: Arc<JobStore>,
     pub issue_store: Arc<IssueStore>,
+    pub plugin_manager: Arc<PluginManager>,
 }
 
 /// JSON-RPC-like request
@@ -300,6 +302,12 @@ async fn process_request(line: &str, state: &Arc<SocketState>) -> JsonRpcRespons
         "job.cancel" => handle_job_cancel(params, state).await,
         "job.delete" => handle_job_delete(params, state).await,
         "job.run" => handle_job_run(state).await,
+
+        // ── Plugin ────────────────────────────────────────────────────────────
+        "plugin.install"   => handle_plugin_install(params, state).await,
+        "plugin.uninstall" => handle_plugin_uninstall(params, state).await,
+        "plugin.list"      => handle_plugin_list(state).await,
+        "plugin.update"    => handle_plugin_update(params, state).await,
 
         // Note: "exec" is handled separately in handle_connection for streaming.
         _ => Err(anyhow::anyhow!("unknown method: {}", method)),
@@ -621,5 +629,64 @@ async fn handle_job_delete(params: &Value, state: &Arc<SocketState>) -> Result<V
 async fn handle_job_run(state: &Arc<SocketState>) -> Result<Value> {
     state.scheduler.poll_and_run().await?;
     Ok(serde_json::json!({ "ran": true }))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Plugin handlers
+// ──────────────────────────────────────────────────────────────────────────────
+
+async fn handle_plugin_install(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
+    let source = params
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("missing 'source' parameter"))?;
+
+    let info = state.plugin_manager.install(source).await?;
+    // Reload so the new plugin's adapters are immediately available
+    state.adapter_manager.reload().await?;
+    Ok(serde_json::json!({ "plugin": info }))
+}
+
+async fn handle_plugin_uninstall(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
+    let name = params
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("missing 'name' parameter"))?;
+
+    state.plugin_manager.uninstall(name).await?;
+    state.adapter_manager.reload().await?;
+    Ok(serde_json::json!({ "uninstalled": name }))
+}
+
+async fn handle_plugin_list(state: &Arc<SocketState>) -> Result<Value> {
+    let plugins = state.plugin_manager.list()?;
+    let count = plugins.len();
+    Ok(serde_json::json!({ "plugins": plugins, "count": count }))
+}
+
+async fn handle_plugin_update(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
+    match params.get("name").and_then(|v| v.as_str()) {
+        Some(name) => {
+            state.plugin_manager.update(name).await?;
+            state.adapter_manager.reload().await?;
+            Ok(serde_json::json!({ "updated": [name] }))
+        }
+        None => {
+            // Update all installed plugins
+            let results = state.plugin_manager.update_all().await;
+            let mut updated = vec![];
+            let mut errors = vec![];
+            for (name, result) in results {
+                match result {
+                    Ok(_) => updated.push(name),
+                    Err(e) => errors.push(serde_json::json!({ "plugin": name, "error": e.to_string() })),
+                }
+            }
+            if !updated.is_empty() {
+                state.adapter_manager.reload().await?;
+            }
+            Ok(serde_json::json!({ "updated": updated, "errors": errors }))
+        }
+    }
 }
 

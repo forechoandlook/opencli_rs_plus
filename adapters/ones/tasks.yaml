@@ -1,0 +1,70 @@
+site: ones
+name: tasks
+description: ONES Project — list work items (requires ONES_BASE_URL env var and browser login)
+domain: ones.cn
+strategy: cookie
+browser: true
+
+args:
+  team:
+    type: str
+    required: true
+    positional: true
+    description: Team UUID (8 chars)
+  limit:
+    type: int
+    default: 30
+    description: Max rows
+
+pipeline:
+  - navigate: ${{ env.ONES_BASE_URL | default('https://ones.cn') }}
+
+  - wait: 2
+
+  - evaluate: |
+      (async () => {
+        const team = ${{ args.team | json }};
+        const limit = ${{ args.limit | json }};
+        const baseUrl = (window.location.origin + '/project/api/project');
+        const body = {
+          query: { must: [] },
+          orders: [{ field_identifier: "create_time", order: "desc" }],
+          pager: { after: 0, limit },
+          view_uuid: "",
+          filter: { must: [] }
+        };
+        const res = await fetch(`${baseUrl}/team/${team}/filters/peek`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        const groups = data?.peek_groups || [];
+        const tasks = [];
+        for (const g of groups) {
+          for (const entry of (g.entries || [])) {
+            tasks.push({
+              uuid: entry.uuid || '',
+              title: entry.summary || entry.name || '',
+              status: entry.status_category || '',
+              project: entry.project_uuid || '',
+              updated: entry.update_time ? new Date(entry.update_time * 1000).toLocaleString('zh-CN') : '',
+            });
+            if (tasks.length >= limit) break;
+          }
+          if (tasks.length >= limit) break;
+        }
+        return tasks;
+      })()
+
+  - map:
+      uuid: ${{ item.uuid }}
+      title: ${{ item.title }}
+      status: ${{ item.status }}
+      project: ${{ item.project }}
+      updated: ${{ item.updated }}
+
+  - limit: ${{ args.limit }}
+
+columns: [uuid, title, status, project, updated]

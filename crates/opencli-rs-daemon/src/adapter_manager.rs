@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::index::AdapterIndex;
+use crate::plugin::PluginManager;
 
 /// Settings file stored at ~/.opencli-rs/adapter_settings.json
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -96,6 +97,7 @@ pub struct AdapterManager {
     registry: RwLock<Registry>,
     settings: RwLock<AdapterSettings>,
     pub index: Arc<AdapterIndex>,
+    plugin_manager: Arc<PluginManager>,
 }
 
 impl AdapterManager {
@@ -115,9 +117,19 @@ impl AdapterManager {
             0
         };
 
+        // Load plugin adapters from ~/.opencli-rs/plugins/*/
+        let plugin_manager = Arc::new(PluginManager::new());
+        let plugin_count = plugin_manager
+            .load_into_registry(&mut registry)
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Failed to load plugin adapters");
+                0
+            });
+
         tracing::info!(
             home_adapters = home_count,
             local_adapters = local_count,
+            plugin_adapters = plugin_count,
             disabled = settings.disabled.len(),
             "Adapter manager initialized"
         );
@@ -132,6 +144,7 @@ impl AdapterManager {
             registry: RwLock::new(registry),
             settings: RwLock::new(settings),
             index,
+            plugin_manager,
         };
 
         // Build initial FTS index (incremental: skips unchanged adapters on restart)
@@ -266,8 +279,9 @@ impl AdapterManager {
         Ok(count)
     }
 
-    /// Full reload from default directories.
+    /// Full reload from default directories (including plugins).
     pub async fn reload(&self) -> Result<usize> {
+        let plugin_mgr = Arc::clone(&self.plugin_manager);
         let count = {
             let mut registry = self.registry.write().await;
             let mut c = discover_adapters(&mut registry)?;
@@ -275,12 +289,21 @@ impl AdapterManager {
             if local_dir.exists() && local_dir.is_dir() {
                 c += scan_dir_no_cache(&local_dir, &mut registry)?;
             }
+            c += plugin_mgr.load_into_registry(&mut registry).unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Failed to reload plugin adapters");
+                0
+            });
             c
         };
         tracing::info!(count = count, "Adapters reloaded");
         let all = self.list_adapters().await;
         self.index.sync(&all)?;
         Ok(count)
+    }
+
+    /// Expose the plugin manager for use in socket handlers.
+    pub fn plugin_manager(&self) -> Arc<PluginManager> {
+        Arc::clone(&self.plugin_manager)
     }
 
     /// Get a command by site and name, respecting enabled/disabled state.

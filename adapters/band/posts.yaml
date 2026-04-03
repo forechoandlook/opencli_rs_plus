@@ -1,0 +1,53 @@
+site: band
+name: posts
+description: List posts from a Band
+domain: www.band.us
+strategy: cookie
+browser: true
+
+args:
+  band_no:
+    type: int
+    required: true
+    positional: true
+    description: Band number (get from band bands)
+  limit:
+    type: int
+    default: 20
+    description: Max results
+
+pipeline:
+  - navigate: https://www.band.us/band/${{ args.band_no }}/post
+
+  - evaluate: |
+      (async () => {
+        const limit = ${{ args.limit | json }};
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+        for (let i = 0; i < 30; i++) {
+          if (document.querySelector('article.cContentsCard._postMainWrap')) break;
+          await sleep(300);
+        }
+        const cards = Array.from(document.querySelectorAll('article.cContentsCard._postMainWrap')).slice(0, limit);
+        return cards.map(card => {
+          const author = norm(card.querySelector('.uName')?.textContent || '');
+          const date = norm(card.querySelector('time')?.getAttribute('datetime') || card.querySelector('time')?.textContent || '');
+          const content = norm(card.querySelector('.postText, .postBody')?.textContent || '').slice(0, 200);
+          const commentsEl = card.querySelector('[class*="comment"] [class*="count"], .commentCount');
+          const comments = parseInt(commentsEl?.textContent?.replace(/\D/g, '') || '0', 10);
+          const postLink = card.querySelector('a[href*="/post/"]');
+          const url = postLink ? 'https://www.band.us' + postLink.getAttribute('href') : '';
+          return { date, author, content, comments, url };
+        });
+      })()
+
+  - map:
+      date: ${{ item.date }}
+      author: ${{ item.author }}
+      content: ${{ item.content }}
+      comments: ${{ item.comments }}
+      url: ${{ item.url }}
+
+  - limit: ${{ args.limit }}
+
+columns: [date, author, content, comments, url]

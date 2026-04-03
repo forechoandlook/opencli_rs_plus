@@ -1,0 +1,42 @@
+site: 36kr
+name: hot
+description: 36氪热榜
+domain: www.36kr.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Number of items (max 50)
+
+pipeline:
+  - navigate: https://www.36kr.com/hot-list/catalog
+
+  - wait: 3
+
+  - evaluate: |
+      (() => {
+        const seen = new Set();
+        const results = [];
+        const links = document.querySelectorAll('a[href*="/p/"]');
+        for (const el of links) {
+          const href = el.getAttribute('href') || '';
+          const title = el.textContent?.trim() || '';
+          if (!title || title.length < 5 || seen.has(href) || seen.has(title)) continue;
+          seen.add(href);
+          seen.add(title);
+          results.push({ title, url: href.startsWith('http') ? href : 'https://36kr.com' + href });
+        }
+        return results;
+      })()
+
+  - map:
+      rank: ${{ index + 1 }}
+      title: ${{ item.title }}
+      url: ${{ item.url }}
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, title, url]

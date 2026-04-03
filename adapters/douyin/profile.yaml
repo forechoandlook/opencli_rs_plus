@@ -1,0 +1,37 @@
+site: douyin
+name: profile
+description: 获取抖音创作者账号信息
+domain: creator.douyin.com
+strategy: cookie
+browser: true
+
+pipeline:
+  - navigate: https://creator.douyin.com
+
+  - wait: 2
+
+  - evaluate: |
+      (async () => {
+        const res = await fetch('https://creator.douyin.com/web/api/media/user/info/?aid=1128', {
+          credentials: 'include'
+        });
+        const data = await res.json();
+        const u = data.user_info ?? data.user;
+        if (!u) return [];
+        return [{
+          uid: u.uid,
+          nickname: u.nickname,
+          follower_count: u.follower_count,
+          following_count: u.following_count,
+          aweme_count: u.aweme_count,
+        }];
+      })()
+
+  - map:
+      uid: ${{ item.uid }}
+      nickname: ${{ item.nickname }}
+      follower_count: ${{ item.follower_count }}
+      following_count: ${{ item.following_count }}
+      aweme_count: ${{ item.aweme_count }}
+
+columns: [uid, nickname, follower_count, following_count, aweme_count]

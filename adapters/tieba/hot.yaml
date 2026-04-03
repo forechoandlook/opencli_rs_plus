@@ -1,0 +1,46 @@
+site: tieba
+name: hot
+description: Tieba hot topics (贴吧热门话题)
+domain: tieba.baidu.com
+strategy: public
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Number of items to return
+
+pipeline:
+  - navigate: https://tieba.baidu.com/hottopic/browse/topicList?res_type=1
+
+  - wait: 2
+
+  - evaluate: |
+      (() => {
+        const limit = ${{ args.limit | json }};
+        const items = document.querySelectorAll('li.topic-top-item');
+        return Array.from(items).map((item) => {
+          const titleEl = item.querySelector('a.topic-text');
+          const numEl = item.querySelector('span.topic-num');
+          const descEl = item.querySelector('p.topic-top-item-desc');
+          const href = titleEl?.getAttribute('href') || '';
+          return {
+            title: titleEl?.textContent?.trim() || '',
+            discussions: numEl?.textContent?.trim() || '',
+            description: descEl?.textContent?.trim() || '',
+            url: href.startsWith('http') ? href : 'https://tieba.baidu.com' + href,
+          };
+        }).filter(item => item.title).slice(0, limit);
+      })()
+
+  - map:
+      rank: ${{ index + 1 }}
+      title: ${{ item.title }}
+      discussions: ${{ item.discussions }}
+      description: ${{ item.description }}
+      url: ${{ item.url }}
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, title, discussions, description]

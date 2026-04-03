@@ -1,0 +1,48 @@
+site: 36kr
+name: news
+description: Latest tech/startup news from 36kr (36氪)
+domain: www.36kr.com
+strategy: public
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Number of articles (max 50)
+
+pipeline:
+  - navigate: https://www.36kr.com/feed
+
+  - evaluate: |
+      (() => {
+        const limit = ${{ args.limit | json }};
+        const xml = document.documentElement.outerHTML || document.body?.innerText || '';
+        const items = [];
+        const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+        let match;
+        while ((match = itemRegex.exec(xml)) && items.length < limit) {
+          const block = match[1];
+          const title = block.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/)?.[1]?.trim() ?? '';
+          const url = block.match(/<link><!\[CDATA\[(.*?)\]\]>/)?.[1]
+            ?? block.match(/<link>(.*?)<\/link>/)?.[1]
+            ?? '';
+          const pubDate = block.match(/<pubDate>(.*?)<\/pubDate>/)?.[1]?.trim() ?? '';
+          const date = pubDate.slice(0, 16);
+          const rawDesc = block.match(/<description><!\[CDATA\[([\s\S]*?)\]\]>/)?.[1] ?? '';
+          const summary = rawDesc.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+          if (title) items.push({ rank: items.length + 1, title, summary, date, url: url.trim() });
+        }
+        return items;
+      })()
+
+  - map:
+      rank: ${{ item.rank }}
+      title: ${{ item.title }}
+      summary: ${{ item.summary }}
+      date: ${{ item.date }}
+      url: ${{ item.url }}
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, title, summary, date, url]

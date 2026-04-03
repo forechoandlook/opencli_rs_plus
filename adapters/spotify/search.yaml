@@ -1,0 +1,41 @@
+site: spotify
+name: search
+description: Search Spotify tracks (requires a valid Spotify Bearer token)
+domain: api.spotify.com
+strategy: public
+browser: false
+
+args:
+  query:
+    type: str
+    required: true
+    positional: true
+    description: Search query (artist, track, album)
+  token:
+    type: str
+    required: true
+    description: Spotify Bearer token (from OAuth flow)
+  limit:
+    type: int
+    default: 10
+    description: Number of results
+
+pipeline:
+  - fetch:
+      url: https://api.spotify.com/v1/search?q=${{ args.query | urlencode }}&type=track&limit=${{ args.limit }}
+      headers:
+        Authorization: Bearer ${{ args.token }}
+
+  - select: tracks.items
+
+  - map:
+      rank: ${{ index + 1 }}
+      name: ${{ item.name }}
+      artist: ${{ item.artists[0].name }}
+      album: ${{ item.album.name }}
+      duration_ms: ${{ item.duration_ms }}
+      url: ${{ item.external_urls.spotify }}
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, name, artist, album, url]

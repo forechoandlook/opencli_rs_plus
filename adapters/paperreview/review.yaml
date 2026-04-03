@@ -1,0 +1,26 @@
+site: paperreview
+name: review
+description: Fetch a paperreview.ai review by token
+domain: paperreview.ai
+strategy: public
+browser: false
+
+args:
+  token:
+    type: str
+    required: true
+    positional: true
+    description: Review token returned by paperreview.ai
+
+pipeline:
+  - fetch:
+      url: https://paperreview.ai/api/review/${{ args.token | urlencode }}
+
+  - map:
+      status: ${{ item.status | default('ok') }}
+      title: ${{ item.title | default('') }}
+      venue: ${{ item.venue | default('') }}
+      numerical_score: ${{ item.numerical_score | default('') }}
+      review_url: https://paperreview.ai/review/${{ args.token }}
+
+columns: [status, title, venue, numerical_score, review_url]

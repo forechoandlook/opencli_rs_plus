@@ -13,6 +13,7 @@ Client (CLI/TCP)
 opencli-rs-daemon
     ├── AdapterManager  (adapter 加载/管理/搜索/禁用)
     ├── AdapterIndex    (FTS5 全文索引 + 使用统计，index.db)
+    ├── PluginManager   (插件安装/卸载/更新，plugins.lock.json)
     ├── IssueStore      (问题记录，issues.db)
     ├── Scheduler       (轮询 due jobs，并发执行)
     └── JobStore        (SQLite CRUD，指数退避重试，jobs.db)
@@ -171,6 +172,67 @@ opencli-cli socket daemon.status
 opencli-cli socket adapter.search '{"query":"bilibili"}'
 ```
 
+### Plugin 管理
+
+插件是包含 YAML adapter 文件的目录，可通过 GitHub 仓库、本地路径安装。安装后 adapter 立即生效，无需重启 daemon。
+
+**安装来源格式：**
+
+| 格式 | 说明 |
+|---|---|
+| `github:user/repo` | 从 GitHub 克隆 |
+| `https://github.com/user/repo.git` | 完整 HTTPS URL |
+| `git@github.com:user/repo.git` | SSH URL |
+| `file:///absolute/path` | 本地目录（符号链接，改动实时生效）|
+| `local:/path` | 同上 |
+| `/absolute/path` | 同上 |
+
+**插件 manifest（`opencli-plugin.json`，可选）：**
+
+```json
+{
+  "name": "my-plugin",
+  "version": "0.1.0",
+  "description": "My custom adapters",
+  "opencli": ">=0.1.0"
+}
+```
+
+若无 manifest，插件名取自目录名，目录内所有 `.yaml` 文件作为 adapter 加载。
+
+```bash
+# 安装插件
+opencli-cli socket plugin.install '{"source":"github:user/my-plugin"}'
+opencli-cli socket plugin.install '{"source":"file:///path/to/local-plugin"}'
+
+# 查看已安装插件
+opencli-cli socket plugin.list
+
+# 更新指定插件（git pull）
+opencli-cli socket plugin.update '{"name":"my-plugin"}'
+
+# 更新所有插件
+opencli-cli socket plugin.update '{}'
+
+# 卸载插件
+opencli-cli socket plugin.uninstall '{"name":"my-plugin"}'
+```
+
+安装/卸载/更新后 daemon 自动重新加载所有 adapter（等同于 `adapter.reload`）。
+
+**插件存储位置：**
+
+```
+~/.opencli-rs/plugins/
+    my-plugin/           ← git 克隆或本地符号链接
+        opencli-plugin.json
+        search.yaml
+        trending.yaml
+    another-plugin/
+        ...
+~/.opencli-rs/plugins.lock.json   ← 记录安装来源和时间
+```
+
 ### 数据文件
 
 | 文件 | 说明 |
@@ -179,6 +241,8 @@ opencli-cli socket adapter.search '{"query":"bilibili"}'
 | `~/.opencli-rs/index.db` | FTS5 全文索引 + 使用统计 + 索引元数据（mtime） |
 | `~/.opencli-rs/issues.db` | Adapter 问题记录 |
 | `~/.opencli-rs/adapter_settings.json` | adapter 启用/禁用/隐藏状态 |
+| `~/.opencli-rs/plugins/` | 已安装插件目录 |
+| `~/.opencli-rs/plugins.lock.json` | 插件安装来源和时间记录 |
 | `~/.opencli-rs/tools/*.md` | 工具知识库（本地文件，不需要 daemon） |
 
 ### Adapter 检索机制
@@ -214,3 +278,7 @@ daemon 启动、`adapter.reload`、`adapter.sync` 时触发增量同步：
 | `adapter.reload` | — | 重新扫描 yaml 文件并增量同步索引 |
 | `adapter.reindex` | — | 强制全量重建 FTS 索引 |
 | `adapter.sync` | `folder` | 从指定目录同步并增量更新索引 |
+| `plugin.install` | `source` | 安装插件并重载 adapter |
+| `plugin.uninstall` | `name` | 卸载插件并重载 adapter |
+| `plugin.list` | — | 列出所有已安装插件 |
+| `plugin.update` | `name`（可选，不传则更新全部）| 更新插件（git pull）并重载 adapter |

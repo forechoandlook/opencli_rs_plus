@@ -1,0 +1,55 @@
+site: imdb
+name: trending
+description: IMDb Most Popular Movies
+domain: www.imdb.com
+strategy: public
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Number of results (max 100)
+
+pipeline:
+  - navigate: https://www.imdb.com/chart/moviemeter/?accept-language=en-US
+
+  - wait: 2
+
+  - evaluate: |
+      (() => {
+        const limit = ${{ args.limit | json }};
+        let ldScript = null;
+        document.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
+          try {
+            const d = JSON.parse(s.textContent || '');
+            if (d['@type'] === 'ItemList') ldScript = d;
+          } catch(e) {}
+        });
+        if (!ldScript || !Array.isArray(ldScript.itemListElement)) return [];
+        return ldScript.itemListElement.slice(0, limit).map((entry, i) => {
+          const item = entry.item || {};
+          const rating = item.aggregateRating || {};
+          const genre = Array.isArray(item.genre) ? item.genre.join(', ') : String(item.genre || '');
+          let url = item.url || '';
+          if (url && !url.startsWith('http')) url = 'https://www.imdb.com' + url;
+          return {
+            rank: entry.position || i + 1,
+            title: String(item.name || ''),
+            rating: rating.ratingValue != null ? String(rating.ratingValue) : '',
+            genre,
+            url
+          };
+        });
+      })()
+
+  - map:
+      rank: ${{ item.rank }}
+      title: ${{ item.title }}
+      rating: ${{ item.rating }}
+      genre: ${{ item.genre }}
+      url: ${{ item.url }}
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, title, rating, genre]

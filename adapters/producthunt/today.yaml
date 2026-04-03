@@ -1,0 +1,45 @@
+site: producthunt
+name: today
+description: Today's Product Hunt launches (from RSS feed)
+domain: www.producthunt.com
+strategy: public
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: Max results
+
+pipeline:
+  - navigate: https://www.producthunt.com/feed
+
+  - evaluate: |
+      (() => {
+        const limit = ${{ args.limit | json }};
+        const xml = document.documentElement.outerHTML || document.body?.innerText || '';
+        const items = [];
+        const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+        let match;
+        while ((match = itemRegex.exec(xml)) && items.length < limit) {
+          const block = match[1];
+          const name = block.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/)?.[1]?.trim() ?? '';
+          const url = block.match(/<link>(.*?)<\/link>/)?.[1]?.trim() ?? '';
+          const author = block.match(/<dc:creator>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/dc:creator>/)?.[1]?.trim() ?? '';
+          const rawDesc = block.match(/<description><!\[CDATA\[([\s\S]*?)\]\]>/)?.[1] ?? '';
+          const tagline = rawDesc.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+          if (name) items.push({ rank: items.length + 1, name, tagline, author, url });
+        }
+        return items;
+      })()
+
+  - map:
+      rank: ${{ item.rank }}
+      name: ${{ item.name }}
+      tagline: ${{ item.tagline }}
+      author: ${{ item.author }}
+      url: ${{ item.url }}
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, name, tagline, author, url]

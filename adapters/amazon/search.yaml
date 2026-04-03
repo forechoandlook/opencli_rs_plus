@@ -1,0 +1,52 @@
+site: amazon
+name: search
+description: Amazon product search
+domain: amazon.com
+strategy: cookie
+browser: true
+
+args:
+  query:
+    type: str
+    required: true
+    positional: true
+    description: Search query (e.g. "desk shelf organizer")
+  limit:
+    type: int
+    default: 20
+    description: Maximum number of results to return
+
+pipeline:
+  - navigate: https://www.amazon.com/s?k=${{ args.query | urlencode }}
+
+  - wait: 2
+
+  - evaluate: |
+      (() => {
+        const limit = ${{ args.limit | json }};
+        return Array.from(document.querySelectorAll('[data-component-type="s-search-result"]'))
+          .filter(card => card.getAttribute('data-asin') && card.querySelector('h2'))
+          .slice(0, limit)
+          .map((card, i) => {
+            const asin = card.getAttribute('data-asin') || '';
+            const title = card.querySelector('h2')?.textContent?.trim() || '';
+            const href = card.querySelector('a.a-link-normal[href*="/dp/"]')?.href || '';
+            const priceText = card.querySelector('.a-price .a-offscreen')?.textContent?.trim() || '';
+            const ratingText = card.querySelector('[aria-label*="out of 5 stars"]')?.getAttribute('aria-label') || '';
+            const reviewText = card.querySelector('a[href*="#customerReviews"]')?.textContent?.trim() || '';
+            return { rank: i + 1, asin, title, price_text: priceText, rating_text: ratingText, review_count: reviewText, url: href };
+          });
+      })()
+
+  - map:
+      rank: ${{ item.rank }}
+      asin: ${{ item.asin }}
+      title: ${{ item.title }}
+      price_text: ${{ item.price_text }}
+      rating_text: ${{ item.rating_text }}
+      review_count: ${{ item.review_count }}
+      url: ${{ item.url }}
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, asin, title, price_text, rating_text, review_count]

@@ -1,0 +1,70 @@
+site: douyin
+name: videos
+description: 获取抖音作品列表
+domain: creator.douyin.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: 每页数量
+  page:
+    type: int
+    default: 1
+    description: 页码
+  status:
+    type: str
+    default: all
+    description: 状态过滤
+    choices: [all, published, reviewing, scheduled]
+
+pipeline:
+  - navigate: https://creator.douyin.com
+
+  - wait: 2
+
+  - evaluate: |
+      (async () => {
+        const statusMap = { all: 0, published: 1, reviewing: 3, scheduled: 0 };
+        const statusNum = statusMap[${{ args.status | json }}] ?? 0;
+        const url = 'https://creator.douyin.com/janus/douyin/creator/pc/work_list?page_size=${{ args.limit }}&page_num=${{ args.page }}&status=' + statusNum;
+        const res = await fetch(url, { credentials: 'include' });
+        const data = await res.json();
+        let items = data?.data?.work_list ?? data?.aweme_list ?? [];
+        const filterStatus = ${{ args.status | json }};
+        if (filterStatus === 'scheduled') {
+          items = items.filter(v => (v.public_time ?? 0) > Date.now() / 1000);
+        }
+        return items.map(v => {
+          let status = v.status;
+          if (typeof status === 'object' && status !== null) {
+            if (status.is_delete) status = 'deleted';
+            else if (status.is_prohibited) status = 'prohibited';
+            else if (status.in_reviewing) status = 'reviewing';
+            else if (status.is_private) status = 'private';
+            else status = (v.public_time && v.public_time > Date.now() / 1000) ? 'scheduled' : 'published';
+          }
+          return {
+            aweme_id: v.aweme_id,
+            title: v.desc ?? '',
+            status,
+            play_count: v.statistics?.play_count ?? 0,
+            digg_count: v.statistics?.digg_count ?? 0,
+            create_time: new Date(((v.create_time ?? v.public_time ?? 0) * 1000)).toLocaleString('zh-CN'),
+          };
+        });
+      })()
+
+  - map:
+      aweme_id: ${{ item.aweme_id }}
+      title: ${{ item.title }}
+      status: ${{ item.status }}
+      play_count: ${{ item.play_count }}
+      digg_count: ${{ item.digg_count }}
+      create_time: ${{ item.create_time }}
+
+  - limit: ${{ args.limit }}
+
+columns: [aweme_id, title, status, play_count, digg_count, create_time]

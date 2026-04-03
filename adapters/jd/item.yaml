@@ -1,0 +1,57 @@
+site: jd
+name: item
+description: 京东商品详情（价格、店铺、规格参数）
+domain: item.jd.com
+strategy: cookie
+browser: true
+
+args:
+  sku:
+    type: str
+    required: true
+    positional: true
+    description: 商品 SKU ID（如 100291143898）
+
+pipeline:
+  - navigate: https://item.jd.com/${{ args.sku }}.html
+
+  - wait: 2
+
+  - scroll:
+      times: 4
+      delay: 500
+
+  - wait: 2
+
+  - evaluate: |
+      (() => {
+        const skuMatch = location.pathname.match(/(\d+)\.html/);
+        const sku = skuMatch ? skuMatch[1] : '';
+        const priceEl = document.querySelector('.J-p-' + sku)
+          || document.querySelector('[class*="price"] [class*="num"]')
+          || document.querySelector('.p-price strong');
+        const price = priceEl?.textContent?.trim() || 'not found';
+        const title = document.querySelector('.product-title')?.textContent?.trim()
+          || document.title.split('-')[0].trim();
+        const shop = document.querySelector('.J-shop-name')?.textContent?.trim() || '京东自营';
+        const text = document.body.innerText;
+        const specMatch = text.match(/商品编号[\s\S]*?(?=包装清单|\n\n|$)/);
+        const specs = {};
+        if (specMatch) {
+          const lines = specMatch[0].split('\n').filter(l => l.trim());
+          for (let i = 0; i < lines.length - 1; i += 2) {
+            const key = lines[i].trim();
+            const val = lines[i + 1]?.trim() || '';
+            if (key && val && key !== '商品编号') specs[key] = val;
+          }
+        }
+        return [{ title, price, shop, specs: JSON.stringify(specs) }];
+      })()
+
+  - map:
+      title: ${{ item.title }}
+      price: ${{ item.price }}
+      shop: ${{ item.shop }}
+      specs: ${{ item.specs }}
+
+columns: [title, price, shop, specs]

@@ -1,0 +1,68 @@
+site: zsxq
+name: search
+description: 搜索知识星球内容
+domain: wx.zsxq.com
+strategy: cookie
+browser: true
+
+args:
+  keyword:
+    type: str
+    required: true
+    positional: true
+    description: Search keyword
+  limit:
+    type: int
+    default: 20
+    description: Number of results to return
+  group_id:
+    type: str
+    description: 星球 group_id（默认使用浏览器当前星球）
+
+pipeline:
+  - navigate: https://wx.zsxq.com
+
+  - wait: 2
+
+  - evaluate: |
+      (async () => {
+        const limit = ${{ args.limit | json }};
+        const keyword = ${{ args.keyword | json }};
+        let groupId = ${{ args.group_id | json }};
+        if (!groupId) {
+          const m = location.href.match(/group_id=(\d+)/);
+          if (m) groupId = m[1];
+        }
+        if (!groupId) return [{ error: 'No group_id found. Please pass --group_id or navigate to a group in Chrome.' }];
+        const query = encodeURIComponent(keyword);
+        const res = await fetch(`https://api.zsxq.com/v2/search/groups/${groupId}/topics?keyword=${query}&count=${limit}`, {
+          credentials: 'include'
+        });
+        const data = await res.json();
+        const topics = data?.resp_data?.topics || [];
+        return topics.slice(0, limit).map(t => {
+          const text = t.talk?.text || t.q?.text || t.article?.title || '';
+          return {
+            topic_id: String(t.topic_id || ''),
+            author: t.author?.name || '',
+            title: text.slice(0, 100),
+            comments: t.comments_count ?? 0,
+            likes: t.likes_count ?? 0,
+            time: (t.create_time || '').slice(0, 16),
+            url: 'https://wx.zsxq.com/dweb2/index/topic_detail/' + t.topic_id,
+          };
+        });
+      })()
+
+  - map:
+      topic_id: ${{ item.topic_id }}
+      author: ${{ item.author }}
+      title: ${{ item.title }}
+      comments: ${{ item.comments }}
+      likes: ${{ item.likes }}
+      time: ${{ item.time }}
+      url: ${{ item.url }}
+
+  - limit: ${{ args.limit }}
+
+columns: [topic_id, author, title, comments, likes, time]

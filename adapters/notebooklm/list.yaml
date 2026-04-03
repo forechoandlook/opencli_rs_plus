@@ -1,0 +1,44 @@
+site: notebooklm
+name: list
+description: List NotebookLM notebooks (requires logged-in browser session)
+domain: notebooklm.google.com
+strategy: cookie
+browser: true
+
+pipeline:
+  - navigate: https://notebooklm.google.com
+
+  - wait: 3
+
+  - evaluate: |
+      (async () => {
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        for (let i = 0; i < 20; i++) {
+          if (document.querySelector('[data-testid="notebook-card"], .notebook-card, a[href*="/notebook/"]')) break;
+          await wait(300);
+        }
+        const cards = Array.from(document.querySelectorAll('[data-testid="notebook-card"], .notebook-card, a[href*="/notebook/"]'));
+        if (cards.length === 0) {
+          const links = Array.from(document.querySelectorAll('a[href*="/notebook/"]'));
+          return links.map(a => {
+            const id = (a.getAttribute('href') || '').match(/notebook\/([^/?]+)/)?.[1] || '';
+            const title = a.textContent?.trim() || id;
+            return { title, id, url: 'https://notebooklm.google.com' + a.getAttribute('href') };
+          }).filter(item => item.id);
+        }
+        return cards.map(card => {
+          const link = card.tagName === 'A' ? card : card.querySelector('a[href*="/notebook/"]');
+          const href = link?.getAttribute('href') || '';
+          const id = href.match(/notebook\/([^/?]+)/)?.[1] || '';
+          const title = card.querySelector('[data-testid="notebook-title"], .notebook-title, h3, h2')?.textContent?.trim()
+            || link?.textContent?.trim() || id;
+          return { title, id, url: href ? 'https://notebooklm.google.com' + href : '' };
+        }).filter(item => item.id);
+      })()
+
+  - map:
+      title: ${{ item.title }}
+      id: ${{ item.id }}
+      url: ${{ item.url }}
+
+columns: [title, id, url]

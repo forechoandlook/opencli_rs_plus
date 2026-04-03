@@ -1,0 +1,48 @@
+site: web
+name: read
+description: Fetch any web page and extract main content as text
+domain: ""
+strategy: cookie
+browser: true
+
+args:
+  url:
+    type: str
+    required: true
+    positional: true
+    description: Any web page URL
+
+pipeline:
+  - navigate: ${{ args.url }}
+
+  - wait: 2
+
+  - evaluate: |
+      (() => {
+        const ogTitle = document.querySelector('meta[property="og:title"]');
+        let title = ogTitle?.getAttribute('content')?.trim() || document.title?.trim() || '';
+        title = title.replace(/\s*[|\-–—]\s*[^|\-–—]{1,30}$/, '').trim();
+        const authorMeta = document.querySelector('meta[name="author"], meta[property="article:author"]');
+        const author = authorMeta?.getAttribute('content')?.trim() || '';
+        const timeMeta = document.querySelector('meta[property="article:published_time"], time[datetime]');
+        const publishTime = timeMeta?.getAttribute('content') || timeMeta?.getAttribute('datetime') || '';
+        let contentEl = null;
+        const articles = document.querySelectorAll('article');
+        if (articles.length === 1) contentEl = articles[0];
+        else if (articles.length > 1) { let max = 0; articles.forEach(a => { const l = a.textContent?.length || 0; if (l > max) { max = l; contentEl = a; } }); }
+        if (!contentEl) contentEl = document.querySelector('[role="main"]') || document.querySelector('main');
+        if (!contentEl) contentEl = document.body;
+        const clone = contentEl.cloneNode(true);
+        clone.querySelectorAll('nav,header,footer,aside,.sidebar,.nav,.menu,.footer,.header,.comments,.ad,.ads,script,style,noscript,iframe').forEach(el => el.remove());
+        const text = clone.textContent?.replace(/\s+/g, ' ').trim().slice(0, 2000) || '';
+        return [{ title, author, publish_time: publishTime, content: text, url: location.href }];
+      })()
+
+  - map:
+      title: ${{ item.title }}
+      author: ${{ item.author }}
+      publish_time: ${{ item.publish_time }}
+      content: ${{ item.content }}
+      url: ${{ item.url }}
+
+columns: [title, author, publish_time, url]

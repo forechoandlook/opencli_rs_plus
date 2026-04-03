@@ -1,0 +1,42 @@
+site: band
+name: bands
+description: List all Bands you belong to
+domain: www.band.us
+strategy: cookie
+browser: true
+
+pipeline:
+  - navigate: https://www.band.us
+
+  - evaluate: |
+      (async () => {
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        for (let i = 0; i < 30; i++) {
+          if (document.querySelector('a.bandCover._link')) break;
+          await sleep(300);
+        }
+        const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+        const seen = new Set();
+        const results = [];
+        for (const a of Array.from(document.querySelectorAll('a.bandCover._link'))) {
+          const m = (a.getAttribute('href') || '').match(/^\/band\/(\d+)(?:\/post)?\/?$/);
+          if (!m) continue;
+          const bandNo = Number(m[1]);
+          if (seen.has(bandNo)) continue;
+          seen.add(bandNo);
+          const nameEl = a.querySelector('p.uriText');
+          const name = nameEl ? norm(nameEl.textContent) : '';
+          if (!name) continue;
+          const memberEl = a.querySelector('span.member em');
+          const members = memberEl ? parseInt(memberEl.textContent?.replace(/\D/g, '') || '0', 10) : 0;
+          results.push({ band_no: bandNo, name, members });
+        }
+        return results;
+      })()
+
+  - map:
+      band_no: ${{ item.band_no }}
+      name: ${{ item.name }}
+      members: ${{ item.members }}
+
+columns: [band_no, name, members]
