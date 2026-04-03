@@ -7,7 +7,10 @@ use opencli_rs_discovery::{discover_adapters, scan_dir_no_cache};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::sync::RwLock;
+
+use crate::index::AdapterIndex;
 
 /// Settings file stored at ~/.opencli-rs/adapter_settings.json
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -92,6 +95,7 @@ impl AdapterEntry {
 pub struct AdapterManager {
     registry: RwLock<Registry>,
     settings: RwLock<AdapterSettings>,
+    pub index: Arc<AdapterIndex>,
 }
 
 impl AdapterManager {
@@ -118,10 +122,23 @@ impl AdapterManager {
             "Adapter manager initialized"
         );
 
-        Ok(Self {
+        // Initialize FTS index
+        let index_path = dirs::home_dir()
+            .map(|h| h.join(".opencli-rs").join("index.db"))
+            .unwrap_or_else(|| PathBuf::from("index.db"));
+        let index = Arc::new(AdapterIndex::new(index_path)?);
+
+        let manager = Self {
             registry: RwLock::new(registry),
             settings: RwLock::new(settings),
-        })
+            index,
+        };
+
+        // Build initial FTS index (incremental: skips unchanged adapters on restart)
+        let all = manager.list_adapters().await;
+        manager.index.sync(&all)?;
+
+        Ok(manager)
     }
 
     /// Return all adapters (including disabled), with their current enabled/disabled status.
@@ -150,8 +167,39 @@ impl AdapterManager {
             .collect()
     }
 
-    /// Search adapters by name or description (case-insensitive substring match).
+    /// Search adapters using FTS5/BM25 + usage hotspot hybrid ranking.
     pub async fn search(&self, query: &str, include_hidden: bool) -> Vec<AdapterEntry> {
+        let fts_results = match self.index.search(query, 50) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "FTS search failed, falling back to substring match");
+                return self.search_fallback(query, include_hidden).await;
+            }
+        };
+
+        let registry = self.registry.read().await;
+        let settings = self.settings.read().await;
+
+        fts_results
+            .into_iter()
+            .filter_map(|r| {
+                let parts: Vec<&str> = r.full_name.splitn(2, ' ').collect();
+                if parts.len() != 2 {
+                    return None;
+                }
+                let cmd = registry.get(parts[0], parts[1])?;
+                let hidden = settings.hidden.contains(&r.full_name);
+                let enabled = !settings.disabled.contains(&r.full_name);
+                if !enabled || (!include_hidden && hidden) {
+                    return None;
+                }
+                Some(AdapterEntry::from_cmd(cmd, enabled, hidden))
+            })
+            .collect()
+    }
+
+    /// Fallback substring search when FTS is unavailable.
+    async fn search_fallback(&self, query: &str, include_hidden: bool) -> Vec<AdapterEntry> {
         let all = self.list_adapters().await;
         let query_lower = query.to_lowercase();
         all.into_iter()
@@ -208,21 +256,30 @@ impl AdapterManager {
     /// Sync adapters from a specific folder (replaces auto-discovery for that folder).
     /// Returns the number of adapters loaded.
     pub async fn sync_from(&self, folder: &Path) -> Result<usize> {
-        let mut registry = self.registry.write().await;
-        let count = scan_dir_no_cache(&folder.to_path_buf(), &mut registry)?;
+        let count = {
+            let mut registry = self.registry.write().await;
+            scan_dir_no_cache(&folder.to_path_buf(), &mut registry)?
+        };
         tracing::info!(folder = %folder.display(), count = count, "Adapters synced from folder");
+        let all = self.list_adapters().await;
+        self.index.sync(&all)?;
         Ok(count)
     }
 
     /// Full reload from default directories.
     pub async fn reload(&self) -> Result<usize> {
-        let mut registry = self.registry.write().await;
-        let mut count = discover_adapters(&mut registry)?;
-        let local_dir = PathBuf::from("adapters");
-        if local_dir.exists() && local_dir.is_dir() {
-            count += scan_dir_no_cache(&local_dir, &mut registry)?;
-        }
+        let count = {
+            let mut registry = self.registry.write().await;
+            let mut c = discover_adapters(&mut registry)?;
+            let local_dir = PathBuf::from("adapters");
+            if local_dir.exists() && local_dir.is_dir() {
+                c += scan_dir_no_cache(&local_dir, &mut registry)?;
+            }
+            c
+        };
         tracing::info!(count = count, "Adapters reloaded");
+        let all = self.list_adapters().await;
+        self.index.sync(&all)?;
         Ok(count)
     }
 

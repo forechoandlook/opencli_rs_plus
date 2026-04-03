@@ -1,6 +1,6 @@
-use opencli_rs_core::{CliCommand, CliError, IPage};
+use opencli_rs_core::{CliCommand, CliError, IPage, Strategy};
 use opencli_rs_pipeline::{execute_pipeline, steps::register_all_steps, StepRegistry};
-use opencli_rs_browser::BrowserBridge;
+use opencli_rs_browser::{get_app_port, probe_cdp, BrowserBridge, CdpPage};
 use serde_json::Value;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -55,18 +55,34 @@ async fn execute_command_inner(
     register_all_steps(&mut registry);
 
     if cmd.needs_browser() {
-        // Browser session
-        let mut bridge = BrowserBridge::new(daemon_port());
-        let page = bridge.connect().await?;
+        // UI strategy + localhost domain → try direct CDP connection to Electron app
+        let is_electron = cmd.strategy == Strategy::Ui
+            && cmd.domain.as_deref().map_or(false, |d| d == "localhost" || d.starts_with("localhost:"));
 
-        // Pre-navigate to domain if set, but ONLY if the pipeline doesn't
-        // start with its own navigate step (to avoid double navigation).
+        let page: Arc<dyn IPage> = if is_electron {
+            let port = get_app_port(&cmd.site).ok_or_else(|| {
+                CliError::browser_connect(format!(
+                    "No Electron app registered for '{}'. Add it to ~/.opencli-rs/apps.yaml",
+                    cmd.site
+                ))
+            })?;
+            let ws_url = probe_cdp(port).await?;
+            tracing::debug!(site = %cmd.site, port = port, "Connecting via CDP to Electron app");
+            Arc::new(CdpPage::connect(&ws_url).await?)
+        } else {
+            // Standard browser session via Chrome extension
+            let mut bridge = BrowserBridge::new(daemon_port());
+            bridge.connect().await?
+        };
+
+        // Pre-navigate only for Cookie/Header strategies.
         let pipeline_starts_with_navigate = cmd.pipeline.as_ref()
             .and_then(|steps| steps.first())
             .and_then(|step| step.as_object())
             .map_or(false, |obj| obj.contains_key("navigate"));
 
-        if !pipeline_starts_with_navigate {
+        let should_pre_navigate = matches!(cmd.strategy, Strategy::Cookie | Strategy::Header);
+        if should_pre_navigate && !pipeline_starts_with_navigate {
             if let Some(domain) = &cmd.domain {
                 let url = format!("https://{}", domain);
                 tracing::debug!(url = %url, "Pre-navigating to domain");

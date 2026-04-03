@@ -1,6 +1,15 @@
 use colored::Colorize;
 use opencli_rs_browser::DaemonClient;
-use opencli_rs_external::is_binary_installed;
+fn is_binary_installed(binary: &str) -> bool {
+    let cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    std::process::Command::new(cmd)
+        .arg(binary)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
 
 pub async fn run_doctor() {
     println!("{}", "opencli-rs diagnostics".bold());

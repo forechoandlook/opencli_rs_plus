@@ -2,6 +2,7 @@
 //! Uses a JSON-RPC-like protocol over TCP sockets.
 
 use crate::adapter_manager::{is_chrome_running, AdapterManager};
+use crate::issues::{IssueKind, IssueStatus, IssueStore};
 use crate::scheduler::Scheduler;
 use crate::store::{Job, JobStatus, JobStore};
 use anyhow::Result;
@@ -20,6 +21,7 @@ pub struct SocketState {
     pub adapter_manager: Arc<AdapterManager>,
     pub scheduler: Arc<Scheduler>,
     pub job_store: Arc<JobStore>,
+    pub issue_store: Arc<IssueStore>,
 }
 
 /// JSON-RPC-like request
@@ -225,6 +227,17 @@ async fn handle_exec_streaming(
     // Execute the command
     match opencli_rs_cli::execute_command(&cmd, kwargs).await {
         Ok(result) => {
+            // Record successful usage for hotspot tracking
+            let full_name = format!("{} {}", site, cmd_name);
+            if let Err(e) = state.adapter_manager.index.record_usage(
+                &full_name,
+                site,
+                cmd_name,
+                &cmd.description,
+            ) {
+                tracing::warn!(error = %e, adapter = %full_name, "Failed to record usage");
+            }
+
             // Stream result as stdout
             let stdout = serde_json::to_string(&result)?;
             let event = StreamEvent::Stdout(stdout);
@@ -268,6 +281,17 @@ async fn process_request(line: &str, state: &Arc<SocketState>) -> JsonRpcRespons
         "adapter.enable" => handle_adapter_enable(params, state).await,
         "adapter.disable" => handle_adapter_disable(params, state).await,
         "adapter.reload" => handle_adapter_reload(state).await,
+        "adapter.reindex" => handle_adapter_reindex(state).await,
+        "adapter.hot" => handle_adapter_hot(params, state).await,
+        "adapter.trending" => handle_adapter_trending(params, state).await,
+
+        // ── Issue ─────────────────────────────────────────────────────────────
+        "issue.add" => handle_issue_add(params, state).await,
+        "issue.list" => handle_issue_list(params, state).await,
+        "issue.show" => handle_issue_show(params, state).await,
+        "issue.close" => handle_issue_close(params, state).await,
+        "issue.delete" => handle_issue_delete(params, state).await,
+        "issue.export" => handle_issue_export(params, state).await,
 
         // ── Job ───────────────────────────────────────────────────────────────
         "job.add" => handle_job_add(params, state).await,
@@ -415,9 +439,109 @@ async fn handle_adapter_disable(params: &Value, state: &Arc<SocketState>) -> Res
 
 async fn handle_adapter_reload(state: &Arc<SocketState>) -> Result<Value> {
     let count = state.adapter_manager.reload().await?;
+    Ok(serde_json::json!({ "loaded": count }))
+}
+
+/// Force full FTS rebuild (clears adapter_index_meta and re-indexes everything).
+async fn handle_adapter_reindex(state: &Arc<SocketState>) -> Result<Value> {
+    let all = state.adapter_manager.list_adapters().await;
+    state.adapter_manager.index.rebuild(&all)?;
+    Ok(serde_json::json!({ "reindexed": all.len() }))
+}
+
+async fn handle_adapter_hot(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
+    let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+    let results = state.adapter_manager.index.hot(limit)?;
     Ok(serde_json::json!({
-        "loaded": count,
+        "adapters": results,
+        "count": results.len(),
     }))
+}
+
+async fn handle_adapter_trending(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
+    let days = params.get("days").and_then(|v| v.as_i64()).unwrap_or(7);
+    let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+    let results = state.adapter_manager.index.trending(days, limit)?;
+    Ok(serde_json::json!({
+        "adapters": results,
+        "days": days,
+        "count": results.len(),
+    }))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Issue handlers
+// ──────────────────────────────────────────────────────────────────────────────
+
+async fn handle_issue_add(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
+    let adapter = params
+        .get("adapter")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("missing 'adapter' parameter"))?;
+    let kind = IssueKind::from(params.get("kind").and_then(|v| v.as_str()).unwrap_or("other"));
+    let title = params
+        .get("title")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("missing 'title' parameter"))?;
+    let body = params.get("body").and_then(|v| v.as_str());
+
+    let issue = state.issue_store.add(adapter, kind, title, body)?;
+    Ok(serde_json::json!({ "issue": issue }))
+}
+
+async fn handle_issue_list(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
+    let adapter = params.get("adapter").and_then(|v| v.as_str());
+    let status = params
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map(IssueStatus::from);
+    let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+
+    let issues = state.issue_store.list(adapter, status, limit)?;
+    Ok(serde_json::json!({ "issues": issues, "count": issues.len() }))
+}
+
+async fn handle_issue_show(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
+    let id = params
+        .get("id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| anyhow::anyhow!("missing 'id' parameter"))?;
+
+    match state.issue_store.get(id)? {
+        Some(issue) => Ok(serde_json::json!({ "issue": issue })),
+        None => Err(anyhow::anyhow!("issue not found: {}", id)),
+    }
+}
+
+async fn handle_issue_close(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
+    let id = params
+        .get("id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| anyhow::anyhow!("missing 'id' parameter"))?;
+
+    let closed = state.issue_store.close(id)?;
+    Ok(serde_json::json!({ "id": id, "closed": closed }))
+}
+
+async fn handle_issue_delete(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
+    let id = params
+        .get("id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| anyhow::anyhow!("missing 'id' parameter"))?;
+
+    let deleted = state.issue_store.delete(id)?;
+    Ok(serde_json::json!({ "id": id, "deleted": deleted }))
+}
+
+async fn handle_issue_export(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
+    let status = params
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map(IssueStatus::from);
+
+    let json = state.issue_store.export(status)?;
+    // Return raw JSON string so caller can write to file
+    Ok(serde_json::json!({ "data": json }))
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -498,3 +622,4 @@ async fn handle_job_run(state: &Arc<SocketState>) -> Result<Value> {
     state.scheduler.poll_and_run().await?;
     Ok(serde_json::json!({ "ran": true }))
 }
+

@@ -1,3 +1,4 @@
+pub mod electron_apps;
 pub mod types;
 pub mod daemon_client;
 pub mod page;
@@ -7,6 +8,7 @@ pub mod daemon;
 pub mod bridge;
 pub mod cdp;
 
+pub use electron_apps::{get_app_port, probe_cdp};
 pub use bridge::BrowserBridge;
 pub use page::DaemonPage;
 pub use cdp::CdpPage;

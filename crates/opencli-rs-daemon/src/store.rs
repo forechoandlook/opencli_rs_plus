@@ -143,10 +143,10 @@ impl JobStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, adapter, args, run_at, interval_seconds, status, retry_count, max_retries,
-                    result, error, start_at, end_at, created_at, updated_at FROM jobs WHERE id = ?1"
+                    result, error, start_at, end_at, created_at, updated_at FROM jobs WHERE id = ?1 OR id LIKE ?2"
         )?;
 
-        let job = stmt.query_row(params![id], |row| {
+        let job = stmt.query_row(params![id, format!("{}%", id)], |row| {
             Ok(Job {
                 id: row.get(0)?,
                 adapter: row.get(1)?,

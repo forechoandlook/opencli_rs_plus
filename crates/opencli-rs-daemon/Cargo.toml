@@ -30,3 +30,4 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 directories = "5"
 dirs = "5"
+serde_yaml = "0.9"

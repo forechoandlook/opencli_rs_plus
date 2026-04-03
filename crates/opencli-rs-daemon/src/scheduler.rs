@@ -49,11 +49,21 @@ impl Scheduler {
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect()
             }
+            None | Some(serde_json::Value::Null) => HashMap::new(),
             Some(_) => {
                 return Ok((false, Some("args must be a JSON object".to_string())));
             }
-            None => HashMap::new(),
         };
+
+        // Inject default arg values defined in the adapter YAML (for args not supplied by the job)
+        let mut kwargs = kwargs;
+        for def in &cmd.args {
+            if !kwargs.contains_key(&def.name) {
+                if let Some(default) = &def.default {
+                    kwargs.insert(def.name.clone(), default.clone());
+                }
+            }
+        }
 
         match execute_command(&cmd, kwargs).await {
             Ok(data) => Ok((true, Some(serde_json::to_string(&data).unwrap_or_default()))),

@@ -1,11 +1,15 @@
 mod adapter_manager;
+mod index;
+mod issues;
 mod scheduler;
 mod socket;
 mod store;
+mod tools;
 
 use adapter_manager::AdapterManager;
 use anyhow::Result;
 use clap::Parser;
+use issues::{default_issues_db_path, IssueStore};
 use scheduler::Scheduler;
 use socket::{serve, SocketState};
 use std::path::PathBuf;
@@ -54,6 +58,7 @@ async fn main() -> Result<()> {
 
     let job_store = Arc::new(JobStore::new(db_path).map_err(|e| anyhow::anyhow!("{}", e))?);
     let adapter_manager = Arc::new(AdapterManager::new().await?);
+    let issue_store = Arc::new(IssueStore::new(default_issues_db_path())?);
     let scheduler = Arc::new(Scheduler::new(
         Arc::clone(&job_store),
         Arc::clone(&adapter_manager),
@@ -69,6 +74,7 @@ async fn main() -> Result<()> {
         adapter_manager,
         scheduler,
         job_store,
+        issue_store,
     });
 
     let addr_clone = addr.clone();

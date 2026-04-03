@@ -7,7 +7,6 @@ use clap_complete::Shell;
 use opencli_rs_core::Registry;
 use serde_json::Value;
 use opencli_rs_discovery::{discover_adapters, scan_dir_no_cache};
-use opencli_rs_external::{load_external_clis, ExternalCli};
 use opencli_rs_output::format::{OutputFormat, RenderOptions};
 use opencli_rs_output::render;
 use std::collections::HashMap;
@@ -18,7 +17,7 @@ use crate::args::coerce_and_validate_args;
 use crate::commands::{completion, doctor};
 use crate::execution::execute_command;
 
-fn build_cli(registry: &Registry, external_clis: &[ExternalCli]) -> Command {
+fn build_cli(registry: &Registry) -> Command {
     let mut app = Command::new("opencli-rs")
         .version(env!("CARGO_PKG_VERSION"))
         .about("AI-driven CLI tool — turns websites into command-line interfaces")
@@ -72,15 +71,6 @@ fn build_cli(registry: &Registry, external_clis: &[ExternalCli]) -> Command {
             site_cmd = site_cmd.subcommand(sub);
         }
         app = app.subcommand(site_cmd);
-    }
-
-    // Add external CLI subcommands
-    for ext in external_clis {
-        app = app.subcommand(
-            Command::new(ext.name.clone())
-                .about(ext.description.clone())
-                .allow_external_subcommands(true),
-        );
     }
 
     // Built-in utility subcommands
@@ -329,20 +319,8 @@ async fn main() {
         }
     }
 
-    // 3. Load external CLIs
-    let external_clis = match load_external_clis() {
-        Ok(clis) => {
-            tracing::debug!(count = clis.len(), "Loaded external CLIs");
-            clis
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "Failed to load external CLIs");
-            vec![]
-        }
-    };
-
-    // 4. Build clap app with dynamic subcommands
-    let app = build_cli(&registry, &external_clis);
+    // 3. Build clap app with dynamic subcommands
+    let app = build_cli(&registry);
     let matches = app.get_matches();
 
     let format_str = matches.get_one::<String>("format").unwrap().clone();
@@ -367,7 +345,7 @@ async fn main() {
                     .get_one::<Shell>("shell")
                     .copied()
                     .expect("shell argument required");
-                let mut app = build_cli(&registry, &external_clis);
+                let mut app = build_cli(&registry);
                 completion::run_completion(&mut app, shell);
                 return;
             }
@@ -500,33 +478,6 @@ async fn main() {
             _ => {}
         }
 
-        // Check if it's an external CLI
-        if let Some(ext) = external_clis.iter().find(|e| e.name == site_name) {
-            // Gather remaining args for the external CLI
-            let ext_args: Vec<String> = match site_matches.subcommand() {
-                Some((sub, sub_matches)) => {
-                    let mut args = vec![sub.to_string()];
-                    if let Some(rest) = sub_matches.get_many::<std::ffi::OsString>("") {
-                        args.extend(rest.map(|s| s.to_string_lossy().to_string()));
-                    }
-                    args
-                }
-                None => vec![],
-            };
-
-            match opencli_rs_external::execute_external_cli(&ext.name, &ext.binary, &ext_args)
-                .await
-            {
-                Ok(status) => {
-                    std::process::exit(status.code().unwrap_or(1));
-                }
-                Err(e) => {
-                    print_error(&e);
-                    std::process::exit(1);
-                }
-            }
-        }
-
         // Check if it's a registered site
         if let Some((cmd_name, cmd_matches)) = site_matches.subcommand() {
             if let Some(cmd) = registry.get(site_name, cmd_name) {
@@ -578,7 +529,7 @@ async fn main() {
         } else {
             // Site specified but no command — show site help
             // Re-build and print help for just this site subcommand
-            let app = build_cli(&registry, &external_clis);
+            let app = build_cli(&registry);
             let app_clone = app;
             // Try to print subcommand help
             let _ = app_clone.try_get_matches_from(vec!["opencli-rs", site_name, "--help"]);

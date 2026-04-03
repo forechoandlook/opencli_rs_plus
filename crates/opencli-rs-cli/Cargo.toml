@@ -17,7 +17,6 @@ opencli-rs-pipeline = { path = "../opencli-rs-pipeline" }
 opencli-rs-browser = { path = "../opencli-rs-browser" }
 opencli-rs-output = { path = "../opencli-rs-output" }
 opencli-rs-discovery = { path = "../opencli-rs-discovery" }
-opencli-rs-external = { path = "../opencli-rs-external" }
 opencli-rs-ai = { path = "../opencli-rs-ai" }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -4,6 +4,9 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use clap::{Parser, Subcommand};
+#[path = "../tools.rs"]
+mod tools;
+use tools::{find_by_name, load_tools, search, summary};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -45,11 +48,28 @@ enum Command {
         #[command(subcommand)]
         sub: AdapterSubcommand,
     },
+    /// Tool knowledge base
+    Tools {
+        #[command(subcommand)]
+        sub: ToolsSubcommand,
+    },
     /// Send a raw socket command (for debugging)
     Socket {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum ToolsSubcommand {
+    /// Search for tools by keyword
+    Search { query: String },
+    /// List all tools
+    List,
+    /// Show tool details
+    Info { name: String },
+    /// Show all tool names and short descriptions
+    Summary,
 }
 
 #[derive(Subcommand)]
@@ -359,6 +379,87 @@ fn cmd_job_delete(addr: &str, id: &str) -> Result<()> {
     Ok(())
 }
 
+fn cmd_tools_search(query: &str) -> Result<()> {
+    let tools = load_tools();
+    let results = search(query, &tools);
+    if results.is_empty() {
+        println!("No tools found for '{}'.", query);
+        return Ok(());
+    }
+    println!("{:25} {:20} {:10} {}", "Name", "Binary", "Installed", "Description");
+    println!("{}", "-".repeat(85));
+    for t in results {
+        println!("{:25} {:20} {:10} {}",
+            t.name, t.binary,
+            if t.is_installed() { "yes" } else { "no" },
+            t.description.chars().take(35).collect::<String>());
+    }
+    Ok(())
+}
+
+fn cmd_tools_list() -> Result<()> {
+    let tools = load_tools();
+    if tools.is_empty() {
+        println!("No tools found. Add .md files to ~/.opencli-rs/tools/");
+        return Ok(());
+    }
+    println!("{:25} {:20} {:10} {}", "Name", "Binary", "Installed", "Description");
+    println!("{}", "-".repeat(85));
+    for t in &tools {
+        println!("{:25} {:20} {:10} {}",
+            t.name, t.binary,
+            if t.is_installed() { "yes" } else { "no" },
+            t.description.chars().take(35).collect::<String>());
+    }
+    Ok(())
+}
+
+fn cmd_tools_info(name: &str) -> Result<()> {
+    let tools = load_tools();
+    match find_by_name(name, &tools) {
+        None => println!("Tool '{}' not found.", name),
+        Some(t) => {
+            println!("Name:        {}", t.name);
+            println!("Binary:      {}", t.binary);
+            println!("Installed:   {}", if t.is_installed() { "yes" } else { "no" });
+            if let Some(hp) = &t.homepage {
+                println!("Homepage:    {}", hp);
+            }
+            if !t.description.is_empty() {
+                println!("Description: {}", t.description);
+            }
+            if !t.tags.is_empty() {
+                println!("Tags:        {}", t.tags.join(", "));
+            }
+            if let Some(cmd) = t.install_cmd() {
+                println!("Install:     {}", cmd);
+            }
+            if !t.body.trim().is_empty() {
+                println!("\n{}", t.body.trim());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cmd_tools_summary() -> Result<()> {
+    let tools = load_tools();
+    if tools.is_empty() {
+        println!("No tools found. Add .md files to ~/.opencli-rs/tools/");
+        return Ok(());
+    }
+    let items = summary(&tools);
+    println!("{:25} {:10} {}", "Name", "Installed", "Description");
+    println!("{}", "-".repeat(70));
+    for s in items {
+        println!("{:25} {:10} {}",
+            s.name,
+            if s.installed { "yes" } else { "no" },
+            s.description.chars().take(35).collect::<String>());
+    }
+    Ok(())
+}
+
 fn cmd_job_run(addr: &str) -> Result<()> {
     socket_request(addr, "job.run", serde_json::json!({}))?;
     println!("Due jobs triggered");
@@ -397,6 +498,13 @@ fn main() -> Result<()> {
             AdapterSubcommand::Enable { name } => cmd_adapter_enable(&addr, &name)?,
             AdapterSubcommand::Disable { name } => cmd_adapter_disable(&addr, &name)?,
             AdapterSubcommand::Sync { folder } => cmd_adapter_sync(&addr, folder)?,
+        },
+
+        Command::Tools { sub } => match sub {
+            ToolsSubcommand::Search { query } => cmd_tools_search(&query)?,
+            ToolsSubcommand::List => cmd_tools_list()?,
+            ToolsSubcommand::Info { name } => cmd_tools_info(&name)?,
+            ToolsSubcommand::Summary => cmd_tools_summary()?,
         },
 
         Command::Socket { args: raw_args } => {
