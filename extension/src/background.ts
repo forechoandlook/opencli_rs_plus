@@ -63,14 +63,14 @@ async function connect(): Promise<void> {
     }
   };
 
-  ws.onmessage = async (event) => {
-    try {
-      const command = JSON.parse(event.data as string) as Command;
-      const result = await handleCommand(command);
+  ws.onmessage = (event) => {
+    const command = JSON.parse(event.data as string) as Command;
+    handleCommand(command).then(result => {
       ws?.send(JSON.stringify(result));
-    } catch (err) {
+    }).catch(err => {
       console.error('[opencli] Message handling error:', err);
-    }
+      ws?.send(JSON.stringify({ id: command.id, ok: false, error: String(err) }));
+    });
   };
 
   ws.onclose = () => {

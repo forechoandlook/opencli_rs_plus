@@ -7,6 +7,10 @@ edition.workspace = true
 name = "opencli-daemon"
 path = "src/main.rs"
 
+[[bin]]
+name = "opencli-cli"
+path = "src/bin/cli.rs"
+
 [dependencies]
 opencli-rs-core = { path = "../opencli-rs-core" }
 opencli-rs-pipeline = { path = "../opencli-rs-pipeline" }

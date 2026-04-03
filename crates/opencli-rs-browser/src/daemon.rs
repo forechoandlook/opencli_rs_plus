@@ -21,8 +21,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::types::{DaemonCommand, DaemonResult};
 
-/// Command response timeout.
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+/// Command response timeout. Set high to support long-running tasks (image/video generation).
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(1800); // 30 minutes
 /// WebSocket heartbeat interval.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 /// Idle shutdown threshold.

@@ -1,5 +1,5 @@
 //! Comprehensive socket API server for daemon communication.
-//! Uses a JSON-RPC-like protocol over Unix domain sockets.
+//! Uses a JSON-RPC-like protocol over TCP sockets.
 
 use crate::adapter_manager::{is_chrome_running, AdapterManager};
 use crate::scheduler::Scheduler;
@@ -11,8 +11,8 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixListener;
-use tokio::net::unix::OwnedWriteHalf;
+use tokio::net::TcpListener;
+use tokio::net::tcp::OwnedWriteHalf;
 use tracing::{error, info};
 
 /// Shared state accessible by all socket handlers.
@@ -101,23 +101,15 @@ pub enum StreamEvent {
     Done { exit_code: i32 },
 }
 
-/// Start the Unix socket server. Each connection is handled concurrently.
-pub async fn serve(socket_path: PathBuf, state: Arc<SocketState>) -> Result<()> {
-    if socket_path.exists() {
-        tokio::fs::remove_file(&socket_path).await?;
-    }
-
-    // Ensure parent dir exists
-    if let Some(parent) = socket_path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-
-    let listener = UnixListener::bind(&socket_path)?;
-    info!(path = %socket_path.display(), "Socket server listening");
+/// Start the TCP socket server. Each connection is handled concurrently.
+pub async fn serve(addr: &str, state: Arc<SocketState>) -> Result<()> {
+    let listener = TcpListener::bind(addr).await?;
+    info!(addr = %addr, "Socket server listening");
 
     loop {
         match listener.accept().await {
-            Ok((stream, _)) => {
+            Ok((stream, peer)) => {
+                info!(peer = %peer, "New connection");
                 let state = Arc::clone(&state);
                 tokio::spawn(async move {
                     if let Err(e) = handle_connection(stream, &state).await {
@@ -133,11 +125,11 @@ pub async fn serve(socket_path: PathBuf, state: Arc<SocketState>) -> Result<()> 
     }
 }
 
-/// Handle a single socket connection.
+/// Handle a single TCP connection.
 /// Reads line-delimited JSON requests, writes line-delimited JSON responses.
 /// For `exec`, streams JSON lines until done.
 async fn handle_connection(
-    stream: tokio::net::UnixStream,
+    stream: tokio::net::TcpStream,
     state: &Arc<SocketState>,
 ) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
