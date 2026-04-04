@@ -619,7 +619,11 @@ fn cmd_plugin_install(addr: &str, path: &str) -> Result<()> {
     } else {
         path.to_string()
     };
-    let result = socket_request(addr, "plugin.install", serde_json::json!({ "path": source }))?;
+    let result = socket_request(
+        addr,
+        "plugin.install",
+        serde_json::json!({ "path": source }),
+    )?;
     let plugin = &result["plugin"];
     println!(
         "Installed plugin '{}' ({})",
@@ -633,7 +637,11 @@ fn cmd_plugin_install(addr: &str, path: &str) -> Result<()> {
 }
 
 fn cmd_plugin_uninstall(addr: &str, name: &str) -> Result<()> {
-    socket_request(addr, "plugin.uninstall", serde_json::json!({ "name": name }))?;
+    socket_request(
+        addr,
+        "plugin.uninstall",
+        serde_json::json!({ "name": name }),
+    )?;
     println!("Uninstalled plugin '{}'", name);
     Ok(())
 }
@@ -671,9 +679,7 @@ fn cmd_plugin_update(addr: &str, name: Option<&str>) -> Result<()> {
     let updated = result
         .get("updated")
         .and_then(|v| v.as_array())
-        .map_or(vec![], |v| {
-            v.iter().filter_map(|s| s.as_str()).collect()
-        });
+        .map_or(vec![], |v| v.iter().filter_map(|s| s.as_str()).collect());
     if updated.is_empty() {
         println!("Nothing to update.");
     } else {

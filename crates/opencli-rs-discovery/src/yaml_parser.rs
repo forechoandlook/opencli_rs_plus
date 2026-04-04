@@ -231,7 +231,14 @@ args:
 "#;
         let cmd = parse_yaml_adapter(yaml).unwrap();
         // HashMap — 顺序不固定，按名字查
-        let find = |name: &str| cmd.args.iter().find(|a| a.name == name).unwrap().arg_type.clone();
+        let find = |name: &str| {
+            cmd.args
+                .iter()
+                .find(|a| a.name == name)
+                .unwrap()
+                .arg_type
+                .clone()
+        };
         assert_eq!(find("a"), ArgType::Int);
         assert_eq!(find("b"), ArgType::Number);
         assert_eq!(find("c"), ArgType::Bool);
@@ -394,7 +401,10 @@ updatedAt: "2026-01-01"
         let yaml = "site: test\nname: cmd\nstrategy: cookie\nbrowser: false\n";
         let cmd = parse_yaml_adapter(yaml).unwrap();
         // 当前行为：explicit browser: false 优先于 strategy
-        assert!(!cmd.browser, "explicit browser: false should override strategy default");
+        assert!(
+            !cmd.browser,
+            "explicit browser: false should override strategy default"
+        );
     }
 
     #[test]

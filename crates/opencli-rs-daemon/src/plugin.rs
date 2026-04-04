@@ -161,7 +161,10 @@ impl PluginManager {
                 parts.first().copied().unwrap_or(""),
                 parts.get(1).copied().unwrap_or(""),
             );
-            let subpath = parts.get(2).filter(|s| !s.is_empty()).map(|s| s.to_string());
+            let subpath = parts
+                .get(2)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
             return SourceKind::Git { clone_url, subpath };
         }
         // Full HTTPS or SSH URL (no subpath support for raw URLs)
@@ -169,7 +172,10 @@ impl PluginManager {
             || source.starts_with("git@")
             || source.starts_with("ssh://")
         {
-            return SourceKind::Git { clone_url: source.to_string(), subpath: None };
+            return SourceKind::Git {
+                clone_url: source.to_string(),
+                subpath: None,
+            };
         }
         // Local path: file:///path, local:/path, or bare /absolute/path
         let path_str = source
@@ -201,7 +207,8 @@ impl PluginManager {
 
         match Self::parse_source(source) {
             SourceKind::Git { clone_url, subpath } => {
-                self.install_git(source, &clone_url, subpath.as_deref()).await
+                self.install_git(source, &clone_url, subpath.as_deref())
+                    .await
             }
             SourceKind::Local(path) => self.install_local(source, &path),
         }
@@ -246,10 +253,7 @@ impl PluginManager {
                 let sub = tmp_dir.join(sp);
                 if !sub.is_dir() {
                     let _ = fs::remove_dir_all(&tmp_dir);
-                    return Err(anyhow::anyhow!(
-                        "subpath '{}' not found in repository",
-                        sp
-                    ));
+                    return Err(anyhow::anyhow!("subpath '{}' not found in repository", sp));
                 }
                 sub
             }
@@ -411,12 +415,23 @@ impl PluginManager {
         let source = lock.get(name).map(|e| e.source.clone()).unwrap_or_default();
 
         match Self::parse_source(&source) {
-            SourceKind::Git { clone_url: _, subpath: Some(_) } => {
+            SourceKind::Git {
+                clone_url: _,
+                subpath: Some(_),
+            } => {
                 // Subpath install: no .git in plugin dir — re-install from scratch
                 info!(plugin = %name, "Subpath plugin — re-cloning to update");
-                self.install_git(&source, &Self::clone_url_from_source(&source), Self::subpath_from_source(&source).as_deref()).await?;
+                self.install_git(
+                    &source,
+                    &Self::clone_url_from_source(&source),
+                    Self::subpath_from_source(&source).as_deref(),
+                )
+                .await?;
             }
-            SourceKind::Git { clone_url: _, subpath: None } => {
+            SourceKind::Git {
+                clone_url: _,
+                subpath: None,
+            } => {
                 // Full-repo install: .git is present — git pull in place
                 let dir = plugin_dir.clone();
                 let out = tokio::task::spawn_blocking(move || {
@@ -459,7 +474,10 @@ impl PluginManager {
     fn subpath_from_source(source: &str) -> Option<String> {
         if let Some(repo) = source.strip_prefix("github:") {
             let parts: Vec<&str> = repo.splitn(3, '/').collect();
-            return parts.get(2).filter(|s| !s.is_empty()).map(|s| s.to_string());
+            return parts
+                .get(2)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
         }
         None
     }

@@ -364,7 +364,10 @@ mod tests {
 
     #[test]
     fn string_literal_double_quote() {
-        assert_eq!(eval("\"hello\"", &empty_ctx()), Value::String("hello".into()));
+        assert_eq!(
+            eval("\"hello\"", &empty_ctx()),
+            Value::String("hello".into())
+        );
     }
 
     #[test]
@@ -402,7 +405,10 @@ mod tests {
     #[test]
     fn nested_dot_access() {
         let ctx = ctx_with_item(serde_json::json!({"author": {"name": "Alice"}}));
-        assert_eq!(eval("item.author.name", &ctx), Value::String("Alice".into()));
+        assert_eq!(
+            eval("item.author.name", &ctx),
+            Value::String("Alice".into())
+        );
     }
 
     #[test]
@@ -586,12 +592,18 @@ mod tests {
 
     #[test]
     fn ternary_true_branch() {
-        assert_eq!(eval("true ? \"yes\" : \"no\"", &empty_ctx()), Value::String("yes".into()));
+        assert_eq!(
+            eval("true ? \"yes\" : \"no\"", &empty_ctx()),
+            Value::String("yes".into())
+        );
     }
 
     #[test]
     fn ternary_false_branch() {
-        assert_eq!(eval("false ? \"yes\" : \"no\"", &empty_ctx()), Value::String("no".into()));
+        assert_eq!(
+            eval("false ? \"yes\" : \"no\"", &empty_ctx()),
+            Value::String("no".into())
+        );
     }
 
     #[test]
@@ -606,17 +618,26 @@ mod tests {
 
     #[test]
     fn math_min() {
-        assert_eq!(eval("Math.min(3, 1, 2)", &empty_ctx()), Value::Number(1.into()));
+        assert_eq!(
+            eval("Math.min(3, 1, 2)", &empty_ctx()),
+            Value::Number(1.into())
+        );
     }
 
     #[test]
     fn math_max() {
-        assert_eq!(eval("Math.max(3, 1, 2)", &empty_ctx()), Value::Number(3.into()));
+        assert_eq!(
+            eval("Math.max(3, 1, 2)", &empty_ctx()),
+            Value::Number(3.into())
+        );
     }
 
     #[test]
     fn math_abs() {
-        assert_eq!(eval("Math.abs(0 - 7)", &empty_ctx()), Value::Number(7.into()));
+        assert_eq!(
+            eval("Math.abs(0 - 7)", &empty_ctx()),
+            Value::Number(7.into())
+        );
     }
 
     #[test]

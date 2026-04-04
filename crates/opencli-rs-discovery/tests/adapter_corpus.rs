@@ -14,10 +14,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use opencli_rs_core::{CliError, IPage};
 use opencli_rs_discovery::yaml_parser::parse_yaml_adapter;
 use opencli_rs_pipeline::steps::register_transform_steps;
 use opencli_rs_pipeline::{execute_pipeline, StepHandler, StepRegistry};
-use opencli_rs_core::{CliError, IPage};
 use serde_json::Value;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,7 +131,10 @@ fn cookie_strategy_adapters_have_domain() {
 
         use opencli_rs_core::Strategy;
         // Cookie/Ui/Intercept strategy 都需要 domain 来确定 cookie 注入目标
-        let needs_domain = matches!(cmd.strategy, Strategy::Cookie | Strategy::Ui | Strategy::Intercept);
+        let needs_domain = matches!(
+            cmd.strategy,
+            Strategy::Cookie | Strategy::Ui | Strategy::Intercept
+        );
         if needs_domain && cmd.domain.is_none() {
             let rel = path.strip_prefix(&dir).unwrap_or(path);
             missing.push(format!("  {} ({} {})", rel.display(), cmd.site, cmd.name));
@@ -199,10 +202,7 @@ fn pipeline_steps_are_valid_single_key_objects() {
         };
 
         for (i, step) in pipeline.iter().enumerate() {
-            let valid = step
-                .as_object()
-                .map(|obj| obj.len() == 1)
-                .unwrap_or(false);
+            let valid = step.as_object().map(|obj| obj.len() == 1).unwrap_or(false);
             if !valid {
                 let rel = path.strip_prefix(&dir).unwrap_or(path);
                 bad.push(format!(
@@ -371,7 +371,9 @@ async fn test_bilibili_hot_transform_pipeline() {
         {"title": "测试视频5", "author": "UP主E", "play": 50_000,   "danmaku": 100},
     ]);
 
-    let pipeline = cmd.pipeline.expect("bilibili/hot.yaml should have a pipeline");
+    let pipeline = cmd
+        .pipeline
+        .expect("bilibili/hot.yaml should have a pipeline");
     let test_pipeline = build_test_pipeline(&pipeline, &mock_data);
 
     let mut args = HashMap::new();
@@ -391,10 +393,10 @@ async fn test_bilibili_hot_transform_pipeline() {
     // columns: [rank, title, author, play, danmaku]
     for (i, item) in arr.iter().enumerate() {
         let obj = item.as_object().expect("each item must be an object");
-        assert!(obj.contains_key("rank"),    "item[{i}] missing 'rank'");
-        assert!(obj.contains_key("title"),   "item[{i}] missing 'title'");
-        assert!(obj.contains_key("author"),  "item[{i}] missing 'author'");
-        assert!(obj.contains_key("play"),    "item[{i}] missing 'play'");
+        assert!(obj.contains_key("rank"), "item[{i}] missing 'rank'");
+        assert!(obj.contains_key("title"), "item[{i}] missing 'title'");
+        assert!(obj.contains_key("author"), "item[{i}] missing 'author'");
+        assert!(obj.contains_key("play"), "item[{i}] missing 'play'");
         assert!(obj.contains_key("danmaku"), "item[{i}] missing 'danmaku'");
 
         // rank 应该是 index + 1
@@ -469,17 +471,12 @@ async fn transform_only_pipelines_run_with_mock_data() {
         // 只测试：过滤掉浏览器/网络步骤后，剩下的都是已知 transform 步骤的 adapter
         // 注意：select 步骤依赖数据结构，不在通用 mock 测试范围内（由专项测试覆盖）
         let known_transform = ["map", "filter", "limit", "sort"];
-        let non_browser_steps: Vec<&Value> = pipeline
-            .iter()
-            .filter(|s| !is_browser_step(s))
-            .collect();
+        let non_browser_steps: Vec<&Value> =
+            pipeline.iter().filter(|s| !is_browser_step(s)).collect();
 
         let all_transform = non_browser_steps.iter().all(|s| {
             s.as_object()
-                .map(|obj| {
-                    obj.keys()
-                        .all(|k| known_transform.contains(&k.as_str()))
-                })
+                .map(|obj| obj.keys().all(|k| known_transform.contains(&k.as_str())))
                 .unwrap_or(false)
         });
 
@@ -527,7 +524,13 @@ async fn transform_only_pipelines_run_with_mock_data() {
         let registry = make_test_registry(mock_data);
         if let Err(e) = execute_pipeline(None, &test_pipeline, &args, &registry).await {
             let rel = path.strip_prefix(&dir).unwrap_or(path);
-            failed.push(format!("  {} ({} {}): {}", rel.display(), cmd.site, cmd.name, e));
+            failed.push(format!(
+                "  {} ({} {}): {}",
+                rel.display(),
+                cmd.site,
+                cmd.name,
+                e
+            ));
         }
     }
 

@@ -495,12 +495,18 @@ mod tests {
     #[test]
     fn filter_reverse_array() {
         let input = json!([1, 2, 3]);
-        assert_eq!(apply_filter("reverse", input, &[]).unwrap(), json!([3, 2, 1]));
+        assert_eq!(
+            apply_filter("reverse", input, &[]).unwrap(),
+            json!([3, 2, 1])
+        );
     }
 
     #[test]
     fn filter_reverse_string() {
-        assert_eq!(apply_filter("reverse", s("hello"), &[]).unwrap(), s("olleh"));
+        assert_eq!(
+            apply_filter("reverse", s("hello"), &[]).unwrap(),
+            s("olleh")
+        );
     }
 
     #[test]
@@ -704,24 +710,36 @@ mod tests {
 
     #[test]
     fn filter_length_array() {
-        assert_eq!(apply_filter("length", json!([1, 2, 3]), &[]).unwrap(), json!(3));
+        assert_eq!(
+            apply_filter("length", json!([1, 2, 3]), &[]).unwrap(),
+            json!(3)
+        );
     }
 
     #[test]
     fn filter_length_object() {
-        assert_eq!(apply_filter("length", json!({"a": 1, "b": 2}), &[]).unwrap(), json!(2));
+        assert_eq!(
+            apply_filter("length", json!({"a": 1, "b": 2}), &[]).unwrap(),
+            json!(2)
+        );
     }
 
     #[test]
     fn filter_unknown_returns_error() {
         let result = apply_filter("nonexistent_filter", s("x"), &[]);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("nonexistent_filter"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("nonexistent_filter"));
     }
 
     #[test]
     fn filter_ext_with_extension() {
-        assert_eq!(apply_filter("ext", s("file.tar.gz"), &[]).unwrap(), s(".gz"));
+        assert_eq!(
+            apply_filter("ext", s("file.tar.gz"), &[]).unwrap(),
+            s(".gz")
+        );
     }
 
     #[test]
@@ -731,12 +749,18 @@ mod tests {
 
     #[test]
     fn filter_basename_with_path() {
-        assert_eq!(apply_filter("basename", s("/home/user/file.txt"), &[]).unwrap(), s("file.txt"));
+        assert_eq!(
+            apply_filter("basename", s("/home/user/file.txt"), &[]).unwrap(),
+            s("file.txt")
+        );
     }
 
     #[test]
     fn filter_basename_no_slash() {
-        assert_eq!(apply_filter("basename", s("file.txt"), &[]).unwrap(), s("file.txt"));
+        assert_eq!(
+            apply_filter("basename", s("file.txt"), &[]).unwrap(),
+            s("file.txt")
+        );
     }
 
     #[test]

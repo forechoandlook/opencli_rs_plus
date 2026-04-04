@@ -21,7 +21,12 @@ fn test_issue_add_returns_correct_fields() {
     let store = IssueStore::new(path.clone()).unwrap();
 
     let issue = store
-        .add("bilibili feed", IssueKind::Broken, "API 返回 404", Some("接口已下线"))
+        .add(
+            "bilibili feed",
+            IssueKind::Broken,
+            "API 返回 404",
+            Some("接口已下线"),
+        )
         .unwrap();
 
     assert_eq!(issue.adapter, "bilibili feed");
@@ -88,9 +93,15 @@ fn test_issue_list_all() {
     let path = temp_db();
     let store = IssueStore::new(path.clone()).unwrap();
 
-    store.add("adapter a", IssueKind::Broken, "t1", None).unwrap();
-    store.add("adapter b", IssueKind::Other, "t2", None).unwrap();
-    store.add("adapter a", IssueKind::BadDescription, "t3", None).unwrap();
+    store
+        .add("adapter a", IssueKind::Broken, "t1", None)
+        .unwrap();
+    store
+        .add("adapter b", IssueKind::Other, "t2", None)
+        .unwrap();
+    store
+        .add("adapter a", IssueKind::BadDescription, "t3", None)
+        .unwrap();
 
     let all = store.list(None, None, 100).unwrap();
     assert_eq!(all.len(), 3);
@@ -103,9 +114,15 @@ fn test_issue_list_filter_by_adapter() {
     let path = temp_db();
     let store = IssueStore::new(path.clone()).unwrap();
 
-    store.add("bilibili feed", IssueKind::Broken, "t1", None).unwrap();
-    store.add("zhihu hot", IssueKind::Broken, "t2", None).unwrap();
-    store.add("bilibili feed", IssueKind::Other, "t3", None).unwrap();
+    store
+        .add("bilibili feed", IssueKind::Broken, "t1", None)
+        .unwrap();
+    store
+        .add("zhihu hot", IssueKind::Broken, "t2", None)
+        .unwrap();
+    store
+        .add("bilibili feed", IssueKind::Other, "t3", None)
+        .unwrap();
 
     let filtered = store.list(Some("bilibili feed"), None, 100).unwrap();
     assert_eq!(filtered.len(), 2);
@@ -119,8 +136,12 @@ fn test_issue_list_filter_by_status_open() {
     let path = temp_db();
     let store = IssueStore::new(path.clone()).unwrap();
 
-    let i1 = store.add("a", IssueKind::Broken, "open issue", None).unwrap();
-    let i2 = store.add("b", IssueKind::Broken, "will close", None).unwrap();
+    let i1 = store
+        .add("a", IssueKind::Broken, "open issue", None)
+        .unwrap();
+    let i2 = store
+        .add("b", IssueKind::Broken, "will close", None)
+        .unwrap();
     store.close(i2.id).unwrap();
 
     let open = store.list(None, Some(IssueStatus::Open), 100).unwrap();
@@ -152,7 +173,9 @@ fn test_issue_list_respects_limit() {
     let store = IssueStore::new(path.clone()).unwrap();
 
     for i in 0..10 {
-        store.add("a", IssueKind::Broken, &format!("issue {i}"), None).unwrap();
+        store
+            .add("a", IssueKind::Broken, &format!("issue {i}"), None)
+            .unwrap();
     }
 
     let limited = store.list(None, None, 3).unwrap();
@@ -192,7 +215,10 @@ fn test_issue_close_already_closed_returns_false() {
 
     // 再次关闭 — 应该返回 false（没有行被更新）
     let result = store.close(issue.id).unwrap();
-    assert!(!result, "closing an already-closed issue should return false");
+    assert!(
+        !result,
+        "closing an already-closed issue should return false"
+    );
 
     cleanup(&path);
 }
@@ -213,7 +239,9 @@ fn test_issue_delete_removes_issue() {
     let path = temp_db();
     let store = IssueStore::new(path.clone()).unwrap();
 
-    let issue = store.add("a", IssueKind::Broken, "to delete", None).unwrap();
+    let issue = store
+        .add("a", IssueKind::Broken, "to delete", None)
+        .unwrap();
     let deleted = store.delete(issue.id).unwrap();
     assert!(deleted);
 
@@ -260,11 +288,13 @@ fn test_issue_export_all_returns_valid_json() {
     let store = IssueStore::new(path.clone()).unwrap();
 
     store.add("a", IssueKind::Broken, "t1", None).unwrap();
-    store.add("b", IssueKind::Other, "t2", Some("body")).unwrap();
+    store
+        .add("b", IssueKind::Other, "t2", Some("body"))
+        .unwrap();
 
     let json_str = store.export(None).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json_str)
-        .expect("export should produce valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).expect("export should produce valid JSON");
 
     let arr = parsed.as_array().expect("export should be a JSON array");
     assert_eq!(arr.len(), 2);
@@ -315,7 +345,10 @@ fn test_issue_export_empty_store() {
 #[test]
 fn test_issue_kind_from_str() {
     assert_eq!(IssueKind::from("broken"), IssueKind::Broken);
-    assert_eq!(IssueKind::from("bad_description"), IssueKind::BadDescription);
+    assert_eq!(
+        IssueKind::from("bad_description"),
+        IssueKind::BadDescription
+    );
     assert_eq!(IssueKind::from("other"), IssueKind::Other);
     // 未知值 fallback 到 Other
     assert_eq!(IssueKind::from("unknown_kind"), IssueKind::Other);
@@ -372,7 +405,10 @@ fn test_issue_data_persists_across_store_instances() {
 
     let id = {
         let store = IssueStore::new(path.clone()).unwrap();
-        store.add("a", IssueKind::Broken, "persisted", None).unwrap().id
+        store
+            .add("a", IssueKind::Broken, "persisted", None)
+            .unwrap()
+            .id
     };
 
     // 重新打开同一个数据库
