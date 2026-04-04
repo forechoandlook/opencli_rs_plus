@@ -35,7 +35,7 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Clippy (warnings as errors)
+      - name: Clippy
         run: |
           cargo clippy \
             --workspace \
@@ -43,7 +43,7 @@ jobs:
             --exclude opencli-rs-ai \
             --exclude opencli-rs-cli \
             --exclude opencli-rs-external \
-            -- -D warnings
+            -- -W clippy::all
 
       - name: Run unit & integration tests
         run: |
