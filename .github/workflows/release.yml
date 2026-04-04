@@ -97,31 +97,46 @@ jobs:
 
       - name: Build
         run: |
-          cargo build --release --target ${{ matrix.target }} -p opencli-rs-daemon
+          cargo build --release --target ${{ matrix.target }} \
+            -p opencli-rs-daemon \
+            -p opencli-rs-cli
 
-      - name: Prepare artifact
+      - name: Prepare artifacts
         shell: bash
         run: |
+          PLAT="${{ matrix.asset_name }}"  # e.g. macos-arm64 / linux-x86_64 / windows-x86_64
+          # Strip the leading "opencli-daemon-" prefix to get the platform suffix
+          SUFFIX="${PLAT#opencli-daemon-}"
+
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            SRC="target/${{ matrix.target }}/release/opencli-daemon.exe"
-            DEST="${{ matrix.asset_name }}.exe"
+            EXT=".exe"
           else
-            SRC="target/${{ matrix.target }}/release/opencli-daemon"
-            DEST="${{ matrix.asset_name }}"
+            EXT=""
           fi
-          cp "$SRC" "$DEST"
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            shasum -a 256 "$DEST" > "$DEST.sha256"
-          else
-            sha256sum "$DEST" > "$DEST.sha256"
-          fi
+
+          OUTDIR="target/${{ matrix.target }}/release"
+
+          declare -A BINS=(
+            ["opencli-daemon${EXT}"]="opencli-daemon-${SUFFIX}${EXT}"
+            ["opencli-cli${EXT}"]="opencli-cli-${SUFFIX}${EXT}"
+            ["opencli-rs${EXT}"]="opencli-rs-${SUFFIX}${EXT}"
+          )
+
+          for SRC_NAME in "${!BINS[@]}"; do
+            DEST="${BINS[$SRC_NAME]}"
+            cp "${OUTDIR}/${SRC_NAME}" "${DEST}"
+            if [[ "$RUNNER_OS" == "macOS" ]]; then
+              shasum -a 256 "${DEST}" > "${DEST}.sha256"
+            else
+              sha256sum "${DEST}" > "${DEST}.sha256"
+            fi
+          done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: |
-            ${{ matrix.asset_name }}*
+          path: "opencli-*"
           retention-days: 1
 
   # ── Step 4：创建 GitHub Release ──────────────────────────────────────────────
@@ -200,25 +215,29 @@ jobs:
             ```
 
             脚本会自动：
-            1. 检测系统平台，下载对应二进制
-            2. 安装到 `/usr/local/bin/opencli-daemon`
+            1. 检测系统平台，下载对应二进制（3个）
+            2. 安装到 `/usr/local/bin/`
             3. 解压 `adapters/` 和 `summaries/` 到 `~/.opencli-rs/`
 
             ### 手动安装
 
-            **1. 下载二进制**
+            **1. 下载二进制（每个平台包含3个文件）**
 
-            | 平台 | 文件 |
+            | 平台 | 后缀 |
             |---|---|
-            | macOS Apple Silicon | `opencli-daemon-macos-arm64` |
-            | Linux x86_64 | `opencli-daemon-linux-x86_64` |
-            | Windows x86_64 | `opencli-daemon-windows-x86_64.exe` |
+            | macOS Apple Silicon | `-macos-arm64` |
+            | Linux x86_64 | `-linux-x86_64` |
+            | Windows x86_64 | `-windows-x86_64.exe` |
+
+            每个平台有 `opencli-daemon-<suffix>`、`opencli-cli-<suffix>`、`opencli-rs-<suffix>` 三个二进制。
 
             ```bash
             # 以 macOS arm64 为例
-            curl -L .../opencli-daemon-macos-arm64 -o opencli-daemon
-            chmod +x opencli-daemon
-            sudo mv opencli-daemon /usr/local/bin/
+            for bin in opencli-daemon opencli-cli opencli-rs; do
+              curl -L .../${bin}-macos-arm64 -o ${bin}
+              chmod +x ${bin}
+              sudo mv ${bin} /usr/local/bin/
+            done
             ```
 
             **2. 安装 adapters（必须）**
@@ -241,6 +260,8 @@ jobs:
             ```
           files: |
             artifacts/opencli-daemon-*
+            artifacts/opencli-cli-*
+            artifacts/opencli-rs-*
             artifacts/adapters.tar.gz
             artifacts/adapters.tar.gz.sha256
             artifacts/summaries.tar.gz
@@ -282,35 +303,38 @@ jobs:
 
           case "\$OS" in
             Darwin)
-              BINARY="opencli-daemon-macos-arm64"
+              SUFFIX="macos-arm64"
               ;;
             Linux)
-              BINARY="opencli-daemon-linux-x86_64"
+              SUFFIX="linux-x86_64"
               ;;
             *)
-              echo "Unsupported OS: \$OS (Windows users: download opencli-daemon-windows-x86_64.exe manually)"
+              echo "Unsupported OS: \$OS (Windows users: download *-windows-x86_64.exe files manually)"
               exit 1
               ;;
           esac
 
-          echo "Platform: \$OS/\$ARCH → \$BINARY"
+          echo "Platform: \$OS → suffix: \$SUFFIX"
 
-          # ── 下载二进制 ───────────────────────────────────────────────────────
+          # ── 下载三个二进制 ────────────────────────────────────────────────────
           TMP="\$(mktemp -d)"
           trap 'rm -rf "\$TMP"' EXIT
 
-          echo "Downloading \$BINARY..."
-          curl -fsSL "\${BASE_URL}/\${BINARY}" -o "\$TMP/opencli-daemon"
-          chmod +x "\$TMP/opencli-daemon"
+          for BIN in opencli-daemon opencli-cli opencli-rs; do
+            REMOTE="\${BIN}-\${SUFFIX}"
+            echo "Downloading \$REMOTE..."
+            curl -fsSL "\${BASE_URL}/\${REMOTE}" -o "\$TMP/\${BIN}"
+            chmod +x "\$TMP/\${BIN}"
+          done
 
           # ── 安装二进制 ───────────────────────────────────────────────────────
           if [ -w "\$INSTALL_DIR" ]; then
-            mv "\$TMP/opencli-daemon" "\$INSTALL_DIR/opencli-daemon"
+            mv "\$TMP"/opencli-* "\$INSTALL_DIR/"
           else
             echo "Installing to \$INSTALL_DIR (sudo required)..."
-            sudo mv "\$TMP/opencli-daemon" "\$INSTALL_DIR/opencli-daemon"
+            sudo mv "\$TMP"/opencli-* "\$INSTALL_DIR/"
           fi
-          echo "✓ Installed opencli-daemon to \$INSTALL_DIR/opencli-daemon"
+          echo "✓ Installed opencli-daemon, opencli-cli, opencli-rs to \$INSTALL_DIR/"
 
           # ── 安装 adapters ────────────────────────────────────────────────────
           mkdir -p "\$DATA_DIR"
@@ -324,7 +348,10 @@ jobs:
           echo "✓ Summaries installed to \$DATA_DIR/summaries/"
 
           echo ""
-          echo "Installation complete! Run: opencli-daemon --help"
+          echo "Installation complete!"
+          echo "  opencli-daemon --help"
+          echo "  opencli-cli --help"
+          echo "  opencli-rs --help"
           SCRIPT
 
           chmod +x install.sh
