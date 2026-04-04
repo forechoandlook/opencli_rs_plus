@@ -1,0 +1,17 @@
+<<<<<<< SEARCH
+    // Set done
+    store.set_done(&job.id, Some("success")).unwrap();
+    let done_job = store.get(&job.id).unwrap().unwrap();
+    assert_eq!(done_job.status, JobStatus::Done);
+    assert_eq!(done_job.result.as_deref(), Some("success"));
+    assert!(done_job.end_at.is_some());
+=======
+    // Set done
+    store.set_done(&job.id, Some("success")).unwrap();
+    let done_job = store.get(&job.id).unwrap().unwrap();
+    // In original logic, interval job becomes pending again, we used None as interval, so it becomes Done. Wait!
+    // If it becomes Pending, it means it thinks it has an interval. But interval was passed as None in test!
+    assert_eq!(done_job.status, JobStatus::Done);
+    assert_eq!(done_job.result.as_deref(), Some("success"));
+    assert!(done_job.end_at.is_some());
+>>>>>>> REPLACE

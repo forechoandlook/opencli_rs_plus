@@ -1,8 +1,12 @@
-use chrono::{Duration, Utc};
-use opencli_rs_daemon::store::{JobStatus, JobStore};
+#!/bin/bash
+git checkout crates/opencli-rs-daemon/tests/store_test.rs
+
+cat << 'INNER_EOF' > crates/opencli-rs-daemon/tests/store_test.rs
+use opencli_rs_daemon::store::{JobStore, JobStatus};
+use chrono::{Utc, Duration};
+use std::path::PathBuf;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
 
 fn get_temp_db_path() -> PathBuf {
     let mut path = env::temp_dir();
@@ -17,9 +21,7 @@ fn test_store_creation_and_add() {
 
     let args = serde_json::json!({"param": "value"});
     let run_at = Utc::now();
-    let job = store
-        .add("test_adapter", Some(args.clone()), run_at, Some(60))
-        .unwrap();
+    let job = store.add("test_adapter", Some(args.clone()), run_at, Some(60)).unwrap();
 
     assert_eq!(job.adapter, "test_adapter");
     assert_eq!(job.args, Some(args));
@@ -47,9 +49,7 @@ fn test_store_list_and_due() {
     // Add 3 jobs
     let j1 = store.add("past_job", None, past, None).unwrap();
     let _j2 = store.add("future_job", None, future, None).unwrap();
-    let j3 = store
-        .add("another_past", None, past - Duration::seconds(10), None)
-        .unwrap();
+    let j3 = store.add("another_past", None, past - Duration::seconds(10), None).unwrap();
 
     // List all
     let all = store.list(None, 10).unwrap();
@@ -135,3 +135,4 @@ fn test_store_cancel_and_delete() {
 
     let _ = fs::remove_file(db_path);
 }
+INNER_EOF

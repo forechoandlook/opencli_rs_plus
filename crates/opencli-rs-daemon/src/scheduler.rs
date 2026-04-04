@@ -16,7 +16,11 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub fn new(job_store: Arc<JobStore>, adapter_manager: Arc<AdapterManager>, poll_interval_secs: u64) -> Self {
+    pub fn new(
+        job_store: Arc<JobStore>,
+        adapter_manager: Arc<AdapterManager>,
+        poll_interval_secs: u64,
+    ) -> Self {
         Self {
             job_store,
             adapter_manager,
@@ -29,7 +33,10 @@ impl Scheduler {
         // Parse adapter: "site command"
         let parts: Vec<&str> = job.adapter.split_whitespace().collect();
         if parts.len() != 2 {
-            return Ok((false, Some(format!("Invalid adapter format: '{}'", job.adapter))));
+            return Ok((
+                false,
+                Some(format!("Invalid adapter format: '{}'", job.adapter)),
+            ));
         }
         let (site, cmd_name) = (parts[0], parts[1]);
 
@@ -38,16 +45,17 @@ impl Scheduler {
             None => {
                 return Ok((
                     false,
-                    Some(format!("Unknown or disabled adapter: {} {}", site, cmd_name)),
+                    Some(format!(
+                        "Unknown or disabled adapter: {} {}",
+                        site, cmd_name
+                    )),
                 ));
             }
         };
 
         let kwargs: HashMap<String, Value> = match &job.args {
             Some(serde_json::Value::Object(map)) => {
-                map.iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect()
+                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
             }
             None | Some(serde_json::Value::Null) => HashMap::new(),
             Some(_) => {
@@ -116,10 +124,7 @@ impl Scheduler {
 
     /// Run the scheduler loop, polling at the configured interval.
     pub async fn run_loop(&self) {
-        info!(
-            poll_interval = self.poll_interval_secs,
-            "Scheduler started"
-        );
+        info!(poll_interval = self.poll_interval_secs, "Scheduler started");
 
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(self.poll_interval_secs)).await;

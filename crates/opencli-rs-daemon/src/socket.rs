@@ -13,8 +13,8 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpListener;
 use tokio::net::tcp::OwnedWriteHalf;
+use tokio::net::TcpListener;
 use tracing::{error, info};
 
 /// Shared state accessible by all socket handlers.
@@ -132,10 +132,7 @@ pub async fn serve(addr: &str, state: Arc<SocketState>) -> Result<()> {
 /// Handle a single TCP connection.
 /// Reads line-delimited JSON requests, writes line-delimited JSON responses.
 /// For `exec`, streams JSON lines until done.
-async fn handle_connection(
-    stream: tokio::net::TcpStream,
-    state: &Arc<SocketState>,
-) -> Result<()> {
+async fn handle_connection(stream: tokio::net::TcpStream, state: &Arc<SocketState>) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
 
@@ -154,7 +151,9 @@ async fn handle_connection(
                 Ok(r) => r,
                 Err(e) => {
                     let resp = JsonRpcResponse::error(&format!("invalid JSON: {}", e), -32700);
-                    writer.write_all(serde_json::to_string(&resp)?.as_bytes()).await?;
+                    writer
+                        .write_all(serde_json::to_string(&resp)?.as_bytes())
+                        .await?;
                     writer.write_all(b"\n").await?;
                     continue;
                 }
@@ -166,12 +165,16 @@ async fn handle_connection(
             match exec_result {
                 Ok(exit_code) => {
                     let done = StreamEvent::Done { exit_code };
-                    writer.write_all(serde_json::to_string(&done)?.as_bytes()).await?;
+                    writer
+                        .write_all(serde_json::to_string(&done)?.as_bytes())
+                        .await?;
                     writer.write_all(b"\n").await?;
                 }
                 Err(e) => {
                     let resp = JsonRpcResponse::error_with_id(&e.to_string(), -32603, id);
-                    writer.write_all(serde_json::to_string(&resp)?.as_bytes()).await?;
+                    writer
+                        .write_all(serde_json::to_string(&resp)?.as_bytes())
+                        .await?;
                     writer.write_all(b"\n").await?;
                 }
             }
@@ -210,15 +213,17 @@ async fn handle_exec_streaming(
     let cmd = match state.adapter_manager.get_command(site, cmd_name).await {
         Some(c) => c,
         None => {
-            return Err(anyhow::anyhow!("Unknown or disabled adapter: {} {}", site, cmd_name));
+            return Err(anyhow::anyhow!(
+                "Unknown or disabled adapter: {} {}",
+                site,
+                cmd_name
+            ));
         }
     };
 
     let kwargs: std::collections::HashMap<String, Value> = match &args {
         Some(serde_json::Value::Object(map)) => {
-            map.iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
+            map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
         }
         Some(_) => {
             return Err(anyhow::anyhow!("args must be a JSON object"));
@@ -243,7 +248,9 @@ async fn handle_exec_streaming(
             // Stream result as stdout
             let stdout = serde_json::to_string(&result)?;
             let event = StreamEvent::Stdout(stdout);
-            writer.write_all(serde_json::to_string(&event)?.as_bytes()).await?;
+            writer
+                .write_all(serde_json::to_string(&event)?.as_bytes())
+                .await?;
             writer.write_all(b"\n").await?;
             Ok(0)
         }
@@ -251,7 +258,9 @@ async fn handle_exec_streaming(
             // Stream error as stderr
             let stderr = e.to_string();
             let event = StreamEvent::Stderr(stderr);
-            writer.write_all(serde_json::to_string(&event)?.as_bytes()).await?;
+            writer
+                .write_all(serde_json::to_string(&event)?.as_bytes())
+                .await?;
             writer.write_all(b"\n").await?;
             Ok(1)
         }
@@ -304,10 +313,10 @@ async fn process_request(line: &str, state: &Arc<SocketState>) -> JsonRpcRespons
         "job.run" => handle_job_run(state).await,
 
         // ── Plugin ────────────────────────────────────────────────────────────
-        "plugin.install"   => handle_plugin_install(params, state).await,
+        "plugin.install" => handle_plugin_install(params, state).await,
         "plugin.uninstall" => handle_plugin_uninstall(params, state).await,
-        "plugin.list"      => handle_plugin_list(state).await,
-        "plugin.update"    => handle_plugin_update(params, state).await,
+        "plugin.list" => handle_plugin_list(state).await,
+        "plugin.update" => handle_plugin_update(params, state).await,
 
         // Note: "exec" is handled separately in handle_connection for streaming.
         _ => Err(anyhow::anyhow!("unknown method: {}", method)),
@@ -327,8 +336,14 @@ async fn handle_daemon_status(state: &Arc<SocketState>) -> Result<Value> {
     let chrome_running = is_chrome_running();
 
     let job_store = &state.job_store;
-    let pending: usize = job_store.list(Some(JobStatus::Pending), 1000).map(|j: Vec<Job>| j.len()).unwrap_or(0);
-    let running: usize = job_store.list(Some(JobStatus::Running), 1000).map(|j: Vec<Job>| j.len()).unwrap_or(0);
+    let pending: usize = job_store
+        .list(Some(JobStatus::Pending), 1000)
+        .map(|j: Vec<Job>| j.len())
+        .unwrap_or(0);
+    let running: usize = job_store
+        .list(Some(JobStatus::Running), 1000)
+        .map(|j: Vec<Job>| j.len())
+        .unwrap_or(0);
 
     let am = state.adapter_manager.list_adapters().await;
     let total = am.len();
@@ -387,15 +402,19 @@ async fn handle_adapter_sync(params: &Value, state: &Arc<SocketState>) -> Result
 }
 
 async fn handle_adapter_list(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
-    let include_disabled = params.get("include_disabled").and_then(|v| v.as_bool()).unwrap_or(false);
-    let include_hidden = params.get("include_hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+    let include_disabled = params
+        .get("include_disabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let include_hidden = params
+        .get("include_hidden")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let adapters = state.adapter_manager.list_adapters().await;
     let filtered: Vec<_> = adapters
         .into_iter()
-        .filter(|a| {
-            (include_disabled || a.enabled) && (include_hidden || !a.hidden)
-        })
+        .filter(|a| (include_disabled || a.enabled) && (include_hidden || !a.hidden))
         .collect();
 
     Ok(serde_json::json!({
@@ -409,7 +428,10 @@ async fn handle_adapter_search(params: &Value, state: &Arc<SocketState>) -> Resu
         .get("query")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
-    let include_hidden = params.get("include_hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+    let include_hidden = params
+        .get("include_hidden")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let results = state.adapter_manager.search(query, include_hidden).await;
     Ok(serde_json::json!({
@@ -486,7 +508,12 @@ async fn handle_issue_add(params: &Value, state: &Arc<SocketState>) -> Result<Va
         .get("adapter")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("missing 'adapter' parameter"))?;
-    let kind = IssueKind::from(params.get("kind").and_then(|v| v.as_str()).unwrap_or("other"));
+    let kind = IssueKind::from(
+        params
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("other"),
+    );
     let title = params
         .get("title")
         .and_then(|v| v.as_str())
@@ -571,7 +598,9 @@ async fn handle_job_add(params: &Value, state: &Arc<SocketState>) -> Result<Valu
         None => Utc::now(),
     };
 
-    let job = state.job_store.add(adapter, args, run_at, interval_seconds)?;
+    let job = state
+        .job_store
+        .add(adapter, args, run_at, interval_seconds)?;
     Ok(serde_json::json!({
         "job": job,
     }))
@@ -582,10 +611,7 @@ async fn handle_job_list(params: &Value, state: &Arc<SocketState>) -> Result<Val
         .get("status")
         .and_then(|v| v.as_str())
         .map(JobStatus::from);
-    let limit = params
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(50) as usize;
+    let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
     let jobs = state.job_store.list(status_filter, limit)?;
     Ok(serde_json::json!({
@@ -679,7 +705,9 @@ async fn handle_plugin_update(params: &Value, state: &Arc<SocketState>) -> Resul
             for (name, result) in results {
                 match result {
                     Ok(_) => updated.push(name),
-                    Err(e) => errors.push(serde_json::json!({ "plugin": name, "error": e.to_string() })),
+                    Err(e) => {
+                        errors.push(serde_json::json!({ "plugin": name, "error": e.to_string() }))
+                    }
                 }
             }
             if !updated.is_empty() {
