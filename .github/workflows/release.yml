@@ -71,15 +71,12 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             asset_name: opencli-daemon-macos-arm64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            asset_name: opencli-daemon-macos-x86_64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             asset_name: opencli-daemon-linux-x86_64
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            asset_name: opencli-daemon-linux-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset_name: opencli-daemon-windows-x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -92,29 +89,31 @@ jobs:
         with:
           shared-key: "release-${{ matrix.target }}"
 
-      - name: Install cross (for Linux targets)
-        if: runner.os == 'Linux'
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build (Linux via cross)
+      - name: Install musl tools (Linux)
         if: runner.os == 'Linux'
         run: |
-          cross build --release --target ${{ matrix.target }} -p opencli-rs-daemon
+          sudo apt-get update -qq
+          sudo apt-get install -y musl-tools
 
-      - name: Build (macOS native)
-        if: runner.os == 'macOS'
+      - name: Build
         run: |
           cargo build --release --target ${{ matrix.target }} -p opencli-rs-daemon
 
       - name: Prepare artifact
         shell: bash
         run: |
-          SRC="target/${{ matrix.target }}/release/opencli-daemon"
-          cp "$SRC" "${{ matrix.asset_name }}"
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            shasum -a 256 "${{ matrix.asset_name }}" > "${{ matrix.asset_name }}.sha256"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            SRC="target/${{ matrix.target }}/release/opencli-daemon.exe"
+            DEST="${{ matrix.asset_name }}.exe"
           else
-            sha256sum "${{ matrix.asset_name }}" > "${{ matrix.asset_name }}.sha256"
+            SRC="target/${{ matrix.target }}/release/opencli-daemon"
+            DEST="${{ matrix.asset_name }}"
+          fi
+          cp "$SRC" "$DEST"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            shasum -a 256 "$DEST" > "$DEST.sha256"
+          else
+            sha256sum "$DEST" > "$DEST.sha256"
           fi
 
       - name: Upload artifact
@@ -122,8 +121,7 @@ jobs:
         with:
           name: ${{ matrix.asset_name }}
           path: |
-            ${{ matrix.asset_name }}
-            ${{ matrix.asset_name }}.sha256
+            ${{ matrix.asset_name }}*
           retention-days: 1
 
   # ── Step 4：创建 GitHub Release ──────────────────────────────────────────────
@@ -213,9 +211,8 @@ jobs:
             | 平台 | 文件 |
             |---|---|
             | macOS Apple Silicon | `opencli-daemon-macos-arm64` |
-            | macOS Intel | `opencli-daemon-macos-x86_64` |
             | Linux x86_64 | `opencli-daemon-linux-x86_64` |
-            | Linux ARM64 | `opencli-daemon-linux-arm64` |
+            | Windows x86_64 | `opencli-daemon-windows-x86_64.exe` |
 
             ```bash
             # 以 macOS arm64 为例
@@ -285,21 +282,13 @@ jobs:
 
           case "\$OS" in
             Darwin)
-              case "\$ARCH" in
-                arm64)  BINARY="opencli-daemon-macos-arm64" ;;
-                x86_64) BINARY="opencli-daemon-macos-x86_64" ;;
-                *) echo "Unsupported macOS arch: \$ARCH"; exit 1 ;;
-              esac
+              BINARY="opencli-daemon-macos-arm64"
               ;;
             Linux)
-              case "\$ARCH" in
-                x86_64)          BINARY="opencli-daemon-linux-x86_64" ;;
-                aarch64 | arm64) BINARY="opencli-daemon-linux-arm64" ;;
-                *) echo "Unsupported Linux arch: \$ARCH"; exit 1 ;;
-              esac
+              BINARY="opencli-daemon-linux-x86_64"
               ;;
             *)
-              echo "Unsupported OS: \$OS"
+              echo "Unsupported OS: \$OS (Windows users: download opencli-daemon-windows-x86_64.exe manually)"
               exit 1
               ;;
           esac
