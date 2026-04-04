@@ -180,7 +180,8 @@ opencli-cli socket adapter.search '{"query":"bilibili"}'
 
 | 格式 | 说明 |
 |---|---|
-| `github:user/repo` | 从 GitHub 克隆 |
+| `github:user/repo` | 从 GitHub 克隆整个仓库 |
+| `github:user/repo/subpath` | 克隆仓库，只安装 `subpath/` 子目录作为插件 |
 | `https://github.com/user/repo.git` | 完整 HTTPS URL |
 | `git@github.com:user/repo.git` | SSH URL |
 | `file:///absolute/path` | 本地目录（符号链接，改动实时生效）|
@@ -201,21 +202,24 @@ opencli-cli socket adapter.search '{"query":"bilibili"}'
 若无 manifest，插件名取自目录名，目录内所有 `.yaml` 文件作为 adapter 加载。
 
 ```bash
-# 安装插件
-opencli-cli socket plugin.install '{"source":"github:user/my-plugin"}'
-opencli-cli socket plugin.install '{"source":"file:///path/to/local-plugin"}'
+# 安装插件（整个仓库，裸 user/repo 自动补 github:）
+opencli-cli plugin install user/my-plugin
+# 安装仓库中的某个子目录
+opencli-cli plugin install user/monorepo/plugins/my-plugin
+# 本地目录（符号链接，开发用）
+opencli-cli plugin install /path/to/local-plugin
 
 # 查看已安装插件
-opencli-cli socket plugin.list
+opencli-cli plugin list
 
-# 更新指定插件（git pull）
-opencli-cli socket plugin.update '{"name":"my-plugin"}'
+# 更新指定插件（git pull 或重新克隆）
+opencli-cli plugin update my-plugin
 
 # 更新所有插件
-opencli-cli socket plugin.update '{}'
+opencli-cli plugin update
 
 # 卸载插件
-opencli-cli socket plugin.uninstall '{"name":"my-plugin"}'
+opencli-cli plugin uninstall my-plugin
 ```
 
 安装/卸载/更新后 daemon 自动重新加载所有 adapter（等同于 `adapter.reload`）。
@@ -278,7 +282,7 @@ daemon 启动、`adapter.reload`、`adapter.sync` 时触发增量同步：
 | `adapter.reload` | — | 重新扫描 yaml 文件并增量同步索引 |
 | `adapter.reindex` | — | 强制全量重建 FTS 索引 |
 | `adapter.sync` | `folder` | 从指定目录同步并增量更新索引 |
-| `plugin.install` | `source` | 安装插件并重载 adapter |
+| `plugin.install` | `path` | 安装插件并重载 adapter |
 | `plugin.uninstall` | `name` | 卸载插件并重载 adapter |
 | `plugin.list` | — | 列出所有已安装插件 |
 | `plugin.update` | `name`（可选，不传则更新全部）| 更新插件（git pull）并重载 adapter |

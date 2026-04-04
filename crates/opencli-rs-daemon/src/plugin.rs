@@ -5,6 +5,7 @@
 //!
 //! Install sources:
 //!   github:user/repo           → clone https://github.com/user/repo.git
+//!   github:user/repo/subpath   → clone repo, install only subpath/ as the plugin
 //!   https://...                → clone URL directly
 //!   git@host:user/repo.git     → clone SSH URL
 //!   file:///absolute/path      → symlink (Unix) or copy (Windows)
@@ -59,7 +60,11 @@ type PluginLock = HashMap<String, PluginLockEntry>;
 
 #[derive(Debug)]
 enum SourceKind {
-    Git(String),
+    /// clone_url, optional subpath inside the repo
+    Git {
+        clone_url: String,
+        subpath: Option<String>,
+    },
     Local(PathBuf),
 }
 
@@ -150,23 +155,23 @@ impl PluginManager {
     fn parse_source(source: &str) -> SourceKind {
         // github:user/repo  or  github:user/repo/subpath
         if let Some(repo) = source.strip_prefix("github:") {
-            // Take only the first two path segments for the clone URL
             let parts: Vec<&str> = repo.splitn(3, '/').collect();
             let clone_url = format!(
                 "https://github.com/{}/{}.git",
                 parts.first().copied().unwrap_or(""),
                 parts.get(1).copied().unwrap_or(""),
             );
-            return SourceKind::Git(clone_url);
+            let subpath = parts.get(2).filter(|s| !s.is_empty()).map(|s| s.to_string());
+            return SourceKind::Git { clone_url, subpath };
         }
-        // Full HTTPS or SSH URL
+        // Full HTTPS or SSH URL (no subpath support for raw URLs)
         if source.starts_with("https://")
             || source.starts_with("git@")
             || source.starts_with("ssh://")
         {
-            return SourceKind::Git(source.to_string());
+            return SourceKind::Git { clone_url: source.to_string(), subpath: None };
         }
-        // Local path: file:///path, local:/path, or bare /path
+        // Local path: file:///path, local:/path, or bare /absolute/path
         let path_str = source
             .strip_prefix("file://")
             .or_else(|| source.strip_prefix("local:"))
@@ -195,12 +200,19 @@ impl PluginManager {
         fs::create_dir_all(&self.plugins_dir)?;
 
         match Self::parse_source(source) {
-            SourceKind::Git(url) => self.install_git(source, &url).await,
+            SourceKind::Git { clone_url, subpath } => {
+                self.install_git(source, &clone_url, subpath.as_deref()).await
+            }
             SourceKind::Local(path) => self.install_local(source, &path),
         }
     }
 
-    async fn install_git(&self, original_source: &str, clone_url: &str) -> Result<PluginInfo> {
+    async fn install_git(
+        &self,
+        original_source: &str,
+        clone_url: &str,
+        subpath: Option<&str>,
+    ) -> Result<PluginInfo> {
         let tmp_name = format!(".tmp-{}", Uuid::new_v4());
         let tmp_dir = self.plugins_dir.join(&tmp_name);
         let url = clone_url.to_string();
@@ -223,31 +235,59 @@ impl PluginManager {
         })
         .await?;
 
-        // Clean up temp dir on any failure after this point
         if let Err(e) = clone_result {
             let _ = fs::remove_dir_all(&tmp_dir);
             return Err(e);
         }
 
-        let manifest = self.read_manifest(&tmp_dir);
+        // Effective plugin root: repo root, or subpath inside repo
+        let plugin_root = match subpath {
+            Some(sp) => {
+                let sub = tmp_dir.join(sp);
+                if !sub.is_dir() {
+                    let _ = fs::remove_dir_all(&tmp_dir);
+                    return Err(anyhow::anyhow!(
+                        "subpath '{}' not found in repository",
+                        sp
+                    ));
+                }
+                sub
+            }
+            None => tmp_dir.clone(),
+        };
+
+        let manifest = self.read_manifest(&plugin_root);
         let dest = self.plugins_dir.join(&manifest.name);
 
         let result = (|| -> Result<()> {
             if dest.exists() {
                 fs::remove_dir_all(&dest)?;
             }
-            fs::rename(&tmp_dir, &dest)?;
+            if subpath.is_some() {
+                // Only copy the subpath dir; tmp_dir (full clone) goes away after
+                copy_dir_all(&plugin_root, &dest)?;
+            } else {
+                // Move the whole clone (preserves .git for future git pull)
+                fs::rename(&tmp_dir, &dest)?;
+            }
             Ok(())
         })();
 
+        // Always clean up the full clone temp dir (rename moved it; copy left it behind)
+        let _ = fs::remove_dir_all(&tmp_dir);
+
         if let Err(e) = result {
-            let _ = fs::remove_dir_all(&tmp_dir);
             return Err(e);
         }
 
         let now = Utc::now().to_rfc3339();
         self.upsert_lock(&manifest.name, original_source)?;
-        info!(plugin = %manifest.name, url = %clone_url, "Plugin installed from git");
+        info!(
+            plugin = %manifest.name,
+            url = %clone_url,
+            subpath = subpath.unwrap_or("(root)"),
+            "Plugin installed from git"
+        );
         Ok(self.plugin_info(&dest, original_source, &now))
     }
 
@@ -284,9 +324,7 @@ impl PluginManager {
             std::os::unix::fs::symlink(&abs, &dest)?;
         }
         #[cfg(not(unix))]
-        {
-            copy_dir_all(src_path, &dest)?;
-        }
+        copy_dir_all(src_path, &dest)?;
 
         let now = Utc::now().to_rfc3339();
         self.upsert_lock(&manifest.name, original_source)?;
@@ -358,7 +396,12 @@ impl PluginManager {
         Ok(plugins)
     }
 
-    /// Update a plugin (git pull for git-sourced plugins; no-op for local).
+    /// Update a plugin.
+    ///
+    /// - Full-repo git install (`github:user/repo`): `git pull --ff-only` in place.
+    /// - Subpath git install (`github:user/repo/sub`): re-clone and re-copy,
+    ///   because the plugin dir contains only the subpath (no `.git`).
+    /// - Local: no-op (symlink points to live source).
     pub async fn update(&self, name: &str) -> Result<()> {
         let plugin_dir = self.plugins_dir.join(name);
         if !plugin_dir.exists() {
@@ -368,7 +411,13 @@ impl PluginManager {
         let source = lock.get(name).map(|e| e.source.clone()).unwrap_or_default();
 
         match Self::parse_source(&source) {
-            SourceKind::Git(_) => {
+            SourceKind::Git { clone_url: _, subpath: Some(_) } => {
+                // Subpath install: no .git in plugin dir — re-install from scratch
+                info!(plugin = %name, "Subpath plugin — re-cloning to update");
+                self.install_git(&source, &Self::clone_url_from_source(&source), Self::subpath_from_source(&source).as_deref()).await?;
+            }
+            SourceKind::Git { clone_url: _, subpath: None } => {
+                // Full-repo install: .git is present — git pull in place
                 let dir = plugin_dir.clone();
                 let out = tokio::task::spawn_blocking(move || {
                     std::process::Command::new("git")
@@ -391,6 +440,28 @@ impl PluginManager {
             }
         }
         Ok(())
+    }
+
+    /// Extract clone URL from a source string (re-parse without subpath).
+    fn clone_url_from_source(source: &str) -> String {
+        if let Some(repo) = source.strip_prefix("github:") {
+            let parts: Vec<&str> = repo.splitn(3, '/').collect();
+            return format!(
+                "https://github.com/{}/{}.git",
+                parts.first().copied().unwrap_or(""),
+                parts.get(1).copied().unwrap_or(""),
+            );
+        }
+        source.to_string()
+    }
+
+    /// Extract subpath from a `github:user/repo/subpath` source string.
+    fn subpath_from_source(source: &str) -> Option<String> {
+        if let Some(repo) = source.strip_prefix("github:") {
+            let parts: Vec<&str> = repo.splitn(3, '/').collect();
+            return parts.get(2).filter(|s| !s.is_empty()).map(|s| s.to_string());
+        }
+        None
     }
 
     /// Update all installed plugins.
@@ -439,8 +510,7 @@ impl PluginManager {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Recursive directory copy (used on non-Unix where symlinks aren't available).
-#[cfg(not(unix))]
+/// Recursive directory copy.
 fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {

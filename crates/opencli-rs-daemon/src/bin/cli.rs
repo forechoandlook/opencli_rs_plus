@@ -53,6 +53,11 @@ enum Command {
         #[command(subcommand)]
         sub: ToolsSubcommand,
     },
+    /// Plugin management
+    Plugin {
+        #[command(subcommand)]
+        sub: PluginSubcommand,
+    },
     /// Send a raw socket command (for debugging)
     Socket {
         #[arg(trailing_var_arg = true)]
@@ -101,6 +106,22 @@ enum JobSubcommand {
     Delete { id: String },
     /// Trigger due jobs immediately
     Run,
+}
+
+#[derive(Subcommand)]
+enum PluginSubcommand {
+    /// Install a plugin
+    Install {
+        /// Plugin source: user/repo, user/repo/subpath, github:user/repo,
+        /// https://..., file:///path, or /local/path
+        path: String,
+    },
+    /// Uninstall a plugin by name
+    Uninstall { name: String },
+    /// List installed plugins
+    List,
+    /// Update a plugin (or all plugins if name omitted)
+    Update { name: Option<String> },
 }
 
 #[derive(Subcommand)]
@@ -591,6 +612,85 @@ fn cmd_tools_summary() -> Result<()> {
     Ok(())
 }
 
+fn cmd_plugin_install(addr: &str, path: &str) -> Result<()> {
+    // Expand bare "user/repo" and "user/repo/subpath" → "github:user/repo[/subpath]"
+    let source = if !path.contains(':') && !path.starts_with('/') {
+        format!("github:{}", path)
+    } else {
+        path.to_string()
+    };
+    let result = socket_request(addr, "plugin.install", serde_json::json!({ "path": source }))?;
+    let plugin = &result["plugin"];
+    println!(
+        "Installed plugin '{}' ({})",
+        plugin["name"].as_str().unwrap_or("?"),
+        plugin["source"].as_str().unwrap_or("?"),
+    );
+    if let Some(desc) = plugin["description"].as_str().filter(|s| !s.is_empty()) {
+        println!("  {}", desc);
+    }
+    Ok(())
+}
+
+fn cmd_plugin_uninstall(addr: &str, name: &str) -> Result<()> {
+    socket_request(addr, "plugin.uninstall", serde_json::json!({ "name": name }))?;
+    println!("Uninstalled plugin '{}'", name);
+    Ok(())
+}
+
+fn cmd_plugin_list(addr: &str) -> Result<()> {
+    let result = socket_request(addr, "plugin.list", serde_json::json!({}))?;
+    let plugins = result
+        .get("plugins")
+        .and_then(|v| v.as_array())
+        .map_or(&[] as &[_], |v| v.as_slice());
+    if plugins.is_empty() {
+        println!("No plugins installed.");
+        return Ok(());
+    }
+    println!("{:25} {:10} {}", "Name", "Version", "Source");
+    println!("{}", "-".repeat(80));
+    for p in plugins {
+        println!(
+            "{:25} {:10} {}",
+            p["name"].as_str().unwrap_or("?"),
+            p["version"].as_str().unwrap_or("-"),
+            p["source"].as_str().unwrap_or("?"),
+        );
+    }
+    println!("\n{} plugin(s)", plugins.len());
+    Ok(())
+}
+
+fn cmd_plugin_update(addr: &str, name: Option<&str>) -> Result<()> {
+    let params = match name {
+        Some(n) => serde_json::json!({ "name": n }),
+        None => serde_json::json!({}),
+    };
+    let result = socket_request(addr, "plugin.update", params)?;
+    let updated = result
+        .get("updated")
+        .and_then(|v| v.as_array())
+        .map_or(vec![], |v| {
+            v.iter().filter_map(|s| s.as_str()).collect()
+        });
+    if updated.is_empty() {
+        println!("Nothing to update.");
+    } else {
+        println!("Updated: {}", updated.join(", "));
+    }
+    if let Some(errors) = result.get("errors").and_then(|v| v.as_array()) {
+        for e in errors {
+            eprintln!(
+                "  error: {} — {}",
+                e["plugin"].as_str().unwrap_or("?"),
+                e["error"].as_str().unwrap_or("?")
+            );
+        }
+    }
+    Ok(())
+}
+
 fn cmd_job_run(addr: &str) -> Result<()> {
     socket_request(addr, "job.run", serde_json::json!({}))?;
     println!("Due jobs triggered");
@@ -645,6 +745,13 @@ fn main() -> Result<()> {
             ToolsSubcommand::List => cmd_tools_list()?,
             ToolsSubcommand::Info { name } => cmd_tools_info(&name)?,
             ToolsSubcommand::Summary => cmd_tools_summary()?,
+        },
+
+        Command::Plugin { sub } => match sub {
+            PluginSubcommand::Install { path } => cmd_plugin_install(&addr, &path)?,
+            PluginSubcommand::Uninstall { name } => cmd_plugin_uninstall(&addr, &name)?,
+            PluginSubcommand::List => cmd_plugin_list(&addr)?,
+            PluginSubcommand::Update { name } => cmd_plugin_update(&addr, name.as_deref())?,
         },
 
         Command::Socket { args: raw_args } => {

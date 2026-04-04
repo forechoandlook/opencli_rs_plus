@@ -663,9 +663,10 @@ async fn handle_job_run(state: &Arc<SocketState>) -> Result<Value> {
 
 async fn handle_plugin_install(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
     let source = params
-        .get("source")
+        .get("path")
+        .or_else(|| params.get("source"))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("missing 'source' parameter"))?;
+        .ok_or_else(|| anyhow::anyhow!("missing 'path' parameter"))?;
 
     let info = state.plugin_manager.install(source).await?;
     // Reload so the new plugin's adapters are immediately available
