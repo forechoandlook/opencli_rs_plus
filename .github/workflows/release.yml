@@ -92,20 +92,17 @@ jobs:
         with:
           shared-key: "release-${{ matrix.target }}"
 
-      - name: Install musl tools
-        if: contains(matrix.target, 'musl')
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y musl-tools
+      - name: Install cross (for Linux targets)
+        if: runner.os == 'Linux'
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Install aarch64 cross compiler
-        if: matrix.target == 'aarch64-unknown-linux-musl'
+      - name: Build (Linux via cross)
+        if: runner.os == 'Linux'
         run: |
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          echo '[target.aarch64-unknown-linux-musl]' >> ~/.cargo/config.toml
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+          cross build --release --target ${{ matrix.target }} -p opencli-rs-daemon
 
-      - name: Build
+      - name: Build (macOS native)
+        if: runner.os == 'macOS'
         run: |
           cargo build --release --target ${{ matrix.target }} -p opencli-rs-daemon
 
