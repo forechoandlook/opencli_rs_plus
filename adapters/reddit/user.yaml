@@ -10,6 +10,7 @@ args:
     positional: true
     type: string
     required: true
+    description: Reddit username
 
 columns: [field, value]
 

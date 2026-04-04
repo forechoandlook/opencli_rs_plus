@@ -19,6 +19,8 @@ args:
     default: grouped
     description: "Output mode: grouped (readable paragraphs) or raw (every segment)"
 
+columns: [timestamp, speaker, text]
+
 pipeline:
   - evaluate: |
       (() => {

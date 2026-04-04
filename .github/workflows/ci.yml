@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+    branches: [master, main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo registry & build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          # 按 Cargo.lock hash 缓存，避免无效缓存
+          shared-key: "ci"
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (warnings as errors)
+        run: |
+          cargo clippy \
+            --workspace \
+            --exclude opencli-rs-browser \
+            --exclude opencli-rs-ai \
+            --exclude opencli-rs-cli \
+            --exclude opencli-rs-external \
+            -- -D warnings
+
+      - name: Run unit & integration tests
+        run: |
+          cargo test \
+            --workspace \
+            --exclude opencli-rs-browser \
+            --exclude opencli-rs-ai \
+            --exclude opencli-rs-cli \
+            --exclude opencli-rs-external \
+            -- --test-threads=4
+
+      - name: Verify all adapter YAML files parse (corpus test)
+        run: |
+          cargo test \
+            -p opencli-rs-discovery \
+            --test adapter_corpus \
+            -- --nocapture

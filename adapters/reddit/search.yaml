@@ -10,6 +10,7 @@ args:
     positional: true
     type: string
     required: true
+    description: Search keyword or query string
   subreddit:
     type: string
     default: ""

@@ -1,0 +1,350 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── Step 1：测试 ────────────────────────────────────────────────────────────
+  test:
+    name: Test before release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release"
+      - name: Run all tests
+        run: |
+          cargo test \
+            --workspace \
+            --exclude opencli-rs-browser \
+            --exclude opencli-rs-ai \
+            --exclude opencli-rs-cli \
+            --exclude opencli-rs-external
+
+  # ── Step 2：打包 adapters + summaries（与平台无关，只需一次）───────────────
+  package-assets:
+    name: Package adapters & summaries
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package adapters
+        run: |
+          tar -czf adapters.tar.gz adapters/
+          sha256sum adapters.tar.gz > adapters.tar.gz.sha256
+
+      - name: Package summaries
+        run: |
+          tar -czf summaries.tar.gz summaries/
+          sha256sum summaries.tar.gz > summaries.tar.gz.sha256
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            adapters.tar.gz
+            adapters.tar.gz.sha256
+            summaries.tar.gz
+            summaries.tar.gz.sha256
+          retention-days: 1
+
+  # ── Step 3：交叉编译 ─────────────────────────────────────────────────────────
+  build:
+    name: Build ${{ matrix.target }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset_name: opencli-daemon-macos-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            asset_name: opencli-daemon-macos-x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset_name: opencli-daemon-linux-x86_64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            asset_name: opencli-daemon-linux-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release-${{ matrix.target }}"
+
+      - name: Install musl tools
+        if: contains(matrix.target, 'musl')
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y musl-tools
+
+      - name: Install aarch64 cross compiler
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo '[target.aarch64-unknown-linux-musl]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
+      - name: Build
+        run: |
+          cargo build --release --target ${{ matrix.target }} -p opencli-rs-daemon
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          SRC="target/${{ matrix.target }}/release/opencli-daemon"
+          cp "$SRC" "${{ matrix.asset_name }}"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            shasum -a 256 "${{ matrix.asset_name }}" > "${{ matrix.asset_name }}.sha256"
+          else
+            sha256sum "${{ matrix.asset_name }}" > "${{ matrix.asset_name }}.sha256"
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: |
+            ${{ matrix.asset_name }}
+            ${{ matrix.asset_name }}.sha256
+          retention-days: 1
+
+  # ── Step 4：创建 GitHub Release ──────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [build, package-assets]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          if [[ "$TAG" == *"-"* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | sed -n '2p')
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+          fi
+          CHANGELOG=$(git log $RANGE \
+            --pretty=format:"- %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" \
+            --no-merges | head -50)
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- No significant changes"
+          fi
+          {
+            echo "content<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: List release assets
+        run: ls -lh artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Release ${{ steps.version.outputs.tag }}"
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          body: |
+            ## What's Changed
+
+            ${{ steps.changelog.outputs.content }}
+
+            ---
+
+            ## 安装
+
+            ### 一键安装脚本（推荐）
+
+            ```bash
+            curl -fsSL https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/install.sh | bash
+            ```
+
+            脚本会自动：
+            1. 检测系统平台，下载对应二进制
+            2. 安装到 `/usr/local/bin/opencli-daemon`
+            3. 解压 `adapters/` 和 `summaries/` 到 `~/.opencli-rs/`
+
+            ### 手动安装
+
+            **1. 下载二进制**
+
+            | 平台 | 文件 |
+            |---|---|
+            | macOS Apple Silicon | `opencli-daemon-macos-arm64` |
+            | macOS Intel | `opencli-daemon-macos-x86_64` |
+            | Linux x86_64 | `opencli-daemon-linux-x86_64` |
+            | Linux ARM64 | `opencli-daemon-linux-arm64` |
+
+            ```bash
+            # 以 macOS arm64 为例
+            curl -L .../opencli-daemon-macos-arm64 -o opencli-daemon
+            chmod +x opencli-daemon
+            sudo mv opencli-daemon /usr/local/bin/
+            ```
+
+            **2. 安装 adapters（必须）**
+
+            ```bash
+            curl -L .../adapters.tar.gz | tar -xz -C ~/.opencli-rs/
+            ```
+
+            **3. 安装 summaries（可选，AI 搜索用）**
+
+            ```bash
+            curl -L .../summaries.tar.gz | tar -xz -C ~/.opencli-rs/
+            ```
+
+            ### 校验文件完整性
+
+            ```bash
+            sha256sum -c opencli-daemon-linux-x86_64.sha256
+            sha256sum -c adapters.tar.gz.sha256
+            ```
+          files: |
+            artifacts/opencli-daemon-*
+            artifacts/adapters.tar.gz
+            artifacts/adapters.tar.gz.sha256
+            artifacts/summaries.tar.gz
+            artifacts/summaries.tar.gz.sha256
+            artifacts/install.sh
+          fail_on_unmatched_files: false
+
+  # ── Step 5：生成并上传安装脚本 ───────────────────────────────────────────────
+  # 注意：install.sh 在 release 创建后单独上传，因为脚本里需要引用 release URL
+  upload-install-script:
+    name: Upload install script
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate install.sh
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          REPO="${{ github.repository }}"
+          BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
+
+          cat > install.sh << SCRIPT
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          TAG="${TAG}"
+          REPO="${REPO}"
+          BASE_URL="${BASE_URL}"
+          INSTALL_DIR="\${OPENCLI_INSTALL_DIR:-/usr/local/bin}"
+          DATA_DIR="\${OPENCLI_DATA_DIR:-\$HOME/.opencli-rs}"
+
+          # ── 检测平台 ─────────────────────────────────────────────────────────
+          OS="\$(uname -s)"
+          ARCH="\$(uname -m)"
+
+          case "\$OS" in
+            Darwin)
+              case "\$ARCH" in
+                arm64)  BINARY="opencli-daemon-macos-arm64" ;;
+                x86_64) BINARY="opencli-daemon-macos-x86_64" ;;
+                *) echo "Unsupported macOS arch: \$ARCH"; exit 1 ;;
+              esac
+              ;;
+            Linux)
+              case "\$ARCH" in
+                x86_64)          BINARY="opencli-daemon-linux-x86_64" ;;
+                aarch64 | arm64) BINARY="opencli-daemon-linux-arm64" ;;
+                *) echo "Unsupported Linux arch: \$ARCH"; exit 1 ;;
+              esac
+              ;;
+            *)
+              echo "Unsupported OS: \$OS"
+              exit 1
+              ;;
+          esac
+
+          echo "Platform: \$OS/\$ARCH → \$BINARY"
+
+          # ── 下载二进制 ───────────────────────────────────────────────────────
+          TMP="\$(mktemp -d)"
+          trap 'rm -rf "\$TMP"' EXIT
+
+          echo "Downloading \$BINARY..."
+          curl -fsSL "\${BASE_URL}/\${BINARY}" -o "\$TMP/opencli-daemon"
+          chmod +x "\$TMP/opencli-daemon"
+
+          # ── 安装二进制 ───────────────────────────────────────────────────────
+          if [ -w "\$INSTALL_DIR" ]; then
+            mv "\$TMP/opencli-daemon" "\$INSTALL_DIR/opencli-daemon"
+          else
+            echo "Installing to \$INSTALL_DIR (sudo required)..."
+            sudo mv "\$TMP/opencli-daemon" "\$INSTALL_DIR/opencli-daemon"
+          fi
+          echo "✓ Installed opencli-daemon to \$INSTALL_DIR/opencli-daemon"
+
+          # ── 安装 adapters ────────────────────────────────────────────────────
+          mkdir -p "\$DATA_DIR"
+          echo "Downloading adapters..."
+          curl -fsSL "\${BASE_URL}/adapters.tar.gz" | tar -xz -C "\$DATA_DIR"
+          echo "✓ Adapters installed to \$DATA_DIR/adapters/"
+
+          # ── 安装 summaries ───────────────────────────────────────────────────
+          echo "Downloading summaries..."
+          curl -fsSL "\${BASE_URL}/summaries.tar.gz" | tar -xz -C "\$DATA_DIR"
+          echo "✓ Summaries installed to \$DATA_DIR/summaries/"
+
+          echo ""
+          echo "Installation complete! Run: opencli-daemon --help"
+          SCRIPT
+
+          chmod +x install.sh
+
+      - name: Upload install.sh to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" install.sh --clobber

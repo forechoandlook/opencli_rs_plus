@@ -10,6 +10,7 @@ args:
     type: string
     positional: true
     required: true
+    description: Subreddit name (without r/ prefix)
   sort:
     type: string
     default: hot

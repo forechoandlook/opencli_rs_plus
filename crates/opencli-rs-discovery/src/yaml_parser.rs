@@ -185,4 +185,249 @@ domain: www.bilibili.com
         let yaml = "name: test\n";
         assert!(parse_yaml_adapter(yaml).is_err());
     }
+
+    #[test]
+    fn test_parse_missing_name_errors() {
+        let yaml = "site: test\n";
+        assert!(parse_yaml_adapter(yaml).is_err());
+    }
+
+    #[test]
+    fn test_invalid_yaml_errors() {
+        let yaml = "site: [unclosed bracket\nname: test";
+        assert!(parse_yaml_adapter(yaml).is_err());
+    }
+
+    #[test]
+    fn test_unknown_arg_type_defaults_to_str() {
+        let yaml = r#"
+site: test
+name: cmd
+args:
+  ts:
+    type: datetime
+    description: A timestamp
+"#;
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        assert_eq!(cmd.args[0].arg_type, ArgType::Str);
+    }
+
+    #[test]
+    fn test_arg_types_all_variants() {
+        let yaml = r#"
+site: test
+name: cmd
+args:
+  a:
+    type: int
+  b:
+    type: number
+  c:
+    type: bool
+  d:
+    type: boolean
+  e:
+    type: str
+"#;
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        // HashMap — 顺序不固定，按名字查
+        let find = |name: &str| cmd.args.iter().find(|a| a.name == name).unwrap().arg_type.clone();
+        assert_eq!(find("a"), ArgType::Int);
+        assert_eq!(find("b"), ArgType::Number);
+        assert_eq!(find("c"), ArgType::Bool);
+        assert_eq!(find("d"), ArgType::Boolean);
+        assert_eq!(find("e"), ArgType::Str);
+    }
+
+    #[test]
+    fn test_empty_args_object() {
+        let yaml = "site: test\nname: cmd\nargs: {}\n";
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        assert!(cmd.args.is_empty());
+    }
+
+    #[test]
+    fn test_no_args_field() {
+        let yaml = "site: test\nname: cmd\n";
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        assert!(cmd.args.is_empty());
+    }
+
+    #[test]
+    fn test_no_pipeline_field() {
+        let yaml = "site: test\nname: cmd\n";
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        assert!(cmd.pipeline.is_none());
+    }
+
+    #[test]
+    fn test_empty_pipeline_array() {
+        // 空 pipeline 数组（不常见但不应 crash）
+        let yaml = "site: test\nname: cmd\npipeline: []\n";
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        // 空数组在 as_array() 返回 Some([])，pipeline 应该是 Some([])
+        assert!(cmd.pipeline.is_some());
+        assert_eq!(cmd.pipeline.unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_required_arg() {
+        let yaml = r#"
+site: test
+name: cmd
+args:
+  query:
+    required: true
+    description: Search keyword
+"#;
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        let arg = &cmd.args[0];
+        assert!(arg.required);
+        assert_eq!(arg.name, "query");
+    }
+
+    #[test]
+    fn test_positional_arg() {
+        let yaml = r#"
+site: test
+name: cmd
+args:
+  query:
+    positional: true
+    required: true
+    description: Keyword
+"#;
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        let arg = &cmd.args[0];
+        assert!(arg.positional);
+        assert!(arg.required);
+    }
+
+    #[test]
+    fn test_arg_with_choices() {
+        let yaml = r#"
+site: test
+name: cmd
+args:
+  format:
+    type: str
+    default: json
+    choices: [json, csv, table]
+    description: Output format
+"#;
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        let arg = &cmd.args[0];
+        let choices = arg.choices.as_ref().expect("choices should be present");
+        assert_eq!(choices.len(), 3);
+        assert!(choices.contains(&"json".to_string()));
+    }
+
+    #[test]
+    fn test_arg_default_value() {
+        let yaml = r#"
+site: test
+name: cmd
+args:
+  limit:
+    type: int
+    default: 20
+"#;
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        let arg = &cmd.args[0];
+        assert_eq!(arg.default, Some(serde_json::json!(20)));
+    }
+
+    #[test]
+    fn test_timeout_seconds() {
+        let yaml = "site: test\nname: cmd\ntimeoutSeconds: 30\n";
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        assert_eq!(cmd.timeout_seconds, Some(30));
+    }
+
+    #[test]
+    fn test_version_and_updated_at() {
+        let yaml = r#"
+site: test
+name: cmd
+version: "1.2.3"
+updatedAt: "2026-01-01"
+"#;
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        assert_eq!(cmd.version.as_deref(), Some("1.2.3"));
+        assert_eq!(cmd.updated_at.as_deref(), Some("2026-01-01"));
+    }
+
+    #[test]
+    fn test_description_defaults_to_empty_string() {
+        let yaml = "site: test\nname: cmd\n";
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        assert_eq!(cmd.description, "");
+    }
+
+    #[test]
+    fn test_strategy_defaults_to_public() {
+        let yaml = "site: test\nname: cmd\n";
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        assert_eq!(cmd.strategy, Strategy::Public);
+    }
+
+    #[test]
+    fn test_public_strategy_browser_defaults_to_false() {
+        let yaml = "site: test\nname: cmd\nstrategy: public\n";
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        assert!(!cmd.browser);
+    }
+
+    #[test]
+    fn test_cookie_strategy_browser_defaults_to_true() {
+        let yaml = "site: test\nname: cmd\nstrategy: cookie\n";
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        // cookie strategy.requires_browser() == true
+        assert!(cmd.browser);
+    }
+
+    #[test]
+    fn test_explicit_browser_false_overrides_strategy() {
+        // 这是一个记录当前行为的测试：显式设置 browser: false 会覆盖 strategy 的默认值。
+        // 这个行为可能是预期的（某些 cookie adapter 用 api 模式），也可能是 bug。
+        // 先记录下来。
+        let yaml = "site: test\nname: cmd\nstrategy: cookie\nbrowser: false\n";
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        // 当前行为：explicit browser: false 优先于 strategy
+        assert!(!cmd.browser, "explicit browser: false should override strategy default");
+    }
+
+    #[test]
+    fn test_columns_parsed_correctly() {
+        let yaml = r#"
+site: test
+name: cmd
+columns: [rank, title, author, score]
+"#;
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        assert_eq!(cmd.columns, vec!["rank", "title", "author", "score"]);
+    }
+
+    #[test]
+    fn test_no_columns_defaults_to_empty() {
+        let yaml = "site: test\nname: cmd\n";
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        assert!(cmd.columns.is_empty());
+    }
+
+    #[test]
+    fn test_pipeline_steps_count() {
+        let yaml = r#"
+site: test
+name: cmd
+pipeline:
+  - fetch: https://example.com
+  - map:
+      title: ${{ item.title }}
+  - limit: 10
+"#;
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        let pipeline = cmd.pipeline.unwrap();
+        assert_eq!(pipeline.len(), 3);
+    }
 }

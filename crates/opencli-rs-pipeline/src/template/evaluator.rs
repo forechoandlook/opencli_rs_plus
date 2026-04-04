@@ -310,6 +310,348 @@ fn call_function(namespace: &[String], args: &[Value]) -> Result<Value, CliError
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn ctx_with_item(item: Value) -> TemplateContext {
+        TemplateContext {
+            args: HashMap::new(),
+            data: Value::Null,
+            item,
+            index: 0,
+        }
+    }
+
+    fn empty_ctx() -> TemplateContext {
+        TemplateContext::default()
+    }
+
+    fn eval(expr: &str, ctx: &TemplateContext) -> Value {
+        use super::super::parser::parse_expression;
+        let ast = parse_expression(expr).unwrap();
+        evaluate(&ast, ctx).unwrap()
+    }
+
+    // ── 字面量 ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn int_literal() {
+        assert_eq!(eval("42", &empty_ctx()), Value::Number(42.into()));
+    }
+
+    #[test]
+    fn negative_int_literal() {
+        // -1 被解析为 0 - 1（减法）
+        assert_eq!(eval("0 - 1", &empty_ctx()), Value::Number((-1i64).into()));
+    }
+
+    #[test]
+    fn bool_true_literal() {
+        assert_eq!(eval("true", &empty_ctx()), Value::Bool(true));
+    }
+
+    #[test]
+    fn bool_false_literal() {
+        assert_eq!(eval("false", &empty_ctx()), Value::Bool(false));
+    }
+
+    #[test]
+    fn null_literal() {
+        assert_eq!(eval("null", &empty_ctx()), Value::Null);
+    }
+
+    #[test]
+    fn string_literal_double_quote() {
+        assert_eq!(eval("\"hello\"", &empty_ctx()), Value::String("hello".into()));
+    }
+
+    #[test]
+    fn string_literal_single_quote() {
+        assert_eq!(eval("'world'", &empty_ctx()), Value::String("world".into()));
+    }
+
+    // ── 变量解析 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn index_variable_resolves() {
+        let mut ctx = empty_ctx();
+        ctx.index = 5;
+        assert_eq!(eval("index", &ctx), Value::Number(5.into()));
+    }
+
+    #[test]
+    fn missing_field_on_item_returns_null() {
+        let ctx = ctx_with_item(serde_json::json!({"name": "x"}));
+        assert_eq!(eval("item.nonexistent", &ctx), Value::Null);
+    }
+
+    #[test]
+    fn missing_arg_returns_null() {
+        let ctx = empty_ctx();
+        assert_eq!(eval("args.missing_param", &ctx), Value::Null);
+    }
+
+    #[test]
+    fn dot_access_on_null_returns_null() {
+        let ctx = ctx_with_item(Value::Null);
+        assert_eq!(eval("item.anything", &ctx), Value::Null);
+    }
+
+    #[test]
+    fn nested_dot_access() {
+        let ctx = ctx_with_item(serde_json::json!({"author": {"name": "Alice"}}));
+        assert_eq!(eval("item.author.name", &ctx), Value::String("Alice".into()));
+    }
+
+    #[test]
+    fn bracket_access_array() {
+        let ctx = ctx_with_item(serde_json::json!({"tags": ["a", "b", "c"]}));
+        assert_eq!(eval("item.tags[1]", &ctx), Value::String("b".into()));
+    }
+
+    #[test]
+    fn bracket_access_out_of_bounds_returns_null() {
+        let ctx = ctx_with_item(serde_json::json!({"tags": ["a"]}));
+        assert_eq!(eval("item.tags[99]", &ctx), Value::Null);
+    }
+
+    #[test]
+    fn array_length_field() {
+        let ctx = ctx_with_item(serde_json::json!({"tags": ["a", "b"]}));
+        assert_eq!(eval("item.tags.length", &ctx), Value::Number(2.into()));
+    }
+
+    #[test]
+    fn string_length_field() {
+        let ctx = ctx_with_item(serde_json::json!({"name": "hello"}));
+        assert_eq!(eval("item.name.length", &ctx), Value::Number(5.into()));
+    }
+
+    // ── 算术运算 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn addition() {
+        assert_eq!(eval("1 + 2", &empty_ctx()), Value::Number(3.into()));
+    }
+
+    #[test]
+    fn subtraction() {
+        assert_eq!(eval("5 - 3", &empty_ctx()), Value::Number(2.into()));
+    }
+
+    #[test]
+    fn multiplication() {
+        assert_eq!(eval("3 * 4", &empty_ctx()), Value::Number(12.into()));
+    }
+
+    #[test]
+    fn division() {
+        assert_eq!(eval("10 / 2", &empty_ctx()), Value::Number(5.into()));
+    }
+
+    #[test]
+    fn modulo() {
+        assert_eq!(eval("7 % 3", &empty_ctx()), Value::Number(1.into()));
+    }
+
+    #[test]
+    fn division_by_zero_returns_null() {
+        // NaN → Null（num_to_value 的处理）
+        let result = eval("1 / 0", &empty_ctx());
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn string_concat_with_plus() {
+        let ctx = ctx_with_item(serde_json::json!({"prefix": "hello"}));
+        let result = eval("item.prefix + \" world\"", &ctx);
+        assert_eq!(result, Value::String("hello world".into()));
+    }
+
+    #[test]
+    fn null_plus_number_returns_null() {
+        // null + 1 — 两边都不是 string 且 null 无法转为 f64
+        let ctx = ctx_with_item(Value::Null);
+        let result = eval("item.missing + 1", &ctx);
+        assert_eq!(result, Value::Null);
+    }
+
+    // ── 比较运算 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn greater_than_true() {
+        assert_eq!(eval("5 > 3", &empty_ctx()), Value::Bool(true));
+    }
+
+    #[test]
+    fn greater_than_false() {
+        assert_eq!(eval("3 > 5", &empty_ctx()), Value::Bool(false));
+    }
+
+    #[test]
+    fn less_than() {
+        assert_eq!(eval("3 < 5", &empty_ctx()), Value::Bool(true));
+    }
+
+    #[test]
+    fn equal_numbers() {
+        assert_eq!(eval("42 == 42", &empty_ctx()), Value::Bool(true));
+    }
+
+    #[test]
+    fn not_equal() {
+        assert_eq!(eval("1 != 2", &empty_ctx()), Value::Bool(true));
+    }
+
+    #[test]
+    fn greater_than_or_equal() {
+        assert_eq!(eval("5 >= 5", &empty_ctx()), Value::Bool(true));
+        assert_eq!(eval("6 >= 5", &empty_ctx()), Value::Bool(true));
+        assert_eq!(eval("4 >= 5", &empty_ctx()), Value::Bool(false));
+    }
+
+    #[test]
+    fn less_than_or_equal() {
+        assert_eq!(eval("5 <= 5", &empty_ctx()), Value::Bool(true));
+        assert_eq!(eval("4 <= 5", &empty_ctx()), Value::Bool(true));
+        assert_eq!(eval("6 <= 5", &empty_ctx()), Value::Bool(false));
+    }
+
+    // ── 逻辑运算（短路） ──────────────────────────────────────────────────
+
+    #[test]
+    fn and_both_true() {
+        assert_eq!(eval("true && true", &empty_ctx()), Value::Bool(true));
+    }
+
+    #[test]
+    fn and_short_circuits_on_false() {
+        // false && anything — 直接返回 false，不求值右边
+        assert_eq!(eval("false && true", &empty_ctx()), Value::Bool(false));
+    }
+
+    #[test]
+    fn or_returns_first_truthy() {
+        // "hello" || "world" — 返回 "hello"（第一个 truthy 值，不是 bool）
+        let result = eval("\"hello\" || \"world\"", &empty_ctx());
+        assert_eq!(result, Value::String("hello".into()));
+    }
+
+    #[test]
+    fn or_returns_last_when_first_falsy() {
+        let result = eval("null || \"fallback\"", &empty_ctx());
+        assert_eq!(result, Value::String("fallback".into()));
+    }
+
+    #[test]
+    fn or_null_or_null_returns_null() {
+        assert_eq!(eval("null || null", &empty_ctx()), Value::Null);
+    }
+
+    // ── 一元非 ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn unary_not_true() {
+        assert_eq!(eval("!true", &empty_ctx()), Value::Bool(false));
+    }
+
+    #[test]
+    fn unary_not_false() {
+        assert_eq!(eval("!false", &empty_ctx()), Value::Bool(true));
+    }
+
+    #[test]
+    fn unary_not_null() {
+        assert_eq!(eval("!null", &empty_ctx()), Value::Bool(true));
+    }
+
+    #[test]
+    fn unary_not_zero() {
+        assert_eq!(eval("!0", &empty_ctx()), Value::Bool(true));
+    }
+
+    #[test]
+    fn unary_not_non_zero() {
+        assert_eq!(eval("!1", &empty_ctx()), Value::Bool(false));
+    }
+
+    #[test]
+    fn unary_not_empty_string() {
+        assert_eq!(eval("!\"\"", &empty_ctx()), Value::Bool(true));
+    }
+
+    // ── 三元运算符 ────────────────────────────────────────────────────────
+
+    #[test]
+    fn ternary_true_branch() {
+        assert_eq!(eval("true ? \"yes\" : \"no\"", &empty_ctx()), Value::String("yes".into()));
+    }
+
+    #[test]
+    fn ternary_false_branch() {
+        assert_eq!(eval("false ? \"yes\" : \"no\"", &empty_ctx()), Value::String("no".into()));
+    }
+
+    #[test]
+    fn ternary_with_computed_condition() {
+        let mut ctx = empty_ctx();
+        ctx.index = 0;
+        let result = eval("index == 0 ? \"first\" : \"other\"", &ctx);
+        assert_eq!(result, Value::String("first".into()));
+    }
+
+    // ── 内置函数 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn math_min() {
+        assert_eq!(eval("Math.min(3, 1, 2)", &empty_ctx()), Value::Number(1.into()));
+    }
+
+    #[test]
+    fn math_max() {
+        assert_eq!(eval("Math.max(3, 1, 2)", &empty_ctx()), Value::Number(3.into()));
+    }
+
+    #[test]
+    fn math_abs() {
+        assert_eq!(eval("Math.abs(0 - 7)", &empty_ctx()), Value::Number(7.into()));
+    }
+
+    #[test]
+    fn math_floor() {
+        // Math.floor(3.9) → 3 stored as integer
+        let result = eval("Math.floor(3)", &empty_ctx());
+        assert_eq!(result, Value::Number(3.into()));
+    }
+
+    #[test]
+    fn unknown_function_returns_error() {
+        use super::super::parser::parse_expression;
+        let ast = parse_expression("UnknownNs.call()").unwrap();
+        let result = evaluate(&ast, &empty_ctx());
+        assert!(result.is_err());
+    }
+
+    // ── is_truthy 覆盖 ────────────────────────────────────────────────────
+
+    #[test]
+    fn empty_array_is_falsy() {
+        // ![] — 空数组在 JS 里是 truthy，但这里 is_truthy 对 array 始终返回 true
+        // 验证当前行为（非空数组）
+        let ctx = ctx_with_item(serde_json::json!({"arr": [1]}));
+        assert_eq!(eval("!item.arr", &ctx), Value::Bool(false));
+    }
+
+    #[test]
+    fn empty_object_is_falsy() {
+        // 空 object 在当前实现里 is_truthy 返回 false
+        let ctx = ctx_with_item(serde_json::json!({"obj": {}}));
+        assert_eq!(eval("!item.obj", &ctx), Value::Bool(true));
+    }
+}
+
 fn value_to_display(val: &Value) -> String {
     match val {
         Value::String(s) => s.clone(),

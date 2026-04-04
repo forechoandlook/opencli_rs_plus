@@ -1208,12 +1208,14 @@ dependencies = [
 name = "opencli-rs-discovery"
 version = "0.1.2"
 dependencies = [
+ "async-trait",
  "opencli-rs-core",
  "opencli-rs-pipeline",
  "serde",
  "serde_json",
  "serde_yaml",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
 ]
 

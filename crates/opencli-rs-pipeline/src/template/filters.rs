@@ -392,3 +392,375 @@ fn filter_split(input: Value, args: &[Value]) -> Result<Value, CliError> {
         other => other,
     })
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn s(v: &str) -> Value {
+        Value::String(v.to_string())
+    }
+
+    // ── string / int / float ──────────────────────────────────────────────
+
+    #[test]
+    fn filter_string_from_number() {
+        assert_eq!(apply_filter("string", json!(42), &[]).unwrap(), s("42"));
+    }
+
+    #[test]
+    fn filter_string_from_bool() {
+        assert_eq!(apply_filter("str", json!(true), &[]).unwrap(), s("true"));
+    }
+
+    #[test]
+    fn filter_string_from_null() {
+        assert_eq!(apply_filter("string", Value::Null, &[]).unwrap(), s(""));
+    }
+
+    #[test]
+    fn filter_string_passthrough() {
+        assert_eq!(apply_filter("string", s("hello"), &[]).unwrap(), s("hello"));
+    }
+
+    #[test]
+    fn filter_int_from_string() {
+        assert_eq!(apply_filter("int", s("42"), &[]).unwrap(), json!(42));
+    }
+
+    #[test]
+    fn filter_int_from_invalid_string_defaults_to_zero() {
+        assert_eq!(apply_filter("int", s("abc"), &[]).unwrap(), json!(0));
+    }
+
+    #[test]
+    fn filter_int_from_bool_true() {
+        assert_eq!(apply_filter("int", json!(true), &[]).unwrap(), json!(1));
+    }
+
+    #[test]
+    fn filter_int_from_bool_false() {
+        assert_eq!(apply_filter("int", json!(false), &[]).unwrap(), json!(0));
+    }
+
+    #[test]
+    fn filter_float_from_string() {
+        let result = apply_filter("float", s("3.14"), &[]).unwrap();
+        assert!(result.as_f64().unwrap() - 3.14 < 1e-9);
+    }
+
+    // ── abs / round / ceil / floor ────────────────────────────────────────
+
+    #[test]
+    fn filter_abs_negative() {
+        assert_eq!(apply_filter("abs", json!(-5), &[]).unwrap(), json!(5));
+    }
+
+    #[test]
+    fn filter_abs_positive_unchanged() {
+        assert_eq!(apply_filter("abs", json!(5), &[]).unwrap(), json!(5));
+    }
+
+    #[test]
+    fn filter_round_down() {
+        let v = apply_filter("round", json!(3.2), &[]).unwrap();
+        assert_eq!(v.as_f64().unwrap() as i64, 3);
+    }
+
+    #[test]
+    fn filter_round_up() {
+        let v = apply_filter("round", json!(3.7), &[]).unwrap();
+        assert_eq!(v.as_f64().unwrap() as i64, 4);
+    }
+
+    #[test]
+    fn filter_ceil_value() {
+        let v = apply_filter("ceil", json!(3.1), &[]).unwrap();
+        assert_eq!(v.as_f64().unwrap() as i64, 4);
+    }
+
+    #[test]
+    fn filter_floor_value() {
+        let v = apply_filter("floor", json!(3.9), &[]).unwrap();
+        assert_eq!(v.as_f64().unwrap() as i64, 3);
+    }
+
+    // ── reverse ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn filter_reverse_array() {
+        let input = json!([1, 2, 3]);
+        assert_eq!(apply_filter("reverse", input, &[]).unwrap(), json!([3, 2, 1]));
+    }
+
+    #[test]
+    fn filter_reverse_string() {
+        assert_eq!(apply_filter("reverse", s("hello"), &[]).unwrap(), s("olleh"));
+    }
+
+    #[test]
+    fn filter_reverse_empty_array() {
+        let input = json!([]);
+        assert_eq!(apply_filter("reverse", input, &[]).unwrap(), json!([]));
+    }
+
+    // ── unique ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn filter_unique_removes_duplicates() {
+        let input = json!([1, 2, 1, 3, 2]);
+        let result = apply_filter("unique", input, &[]).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0], json!(1));
+        assert_eq!(arr[1], json!(2));
+        assert_eq!(arr[2], json!(3));
+    }
+
+    #[test]
+    fn filter_unique_preserves_order() {
+        let input = json!(["b", "a", "b", "c", "a"]);
+        let result = apply_filter("unique", input, &[]).unwrap();
+        assert_eq!(result, json!(["b", "a", "c"]));
+    }
+
+    #[test]
+    fn filter_unique_empty() {
+        let input = json!([]);
+        assert_eq!(apply_filter("unique", input, &[]).unwrap(), json!([]));
+    }
+
+    // ── split ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn filter_split_by_comma() {
+        let result = apply_filter("split", s("a,b,c"), &[s(",")]).unwrap();
+        assert_eq!(result, json!(["a", "b", "c"]));
+    }
+
+    #[test]
+    fn filter_split_by_default_comma() {
+        let result = apply_filter("split", s("x,y"), &[]).unwrap();
+        assert_eq!(result, json!(["x", "y"]));
+    }
+
+    #[test]
+    fn filter_split_single_item() {
+        let result = apply_filter("split", s("hello"), &[s(",")]).unwrap();
+        assert_eq!(result, json!(["hello"]));
+    }
+
+    // ── urlencode / urldecode ─────────────────────────────────────────────
+
+    #[test]
+    fn filter_urlencode_basic() {
+        let result = apply_filter("urlencode", s("hello world"), &[]).unwrap();
+        assert_eq!(result, s("hello%20world"));
+    }
+
+    #[test]
+    fn filter_urlencode_special_chars() {
+        let result = apply_filter("urlencode", s("a=1&b=2"), &[]).unwrap();
+        // = and & should be encoded
+        let encoded = result.as_str().unwrap();
+        assert!(!encoded.contains('='));
+        assert!(!encoded.contains('&'));
+    }
+
+    #[test]
+    fn filter_urlencode_unreserved_unchanged() {
+        // RFC 3986 unreserved chars: A-Z a-z 0-9 - _ . ~
+        let input = s("hello-world_test.me~");
+        let result = apply_filter("urlencode", input.clone(), &[]).unwrap();
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn filter_urldecode_basic() {
+        let result = apply_filter("urldecode", s("hello%20world"), &[]).unwrap();
+        assert_eq!(result, s("hello world"));
+    }
+
+    #[test]
+    fn filter_urldecode_plus_as_space() {
+        let result = apply_filter("urldecode", s("hello+world"), &[]).unwrap();
+        assert_eq!(result, s("hello world"));
+    }
+
+    #[test]
+    fn filter_urlencode_then_urldecode_roundtrip() {
+        let original = s("query=hello world&limit=10");
+        let encoded = apply_filter("urlencode", original.clone(), &[]).unwrap();
+        let decoded = apply_filter("urldecode", encoded, &[]).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    // ── 已有 filter 的 edge case ──────────────────────────────────────────
+
+    #[test]
+    fn filter_default_on_null_returns_default() {
+        let result = apply_filter("default", Value::Null, &[s("fallback")]).unwrap();
+        assert_eq!(result, s("fallback"));
+    }
+
+    #[test]
+    fn filter_default_on_empty_string_returns_default() {
+        let result = apply_filter("default", s(""), &[s("fallback")]).unwrap();
+        assert_eq!(result, s("fallback"));
+    }
+
+    #[test]
+    fn filter_default_on_non_empty_passthrough() {
+        let result = apply_filter("default", s("value"), &[s("fallback")]).unwrap();
+        assert_eq!(result, s("value"));
+    }
+
+    #[test]
+    fn filter_default_no_arg_returns_null() {
+        let result = apply_filter("default", Value::Null, &[]).unwrap();
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn filter_truncate_exact_length_no_ellipsis() {
+        // 恰好等于 n，不截断
+        let result = apply_filter("truncate", s("hello"), &[json!(5)]).unwrap();
+        assert_eq!(result, s("hello"));
+    }
+
+    #[test]
+    fn filter_truncate_longer_adds_ellipsis() {
+        let result = apply_filter("truncate", s("hello world"), &[json!(5)]).unwrap();
+        assert_eq!(result, s("hello..."));
+    }
+
+    #[test]
+    fn filter_truncate_unicode_counts_chars_not_bytes() {
+        // 中文 3 个字 = 3 chars
+        let result = apply_filter("truncate", s("你好世界"), &[json!(2)]).unwrap();
+        assert_eq!(result, s("你好..."));
+    }
+
+    #[test]
+    fn filter_join_with_separator() {
+        let input = json!(["a", "b", "c"]);
+        let result = apply_filter("join", input, &[s(" | ")]).unwrap();
+        assert_eq!(result, s("a | b | c"));
+    }
+
+    #[test]
+    fn filter_join_empty_array() {
+        let result = apply_filter("join", json!([]), &[s(",")]).unwrap();
+        assert_eq!(result, s(""));
+    }
+
+    #[test]
+    fn filter_slugify_with_special_chars() {
+        let result = apply_filter("slugify", s("Hello, World! 2026"), &[]).unwrap();
+        assert_eq!(result, s("hello-world-2026"));
+    }
+
+    #[test]
+    fn filter_slugify_collapses_multiple_hyphens() {
+        let result = apply_filter("slugify", s("a  b  c"), &[]).unwrap();
+        assert_eq!(result, s("a-b-c"));
+    }
+
+    #[test]
+    fn filter_sanitize_strips_html_tags() {
+        let result = apply_filter("sanitize", s("<b>bold</b> and <i>italic</i>"), &[]).unwrap();
+        assert_eq!(result, s("bold and italic"));
+    }
+
+    #[test]
+    fn filter_sanitize_nested_tags() {
+        let result = apply_filter("sanitize", s("<div><p>text</p></div>"), &[]).unwrap();
+        assert_eq!(result, s("text"));
+    }
+
+    #[test]
+    fn filter_keys_returns_object_keys() {
+        let input = json!({"b": 2, "a": 1, "c": 3});
+        let result = apply_filter("keys", input, &[]).unwrap();
+        let mut keys: Vec<&str> = result
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        keys.sort();
+        assert_eq!(keys, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn filter_length_string() {
+        assert_eq!(apply_filter("length", s("hello"), &[]).unwrap(), json!(5));
+    }
+
+    #[test]
+    fn filter_length_array() {
+        assert_eq!(apply_filter("length", json!([1, 2, 3]), &[]).unwrap(), json!(3));
+    }
+
+    #[test]
+    fn filter_length_object() {
+        assert_eq!(apply_filter("length", json!({"a": 1, "b": 2}), &[]).unwrap(), json!(2));
+    }
+
+    #[test]
+    fn filter_unknown_returns_error() {
+        let result = apply_filter("nonexistent_filter", s("x"), &[]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("nonexistent_filter"));
+    }
+
+    #[test]
+    fn filter_ext_with_extension() {
+        assert_eq!(apply_filter("ext", s("file.tar.gz"), &[]).unwrap(), s(".gz"));
+    }
+
+    #[test]
+    fn filter_ext_no_extension() {
+        assert_eq!(apply_filter("ext", s("Makefile"), &[]).unwrap(), s(""));
+    }
+
+    #[test]
+    fn filter_basename_with_path() {
+        assert_eq!(apply_filter("basename", s("/home/user/file.txt"), &[]).unwrap(), s("file.txt"));
+    }
+
+    #[test]
+    fn filter_basename_no_slash() {
+        assert_eq!(apply_filter("basename", s("file.txt"), &[]).unwrap(), s("file.txt"));
+    }
+
+    #[test]
+    fn filter_replace_all_occurrences() {
+        let result = apply_filter("replace", s("a-b-a-b"), &[s("a"), s("x")]).unwrap();
+        assert_eq!(result, s("x-b-x-b"));
+    }
+
+    #[test]
+    fn filter_first_on_empty_array_returns_null() {
+        assert_eq!(apply_filter("first", json!([]), &[]).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn filter_last_on_empty_array_returns_null() {
+        assert_eq!(apply_filter("last", json!([]), &[]).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn filter_json_serializes_object() {
+        let input = json!({"key": "val"});
+        let result = apply_filter("json", input, &[]).unwrap();
+        let s = result.as_str().unwrap();
+        let reparsed: serde_json::Value = serde_json::from_str(s).unwrap();
+        assert_eq!(reparsed["key"], "val");
+    }
+}
