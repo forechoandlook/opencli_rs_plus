@@ -93,7 +93,9 @@ impl AdapterIndex {
             ",
         )?;
 
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     /// Incremental sync: only re-index adapters whose yaml or summary has changed.
@@ -111,21 +113,22 @@ impl AdapterIndex {
 
         // Load existing meta: full_name → (yaml_mtime, summary_mtime)
         let existing_meta: HashMap<String, (i64, i64)> = {
-            let mut stmt = conn.prepare(
-                "SELECT full_name, yaml_mtime, summary_mtime FROM adapter_index_meta",
-            )?;
-            let rows: Vec<_> = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, (row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
+            let mut stmt = conn
+                .prepare("SELECT full_name, yaml_mtime, summary_mtime FROM adapter_index_meta")?;
+            let rows: Vec<_> = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        (row.get::<_, i64>(1)?, row.get::<_, i64>(2)?),
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
             rows.into_iter().collect()
         };
 
         // Prepare statements
-        let mut fts_delete = conn.prepare(
-            "DELETE FROM adapter_fts WHERE full_name = ?1",
-        )?;
+        let mut fts_delete = conn.prepare("DELETE FROM adapter_fts WHERE full_name = ?1")?;
         let mut fts_insert = conn.prepare(
             "INSERT INTO adapter_fts(full_name, site, name, description, domain, summary)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -270,7 +273,11 @@ impl AdapterIndex {
                 description: row.get(3)?,
                 domain: {
                     let d: String = row.get(4)?;
-                    if d.is_empty() { None } else { Some(d) }
+                    if d.is_empty() {
+                        None
+                    } else {
+                        Some(d)
+                    }
                 },
                 browser: false,
                 score: row.get(5)?,
@@ -282,7 +289,13 @@ impl AdapterIndex {
     }
 
     /// Record a successful adapter execution.
-    pub fn record_usage(&self, full_name: &str, site: &str, name: &str, description: &str) -> Result<()> {
+    pub fn record_usage(
+        &self,
+        full_name: &str,
+        site: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<()> {
         let now = unix_now();
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -344,9 +357,16 @@ fn query_hot(
 /// Checks both local `adapters/` and `~/.opencli-rs/adapters/`. Returns 0 if not found.
 fn yaml_file_mtime(site: &str, name: &str) -> i64 {
     let candidates = [
-        PathBuf::from("adapters").join(site).join(format!("{}.yaml", name)),
+        PathBuf::from("adapters")
+            .join(site)
+            .join(format!("{}.yaml", name)),
         dirs::home_dir()
-            .map(|h| h.join(".opencli-rs").join("adapters").join(site).join(format!("{}.yaml", name)))
+            .map(|h| {
+                h.join(".opencli-rs")
+                    .join("adapters")
+                    .join(site)
+                    .join(format!("{}.yaml", name))
+            })
             .unwrap_or_default(),
     ];
     for path in &candidates {
@@ -366,22 +386,38 @@ fn yaml_file_mtime(site: &str, name: &str) -> i64 {
 fn read_summary_with_mtime(site: &str, name: &str) -> (String, i64) {
     let candidates = [
         PathBuf::from("adapters").join(site).join("summary.md"),
-        PathBuf::from("adapters").join(site).join(format!("{}.md", name)),
+        PathBuf::from("adapters")
+            .join(site)
+            .join(format!("{}.md", name)),
         PathBuf::from("summaries").join(format!("{}-{}.md", site, name)),
         PathBuf::from("summaries").join(format!("{}.md", site)),
         dirs::home_dir()
-            .map(|h| h.join(".opencli-rs").join("adapters").join(site).join("summary.md"))
+            .map(|h| {
+                h.join(".opencli-rs")
+                    .join("adapters")
+                    .join(site)
+                    .join("summary.md")
+            })
             .unwrap_or_default(),
         dirs::home_dir()
-            .map(|h| h.join(".opencli-rs").join("summaries").join(format!("{}-{}.md", site, name)))
+            .map(|h| {
+                h.join(".opencli-rs")
+                    .join("summaries")
+                    .join(format!("{}-{}.md", site, name))
+            })
             .unwrap_or_default(),
         dirs::home_dir()
-            .map(|h| h.join(".opencli-rs").join("summaries").join(format!("{}.md", site)))
+            .map(|h| {
+                h.join(".opencli-rs")
+                    .join("summaries")
+                    .join(format!("{}.md", site))
+            })
             .unwrap_or_default(),
     ];
     for path in &candidates {
         if let Ok(meta) = std::fs::metadata(path) {
-            let mtime = meta.modified()
+            let mtime = meta
+                .modified()
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs() as i64)
@@ -403,10 +439,18 @@ fn sanitize_fts_query(q: &str) -> String {
                 .chars()
                 .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
                 .collect();
-            if clean.is_empty() { None } else { Some(format!("\"{}\"*", clean)) }
+            if clean.is_empty() {
+                None
+            } else {
+                Some(format!("\"{}\"*", clean))
+            }
         })
         .collect();
-    if terms.is_empty() { String::from("\"\"") } else { terms.join(" ") }
+    if terms.is_empty() {
+        String::from("\"\"")
+    } else {
+        terms.join(" ")
+    }
 }
 
 fn unix_now() -> i64 {

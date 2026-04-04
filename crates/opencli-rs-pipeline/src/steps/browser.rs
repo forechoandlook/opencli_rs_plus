@@ -78,7 +78,10 @@ fn dump_value_to_file(value: &Value, path: &Path) {
         }
     }
     match fs::write(path, &content) {
-        Ok(_) => info!(path = path.to_string_lossy().as_ref(), "Dumped raw data to file"),
+        Ok(_) => info!(
+            path = path.to_string_lossy().as_ref(),
+            "Dumped raw data to file"
+        ),
         Err(e) => tracing::warn!(path = %path.display(), err = %e, "Failed to dump raw data"),
     }
 }
@@ -118,16 +121,22 @@ impl StepHandler for NavigateStep {
             }
             // navigate: { url: "...", settleMs: 2000 }
             Value::Object(obj) => {
-                let url_val = obj.get("url")
+                let url_val = obj
+                    .get("url")
                     .ok_or_else(|| CliError::pipeline("navigate object requires 'url' field"))?;
-                let url_str = url_val.as_str()
+                let url_str = url_val
+                    .as_str()
                     .ok_or_else(|| CliError::pipeline("navigate 'url' must be a string"))?;
                 let rendered = render_template_str(url_str, &ctx)?;
                 let url = rendered.as_str().unwrap_or("").to_string();
                 let settle = obj.get("settleMs").and_then(|v| v.as_u64());
                 (url, settle)
             }
-            _ => return Err(CliError::pipeline("navigate expects a string URL or {url, settleMs} object")),
+            _ => {
+                return Err(CliError::pipeline(
+                    "navigate expects a string URL or {url, settleMs} object",
+                ))
+            }
         };
 
         pg.goto(&url, None).await?;
@@ -212,14 +221,20 @@ impl StepHandler for TypeStep {
                 let txt = render_template_str(text_raw, &ctx)?;
                 (
                     sel.as_str()
-                        .ok_or_else(|| CliError::pipeline("type: rendered selector is not a string"))?
+                        .ok_or_else(|| {
+                            CliError::pipeline("type: rendered selector is not a string")
+                        })?
                         .to_string(),
                     txt.as_str()
                         .ok_or_else(|| CliError::pipeline("type: rendered text is not a string"))?
                         .to_string(),
                 )
             }
-            _ => return Err(CliError::pipeline("type: params must be an object with 'selector' and 'text'")),
+            _ => {
+                return Err(CliError::pipeline(
+                    "type: params must be an object with 'selector' and 'text'",
+                ))
+            }
         };
 
         pg.type_text(&selector, &text).await?;
@@ -297,7 +312,11 @@ impl StepHandler for WaitStep {
                     ));
                 }
             }
-            _ => return Err(CliError::pipeline("wait: params must be a number or object")),
+            _ => {
+                return Err(CliError::pipeline(
+                    "wait: params must be a number or object",
+                ))
+            }
         }
 
         Ok(data.clone())
@@ -375,15 +394,13 @@ impl StepHandler for EvaluateStep {
                 let js = obj
                     .get("js")
                     .and_then(|v| v.as_str())
-                    .or_else(|| {
-                        obj.values()
-                            .find_map(|v| v.as_str())
-                    })
+                    .or_else(|| obj.values().find_map(|v| v.as_str()))
                     .ok_or_else(|| {
                         CliError::pipeline("evaluate: object form requires a js code string")
                     })?;
 
-                let raw_dump = if obj.get("format")
+                let raw_dump = if obj
+                    .get("format")
                     .and_then(|v| v.as_str())
                     .map(|f| f == "raw")
                     .unwrap_or(false)
@@ -457,7 +474,10 @@ impl StepHandler for SnapshotStep {
 
         let opts = match params {
             Value::Object(obj) => {
-                let selector = obj.get("selector").and_then(|v| v.as_str()).map(String::from);
+                let selector = obj
+                    .get("selector")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
                 let include_hidden = obj
                     .get("include_hidden")
                     .and_then(|v| v.as_bool())
@@ -511,7 +531,10 @@ impl StepHandler for ScreenshotStep {
                     .get("full_page")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let selector = obj.get("selector").and_then(|v| v.as_str()).map(String::from);
+                let selector = obj
+                    .get("selector")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
                 let path = obj.get("path").and_then(|v| v.as_str()).map(String::from);
                 Some(ScreenshotOptions {
                     path,
@@ -568,14 +591,8 @@ impl StepHandler for ScrollStep {
             }
             // scroll: { direction: "down", count: 5, delay: 500 }
             Value::Object(obj) => {
-                let count = obj
-                    .get("count")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(3) as u32;
-                let delay = obj
-                    .get("delay")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(300);
+                let count = obj.get("count").and_then(|v| v.as_u64()).unwrap_or(3) as u32;
+                let delay = obj.get("delay").and_then(|v| v.as_u64()).unwrap_or(300);
                 pg.auto_scroll(Some(opencli_rs_core::AutoScrollOptions {
                     max_scrolls: Some(count),
                     delay_ms: Some(delay),
@@ -586,11 +603,11 @@ impl StepHandler for ScrollStep {
             // scroll: "down" or template string
             Value::String(_) => {
                 let ctx = default_ctx(data, args);
-                let rendered = render_template_str(
-                    params.as_str().unwrap_or("3"),
-                    &ctx,
-                )?;
-                let count = rendered.as_u64().or_else(|| rendered.as_str().and_then(|s| s.parse().ok())).unwrap_or(3) as u32;
+                let rendered = render_template_str(params.as_str().unwrap_or("3"), &ctx)?;
+                let count = rendered
+                    .as_u64()
+                    .or_else(|| rendered.as_str().and_then(|s| s.parse().ok()))
+                    .unwrap_or(3) as u32;
                 pg.auto_scroll(Some(opencli_rs_core::AutoScrollOptions {
                     max_scrolls: Some(count),
                     delay_ms: Some(300),
@@ -642,7 +659,9 @@ impl StepHandler for CollectStep {
         let parse_fn = params
             .get("parse")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| CliError::pipeline("collect step requires a 'parse' field with a JS function"))?;
+            .ok_or_else(|| {
+                CliError::pipeline("collect step requires a 'parse' field with a JS function")
+            })?;
 
         // Get intercepted data directly from browser (raw JSON, not typed structs)
         // and run the parse function on it — all in one evaluate call.
@@ -736,10 +755,7 @@ mod tests {
         ) -> Result<(), CliError> {
             Ok(())
         }
-        async fn wait_for_navigation(
-            &self,
-            _options: Option<WaitOptions>,
-        ) -> Result<(), CliError> {
+        async fn wait_for_navigation(&self, _options: Option<WaitOptions>) -> Result<(), CliError> {
             Ok(())
         }
         async fn wait_for_timeout(&self, _ms: u64) -> Result<(), CliError> {
@@ -856,7 +872,12 @@ mod tests {
     async fn test_browser_step_requires_page() {
         let step = NavigateStep;
         let result = step
-            .execute(None, &json!("https://example.com"), &json!(null), &empty_args())
+            .execute(
+                None,
+                &json!("https://example.com"),
+                &json!(null),
+                &empty_args(),
+            )
             .await;
         assert!(result.is_err());
     }

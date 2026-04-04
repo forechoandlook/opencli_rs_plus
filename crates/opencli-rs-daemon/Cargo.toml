@@ -3,6 +3,10 @@ name = "opencli-rs-daemon"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+name = "opencli_rs_daemon"
+path = "src/lib.rs"
+
 [[bin]]
 name = "opencli-daemon"
 path = "src/main.rs"

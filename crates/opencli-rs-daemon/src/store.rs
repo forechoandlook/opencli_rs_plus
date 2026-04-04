@@ -95,13 +95,21 @@ impl JobStore {
         })
     }
 
-    pub fn add(&self, adapter: &str, args: Option<serde_json::Value>, run_at: DateTime<Utc>, interval_seconds: Option<i64>) -> Result<Job> {
+    pub fn add(
+        &self,
+        adapter: &str,
+        args: Option<serde_json::Value>,
+        run_at: DateTime<Utc>,
+        interval_seconds: Option<i64>,
+    ) -> Result<Job> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
         let status = JobStatus::Pending;
         let status_str = status.to_string();
 
-        let args_str = args.as_ref().map(|a| serde_json::to_string(a).unwrap_or_default());
+        let args_str = args
+            .as_ref()
+            .map(|a| serde_json::to_string(a).unwrap_or_default());
         let interval = interval_seconds.unwrap_or(0);
 
         let conn = self.conn.lock().unwrap();
@@ -146,35 +154,48 @@ impl JobStore {
                     result, error, start_at, end_at, created_at, updated_at FROM jobs WHERE id = ?1 OR id LIKE ?2"
         )?;
 
-        let job = stmt.query_row(params![id, format!("{}%", id)], |row| {
-            Ok(Job {
-                id: row.get(0)?,
-                adapter: row.get(1)?,
-                args: row.get::<_, Option<String>>(2)?
-                    .and_then(|s| serde_json::from_str(&s).ok()),
-                run_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
-                    .unwrap_or_default()
-                    .with_timezone(&Utc),
-                interval_seconds: row.get::<_, Option<i64>>(4)?,
-                status: JobStatus::from(row.get::<_, String>(5)?.as_str()),
-                retry_count: row.get(6)?,
-                max_retries: row.get(7)?,
-                result: row.get(8)?,
-                error: row.get(9)?,
-                start_at: row.get::<_, Option<String>>(10)?
-                    .map(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok())
-                    .flatten(),
-                end_at: row.get::<_, Option<String>>(11)?
-                    .map(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok())
-                    .flatten(),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?)
-                    .unwrap_or_default()
-                    .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(13)?)
-                    .unwrap_or_default()
-                    .with_timezone(&Utc),
+        let job = stmt
+            .query_row(params![id, format!("{}%", id)], |row| {
+                Ok(Job {
+                    id: row.get(0)?,
+                    adapter: row.get(1)?,
+                    args: row
+                        .get::<_, Option<String>>(2)?
+                        .and_then(|s| serde_json::from_str(&s).ok()),
+                    run_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                        .unwrap_or_default()
+                        .with_timezone(&Utc),
+                    interval_seconds: row.get::<_, Option<i64>>(4)?,
+                    status: JobStatus::from(row.get::<_, String>(5)?.as_str()),
+                    retry_count: row.get(6)?,
+                    max_retries: row.get(7)?,
+                    result: row.get(8)?,
+                    error: row.get(9)?,
+                    start_at: row
+                        .get::<_, Option<String>>(10)?
+                        .map(|s| {
+                            DateTime::parse_from_rfc3339(&s)
+                                .map(|dt| dt.with_timezone(&Utc))
+                                .ok()
+                        })
+                        .flatten(),
+                    end_at: row
+                        .get::<_, Option<String>>(11)?
+                        .map(|s| {
+                            DateTime::parse_from_rfc3339(&s)
+                                .map(|dt| dt.with_timezone(&Utc))
+                                .ok()
+                        })
+                        .flatten(),
+                    created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?)
+                        .unwrap_or_default()
+                        .with_timezone(&Utc),
+                    updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(13)?)
+                        .unwrap_or_default()
+                        .with_timezone(&Utc),
+                })
             })
-        }).optional()?;
+            .optional()?;
 
         Ok(job)
     }
@@ -201,7 +222,8 @@ impl JobStore {
             Ok(Job {
                 id: row.get(0)?,
                 adapter: row.get(1)?,
-                args: row.get::<_, Option<String>>(2)?
+                args: row
+                    .get::<_, Option<String>>(2)?
                     .and_then(|s| serde_json::from_str(&s).ok()),
                 run_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
                     .unwrap_or_default()
@@ -212,11 +234,21 @@ impl JobStore {
                 max_retries: row.get(7)?,
                 result: row.get(8)?,
                 error: row.get(9)?,
-                start_at: row.get::<_, Option<String>>(10)?
-                    .map(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok())
+                start_at: row
+                    .get::<_, Option<String>>(10)?
+                    .map(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .ok()
+                    })
                     .flatten(),
-                end_at: row.get::<_, Option<String>>(11)?
-                    .map(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok())
+                end_at: row
+                    .get::<_, Option<String>>(11)?
+                    .map(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .ok()
+                    })
                     .flatten(),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?)
                     .unwrap_or_default()
@@ -242,14 +274,15 @@ impl JobStore {
                     result, error, start_at, end_at, created_at, updated_at
              FROM jobs
              WHERE status = 'pending' AND run_at <= ?1
-             ORDER BY run_at ASC"
+             ORDER BY run_at ASC",
         )?;
 
         let rows = stmt.query_map(params![now], |row| {
             Ok(Job {
                 id: row.get(0)?,
                 adapter: row.get(1)?,
-                args: row.get::<_, Option<String>>(2)?
+                args: row
+                    .get::<_, Option<String>>(2)?
                     .and_then(|s| serde_json::from_str(&s).ok()),
                 run_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
                     .unwrap_or_default()
@@ -260,11 +293,21 @@ impl JobStore {
                 max_retries: row.get(7)?,
                 result: row.get(8)?,
                 error: row.get(9)?,
-                start_at: row.get::<_, Option<String>>(10)?
-                    .map(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok())
+                start_at: row
+                    .get::<_, Option<String>>(10)?
+                    .map(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .ok()
+                    })
                     .flatten(),
-                end_at: row.get::<_, Option<String>>(11)?
-                    .map(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok())
+                end_at: row
+                    .get::<_, Option<String>>(11)?
+                    .map(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .ok()
+                    })
                     .flatten(),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?)
                     .unwrap_or_default()
@@ -298,7 +341,10 @@ impl JobStore {
         let next_run_at: Option<DateTime<Utc>> = conn.query_row(
             "SELECT interval_seconds FROM jobs WHERE id = ?1",
             params![id],
-            |row| row.get::<_, Option<i64>>(0).map(|opt| opt.map(|i| now + chrono::Duration::seconds(i)))
+            |row| {
+                row.get::<_, Option<i64>>(0)
+                    .map(|opt| opt.map(|i| now + chrono::Duration::seconds(i)))
+            },
         )?;
 
         if let Some(next) = next_run_at {
@@ -317,7 +363,13 @@ impl JobStore {
         Ok(next_run_at)
     }
 
-    pub fn set_failed(&self, id: &str, error: &str, retry_count: i32, max_retries: i32) -> Result<bool> {
+    pub fn set_failed(
+        &self,
+        id: &str,
+        error: &str,
+        retry_count: i32,
+        max_retries: i32,
+    ) -> Result<bool> {
         let now = Utc::now();
         let should_retry = retry_count < max_retries;
         let status = if should_retry { "pending" } else { "failed" };
@@ -372,5 +424,20 @@ impl<T> OptionalExt<T> for Result<T, rusqlite::Error> {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_store_creation_and_add() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("test_store_min_{}.db", uuid::Uuid::new_v4()));
+        let store = JobStore::new(path.clone()).unwrap();
+        let job = store.add("test", None, chrono::Utc::now(), None).unwrap();
+        assert_eq!(job.status, JobStatus::Pending);
+        let _ = std::fs::remove_file(path);
     }
 }

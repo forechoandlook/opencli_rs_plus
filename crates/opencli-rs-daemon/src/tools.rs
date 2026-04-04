@@ -54,16 +54,25 @@ pub struct Tool {
 
 impl Tool {
     pub fn install_cmd(&self) -> Option<&str> {
-        let platform = if cfg!(target_os = "macos") { "mac" }
-            else if cfg!(target_os = "linux") { "linux" }
-            else { "windows" };
-        self.install.get(platform)
+        let platform = if cfg!(target_os = "macos") {
+            "mac"
+        } else if cfg!(target_os = "linux") {
+            "linux"
+        } else {
+            "windows"
+        };
+        self.install
+            .get(platform)
             .or_else(|| self.install.get("default"))
             .map(|s| s.as_str())
     }
 
     pub fn is_installed(&self) -> bool {
-        let cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+        let cmd = if cfg!(target_os = "windows") {
+            "where"
+        } else {
+            "which"
+        };
         std::process::Command::new(cmd)
             .arg(&self.binary)
             .stdout(std::process::Stdio::null())
@@ -124,7 +133,8 @@ fn parse_tool_md(content: &str) -> Option<Tool> {
     let close = after_open.find("\n---")?;
     let yaml = &after_open[..close];
     let body_start = close + 4; // skip \n---
-    let body = after_open.get(body_start..)
+    let body = after_open
+        .get(body_start..)
         .unwrap_or("")
         .trim_start_matches('\n')
         .to_string();
@@ -132,7 +142,8 @@ fn parse_tool_md(content: &str) -> Option<Tool> {
     let fm: ToolFrontmatter = serde_yaml::from_str(yaml).ok()?;
 
     // Short description: first non-empty line in body
-    let description = body.lines()
+    let description = body
+        .lines()
         .map(|l| l.trim())
         .find(|l| !l.is_empty())
         .unwrap_or("")
@@ -157,12 +168,15 @@ pub fn search<'a>(query: &str, tools: &'a [Tool]) -> Vec<&'a Tool> {
         return tools.iter().collect();
     }
     let q = query.to_lowercase();
-    tools.iter().filter(|t| {
-        t.name.to_lowercase().contains(&q)
-            || t.binary.to_lowercase().contains(&q)
-            || t.description.to_lowercase().contains(&q)
-            || t.tags.iter().any(|tag| tag.to_lowercase().contains(&q))
-    }).collect()
+    tools
+        .iter()
+        .filter(|t| {
+            t.name.to_lowercase().contains(&q)
+                || t.binary.to_lowercase().contains(&q)
+                || t.description.to_lowercase().contains(&q)
+                || t.tags.iter().any(|tag| tag.to_lowercase().contains(&q))
+        })
+        .collect()
 }
 
 /// Find a tool by exact name.
@@ -179,9 +193,12 @@ pub struct ToolSummary {
 }
 
 pub fn summary(tools: &[Tool]) -> Vec<ToolSummary> {
-    tools.iter().map(|t| ToolSummary {
-        name: t.name.clone(),
-        description: t.description.clone(),
-        installed: t.is_installed(),
-    }).collect()
+    tools
+        .iter()
+        .map(|t| ToolSummary {
+            name: t.name.clone(),
+            description: t.description.clone(),
+            installed: t.is_installed(),
+        })
+        .collect()
 }
