@@ -1,17 +1,17 @@
+pub mod electron_apps;
+pub mod types;
+pub mod daemon_client;
+pub mod page;
+pub mod dom_helpers;
+pub mod stealth;
+pub mod daemon;
 pub mod bridge;
 pub mod cdp;
-pub mod daemon;
-pub mod daemon_client;
-pub mod dom_helpers;
-pub mod electron_apps;
-pub mod page;
-pub mod stealth;
-pub mod types;
 
+pub use electron_apps::{get_app_port, probe_cdp};
 pub use bridge::BrowserBridge;
+pub use page::DaemonPage;
 pub use cdp::CdpPage;
 pub use daemon::Daemon;
 pub use daemon_client::DaemonClient;
-pub use electron_apps::{get_app_port, probe_cdp};
-pub use page::DaemonPage;
 pub use types::{DaemonCommand, DaemonResult};

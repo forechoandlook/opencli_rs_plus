@@ -289,12 +289,10 @@ impl AdapterManager {
             if local_dir.exists() && local_dir.is_dir() {
                 c += scan_dir_no_cache(&local_dir, &mut registry)?;
             }
-            c += plugin_mgr
-                .load_into_registry(&mut registry)
-                .unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, "Failed to reload plugin adapters");
-                    0
-                });
+            c += plugin_mgr.load_into_registry(&mut registry).unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Failed to reload plugin adapters");
+                0
+            });
             c
         };
         tracing::info!(count = count, "Adapters reloaded");

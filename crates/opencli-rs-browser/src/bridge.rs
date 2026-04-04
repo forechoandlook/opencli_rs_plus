@@ -62,10 +62,7 @@ impl BrowserBridge {
         let client = Arc::new(DaemonClient::new(port));
 
         // Step 4: Wait up to 5s for extension to connect
-        if self
-            .poll_extension(&client, EXTENSION_INITIAL_WAIT, false)
-            .await
-        {
+        if self.poll_extension(&client, EXTENSION_INITIAL_WAIT, false).await {
             let page = DaemonPage::new(client, "default");
             return Ok(Arc::new(page));
         }
@@ -76,10 +73,7 @@ impl BrowserBridge {
         wake_chrome();
 
         // Step 6: Wait remaining 25s with progress
-        if self
-            .poll_extension(&client, EXTENSION_REMAINING_WAIT, true)
-            .await
-        {
+        if self.poll_extension(&client, EXTENSION_REMAINING_WAIT, true).await {
             let page = DaemonPage::new(client, "default");
             return Ok(Arc::new(page));
         }
@@ -231,7 +225,10 @@ impl BrowserBridge {
 /// Check if a port is in use by attempting a TCP connection.
 fn is_port_in_use(port: u16) -> bool {
     let addr = format!("127.0.0.1:{}", port);
-    match TcpStream::connect_timeout(&addr.parse().unwrap(), PORT_CHECK_TIMEOUT) {
+    match TcpStream::connect_timeout(
+        &addr.parse().unwrap(),
+        PORT_CHECK_TIMEOUT,
+    ) {
         Ok(_) => true,
         Err(_) => false,
     }
@@ -326,10 +323,7 @@ mod tests {
     fn test_port_in_use_detection() {
         // Localhost on a very high port is unlikely to be in use
         let unlikely_port = 59999;
-        assert!(
-            !is_port_in_use(unlikely_port),
-            "Unlikely port should not be in use"
-        );
+        assert!(!is_port_in_use(unlikely_port), "Unlikely port should not be in use");
 
         // Localhost on port 1 should fail (requires privilege)
         // We skip this test as it requires elevated privileges

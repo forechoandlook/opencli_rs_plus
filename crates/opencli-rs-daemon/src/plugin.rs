@@ -278,9 +278,7 @@ impl PluginManager {
 
         #[cfg(unix)]
         {
-            let abs = src_path
-                .canonicalize()
-                .unwrap_or_else(|_| src_path.to_path_buf());
+            let abs = src_path.canonicalize().unwrap_or_else(|_| src_path.to_path_buf());
             std::os::unix::fs::symlink(&abs, &dest)?;
         }
         #[cfg(not(unix))]
@@ -337,10 +335,7 @@ impl PluginManager {
 
             let manifest = self.read_manifest(&path);
             let lock_entry = lock.get(&name);
-            let source = lock_entry
-                .map(|e| e.source.as_str())
-                .unwrap_or("")
-                .to_string();
+            let source = lock_entry.map(|e| e.source.as_str()).unwrap_or("").to_string();
             let installed_at = lock_entry
                 .map(|e| e.installed_at.as_str())
                 .unwrap_or("")
@@ -365,7 +360,10 @@ impl PluginManager {
             return Err(anyhow::anyhow!("plugin '{}' not found", name));
         }
         let lock = self.load_lock();
-        let source = lock.get(name).map(|e| e.source.clone()).unwrap_or_default();
+        let source = lock
+            .get(name)
+            .map(|e| e.source.clone())
+            .unwrap_or_default();
 
         match Self::parse_source(&source) {
             SourceKind::Git(_) => {

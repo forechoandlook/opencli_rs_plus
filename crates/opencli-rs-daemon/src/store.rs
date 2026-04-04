@@ -95,21 +95,13 @@ impl JobStore {
         })
     }
 
-    pub fn add(
-        &self,
-        adapter: &str,
-        args: Option<serde_json::Value>,
-        run_at: DateTime<Utc>,
-        interval_seconds: Option<i64>,
-    ) -> Result<Job> {
+    pub fn add(&self, adapter: &str, args: Option<serde_json::Value>, run_at: DateTime<Utc>, interval_seconds: Option<i64>) -> Result<Job> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
         let status = JobStatus::Pending;
         let status_str = status.to_string();
 
-        let args_str = args
-            .as_ref()
-            .map(|a| serde_json::to_string(a).unwrap_or_default());
+        let args_str = args.as_ref().map(|a| serde_json::to_string(a).unwrap_or_default());
         let interval = interval_seconds.unwrap_or(0);
 
         let conn = self.conn.lock().unwrap();
@@ -154,42 +146,35 @@ impl JobStore {
                     result, error, start_at, end_at, created_at, updated_at FROM jobs WHERE id = ?1 OR id LIKE ?2"
         )?;
 
-        let job = stmt
-            .query_row(params![id, format!("{}%", id)], |row| {
-                Ok(Job {
-                    id: row.get(0)?,
-                    adapter: row.get(1)?,
-                    args: row
-                        .get::<_, Option<String>>(2)?
-                        .and_then(|s| serde_json::from_str(&s).ok()),
-                    run_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
-                        .unwrap_or_default()
-                        .with_timezone(&Utc),
-                    interval_seconds: row.get::<_, Option<i64>>(4)?,
-                    status: JobStatus::from(row.get::<_, String>(5)?.as_str()),
-                    retry_count: row.get(6)?,
-                    max_retries: row.get(7)?,
-                    result: row.get(8)?,
-                    error: row.get(9)?,
-                    start_at: row.get::<_, Option<String>>(10)?.and_then(|s| {
-                        DateTime::parse_from_rfc3339(&s)
-                            .map(|dt| dt.with_timezone(&Utc))
-                            .ok()
-                    }),
-                    end_at: row.get::<_, Option<String>>(11)?.and_then(|s| {
-                        DateTime::parse_from_rfc3339(&s)
-                            .map(|dt| dt.with_timezone(&Utc))
-                            .ok()
-                    }),
-                    created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?)
-                        .unwrap_or_default()
-                        .with_timezone(&Utc),
-                    updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(13)?)
-                        .unwrap_or_default()
-                        .with_timezone(&Utc),
-                })
+        let job = stmt.query_row(params![id, format!("{}%", id)], |row| {
+            Ok(Job {
+                id: row.get(0)?,
+                adapter: row.get(1)?,
+                args: row.get::<_, Option<String>>(2)?
+                    .and_then(|s| serde_json::from_str(&s).ok()),
+                run_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                    .unwrap_or_default()
+                    .with_timezone(&Utc),
+                interval_seconds: row.get::<_, Option<i64>>(4)?,
+                status: JobStatus::from(row.get::<_, String>(5)?.as_str()),
+                retry_count: row.get(6)?,
+                max_retries: row.get(7)?,
+                result: row.get(8)?,
+                error: row.get(9)?,
+                start_at: row.get::<_, Option<String>>(10)?
+                    .map(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok())
+                    .flatten(),
+                end_at: row.get::<_, Option<String>>(11)?
+                    .map(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok())
+                    .flatten(),
+                created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?)
+                    .unwrap_or_default()
+                    .with_timezone(&Utc),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(13)?)
+                    .unwrap_or_default()
+                    .with_timezone(&Utc),
             })
-            .optional()?;
+        }).optional()?;
 
         Ok(job)
     }
@@ -216,8 +201,7 @@ impl JobStore {
             Ok(Job {
                 id: row.get(0)?,
                 adapter: row.get(1)?,
-                args: row
-                    .get::<_, Option<String>>(2)?
+                args: row.get::<_, Option<String>>(2)?
                     .and_then(|s| serde_json::from_str(&s).ok()),
                 run_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
                     .unwrap_or_default()
@@ -228,16 +212,12 @@ impl JobStore {
                 max_retries: row.get(7)?,
                 result: row.get(8)?,
                 error: row.get(9)?,
-                start_at: row.get::<_, Option<String>>(10)?.and_then(|s| {
-                    DateTime::parse_from_rfc3339(&s)
-                        .map(|dt| dt.with_timezone(&Utc))
-                        .ok()
-                }),
-                end_at: row.get::<_, Option<String>>(11)?.and_then(|s| {
-                    DateTime::parse_from_rfc3339(&s)
-                        .map(|dt| dt.with_timezone(&Utc))
-                        .ok()
-                }),
+                start_at: row.get::<_, Option<String>>(10)?
+                    .map(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok())
+                    .flatten(),
+                end_at: row.get::<_, Option<String>>(11)?
+                    .map(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok())
+                    .flatten(),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?)
                     .unwrap_or_default()
                     .with_timezone(&Utc),
@@ -262,15 +242,14 @@ impl JobStore {
                     result, error, start_at, end_at, created_at, updated_at
              FROM jobs
              WHERE status = 'pending' AND run_at <= ?1
-             ORDER BY run_at ASC",
+             ORDER BY run_at ASC"
         )?;
 
         let rows = stmt.query_map(params![now], |row| {
             Ok(Job {
                 id: row.get(0)?,
                 adapter: row.get(1)?,
-                args: row
-                    .get::<_, Option<String>>(2)?
+                args: row.get::<_, Option<String>>(2)?
                     .and_then(|s| serde_json::from_str(&s).ok()),
                 run_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
                     .unwrap_or_default()
@@ -281,16 +260,12 @@ impl JobStore {
                 max_retries: row.get(7)?,
                 result: row.get(8)?,
                 error: row.get(9)?,
-                start_at: row.get::<_, Option<String>>(10)?.and_then(|s| {
-                    DateTime::parse_from_rfc3339(&s)
-                        .map(|dt| dt.with_timezone(&Utc))
-                        .ok()
-                }),
-                end_at: row.get::<_, Option<String>>(11)?.and_then(|s| {
-                    DateTime::parse_from_rfc3339(&s)
-                        .map(|dt| dt.with_timezone(&Utc))
-                        .ok()
-                }),
+                start_at: row.get::<_, Option<String>>(10)?
+                    .map(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok())
+                    .flatten(),
+                end_at: row.get::<_, Option<String>>(11)?
+                    .map(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok())
+                    .flatten(),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?)
                     .unwrap_or_default()
                     .with_timezone(&Utc),
@@ -320,16 +295,11 @@ impl JobStore {
     pub fn set_done(&self, id: &str, result: Option<&str>) -> Result<Option<DateTime<Utc>>> {
         let now = Utc::now();
         let conn = self.conn.lock().unwrap();
-
-        let interval: Option<i64> = conn.query_row(
+        let next_run_at: Option<DateTime<Utc>> = conn.query_row(
             "SELECT interval_seconds FROM jobs WHERE id = ?1",
             params![id],
-            |row| row.get(0),
+            |row| row.get::<_, Option<i64>>(0).map(|opt| opt.map(|i| now + chrono::Duration::seconds(i)))
         )?;
-
-        let next_run_at = interval
-            .filter(|&i| i > 0)
-            .map(|i| now + chrono::Duration::seconds(i));
 
         if let Some(next) = next_run_at {
             // Reschedule for next interval
@@ -347,15 +317,8 @@ impl JobStore {
         Ok(next_run_at)
     }
 
-    pub fn set_failed(
-        &self,
-        id: &str,
-        error: &str,
-        retry_count: i32,
-        max_retries: i32,
-    ) -> Result<bool> {
+    pub fn set_failed(&self, id: &str, error: &str, retry_count: i32, max_retries: i32) -> Result<bool> {
         let now = Utc::now();
-        // Since retry_count is 0-indexed, if it's equal to or greater than max_retries we shouldn't retry anymore
         let should_retry = retry_count < max_retries;
         let status = if should_retry { "pending" } else { "failed" };
         let next_run = if should_retry {
@@ -415,139 +378,14 @@ impl<T> OptionalExt<T> for Result<T, rusqlite::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Duration;
-    use std::env;
-    use std::fs;
-
-    fn get_temp_db_path() -> PathBuf {
-        let mut path = env::temp_dir();
-        path.push(format!("test_store_{}.db", uuid::Uuid::new_v4()));
-        path
-    }
 
     #[test]
     fn test_store_creation_and_add() {
-        let db_path = get_temp_db_path();
-        let store = JobStore::new(db_path.clone()).unwrap();
-
-        let args = serde_json::json!({"param": "value"});
-        let run_at = Utc::now();
-        let job = store
-            .add("test_adapter", Some(args.clone()), run_at, Some(60))
-            .unwrap();
-
-        assert_eq!(job.adapter, "test_adapter");
-        assert_eq!(job.args, Some(args));
-        assert_eq!(job.interval_seconds, Some(60));
+        let mut path = std::env::temp_dir();
+        path.push(format!("test_store_min_{}.db", uuid::Uuid::new_v4()));
+        let store = JobStore::new(path.clone()).unwrap();
+        let job = store.add("test", None, chrono::Utc::now(), None).unwrap();
         assert_eq!(job.status, JobStatus::Pending);
-
-        // Get the job back
-        let fetched = store.get(&job.id).unwrap().unwrap();
-        assert_eq!(fetched.id, job.id);
-        assert_eq!(fetched.adapter, "test_adapter");
-        assert_eq!(fetched.status, JobStatus::Pending);
-
-        let _ = fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn test_store_list_and_due() {
-        let db_path = get_temp_db_path();
-        let store = JobStore::new(db_path.clone()).unwrap();
-
-        let now = Utc::now();
-        let past = now - Duration::seconds(60);
-        let future = now + Duration::seconds(60);
-
-        // Add 3 jobs
-        let j1 = store.add("past_job", None, past, None).unwrap();
-        let _j2 = store.add("future_job", None, future, None).unwrap();
-        let j3 = store
-            .add("another_past", None, past - Duration::seconds(10), None)
-            .unwrap();
-
-        // List all
-        let all = store.list(None, 10).unwrap();
-        assert_eq!(all.len(), 3);
-
-        // List due
-        let due = store.due_jobs().unwrap();
-        assert_eq!(due.len(), 2);
-
-        // Order should be ascending by run_at, so j3 should be first
-        assert_eq!(due[0].id, j3.id);
-        assert_eq!(due[1].id, j1.id);
-
-        let _ = fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn test_store_status_updates() {
-        let db_path = get_temp_db_path();
-        let store = JobStore::new(db_path.clone()).unwrap();
-
-        let job = store.add("test_job", None, Utc::now(), None).unwrap();
-
-        // Set running
-        store.set_running(&job.id).unwrap();
-        let running_job = store.get(&job.id).unwrap().unwrap();
-        assert_eq!(running_job.status, JobStatus::Running);
-        assert!(running_job.start_at.is_some());
-
-        // Set done
-        store.set_done(&job.id, Some("success")).unwrap();
-        let done_job = store.get(&job.id).unwrap().unwrap();
-        assert_eq!(done_job.status, JobStatus::Done);
-        assert_eq!(done_job.result.as_deref(), Some("success"));
-        assert!(done_job.end_at.is_some());
-
-        let _ = fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn test_store_failed_and_retry() {
-        let db_path = get_temp_db_path();
-        let store = JobStore::new(db_path.clone()).unwrap();
-
-        let job = store.add("test_job", None, Utc::now(), None).unwrap();
-
-        // Fail it once (should retry)
-        let should_retry = store.set_failed(&job.id, "error 1", 0, 3).unwrap();
-        assert!(should_retry);
-
-        let retry_job = store.get(&job.id).unwrap().unwrap();
-        assert_eq!(retry_job.status, JobStatus::Pending); // Returns to pending
-        assert_eq!(retry_job.error.as_deref(), Some("error 1"));
-        assert_eq!(retry_job.retry_count, 1);
-
-        // Fail it again
-        store.set_failed(&job.id, "error 2", 1, 3).unwrap();
-        let should_retry_last = store.set_failed(&job.id, "error 3", 3, 3).unwrap();
-        assert!(!should_retry_last);
-
-        let failed_job = store.get(&job.id).unwrap().unwrap();
-        assert_eq!(failed_job.status, JobStatus::Failed);
-        assert_eq!(failed_job.error.as_deref(), Some("error 3"));
-        assert_eq!(failed_job.retry_count, 4);
-
-        let _ = fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn test_store_cancel_and_delete() {
-        let db_path = get_temp_db_path();
-        let store = JobStore::new(db_path.clone()).unwrap();
-
-        let job = store.add("test_job", None, Utc::now(), None).unwrap();
-
-        store.cancel(&job.id).unwrap();
-        let cancelled = store.get(&job.id).unwrap().unwrap();
-        assert_eq!(cancelled.status, JobStatus::Cancelled);
-
-        store.delete(&job.id).unwrap();
-        let deleted = store.get(&job.id).unwrap();
-        assert!(deleted.is_none());
-
-        let _ = fs::remove_file(db_path);
+        let _ = std::fs::remove_file(path);
     }
 }

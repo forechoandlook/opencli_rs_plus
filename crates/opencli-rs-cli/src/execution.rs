@@ -1,9 +1,9 @@
-use opencli_rs_browser::{get_app_port, probe_cdp, BrowserBridge, CdpPage};
 use opencli_rs_core::{CliCommand, CliError, IPage, Strategy};
 use opencli_rs_pipeline::{execute_pipeline, steps::register_all_steps, StepRegistry};
+use opencli_rs_browser::{get_app_port, probe_cdp, BrowserBridge, CdpPage};
 use serde_json::Value;
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::collections::HashMap;
 
 /// Get daemon port from env or default
 fn daemon_port() -> u16 {
@@ -57,10 +57,7 @@ async fn execute_command_inner(
     if cmd.needs_browser() {
         // UI strategy + localhost domain → try direct CDP connection to Electron app
         let is_electron = cmd.strategy == Strategy::Ui
-            && cmd
-                .domain
-                .as_deref()
-                .map_or(false, |d| d == "localhost" || d.starts_with("localhost:"));
+            && cmd.domain.as_deref().map_or(false, |d| d == "localhost" || d.starts_with("localhost:"));
 
         let page: Arc<dyn IPage> = if is_electron {
             let port = get_app_port(&cmd.site).ok_or_else(|| {
@@ -79,9 +76,7 @@ async fn execute_command_inner(
         };
 
         // Pre-navigate only for Cookie/Header strategies.
-        let pipeline_starts_with_navigate = cmd
-            .pipeline
-            .as_ref()
+        let pipeline_starts_with_navigate = cmd.pipeline.as_ref()
             .and_then(|steps| steps.first())
             .and_then(|step| step.as_object())
             .map_or(false, |obj| obj.contains_key("navigate"));
@@ -115,6 +110,7 @@ async fn execute_command_inner(
         run_command(cmd, None, &kwargs, &registry).await
     }
 }
+
 
 async fn run_command(
     cmd: &CliCommand,

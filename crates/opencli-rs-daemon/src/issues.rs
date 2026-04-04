@@ -63,11 +63,7 @@ impl std::fmt::Display for IssueStatus {
 
 impl From<&str> for IssueStatus {
     fn from(s: &str) -> Self {
-        if s == "closed" {
-            IssueStatus::Closed
-        } else {
-            IssueStatus::Open
-        }
+        if s == "closed" { IssueStatus::Closed } else { IssueStatus::Open }
     }
 }
 
@@ -112,18 +108,10 @@ impl IssueStore {
             CREATE INDEX IF NOT EXISTS idx_issues_status  ON issues(status);
             ",
         )?;
-        Ok(Self {
-            conn: Mutex::new(conn),
-        })
+        Ok(Self { conn: Mutex::new(conn) })
     }
 
-    pub fn add(
-        &self,
-        adapter: &str,
-        kind: IssueKind,
-        title: &str,
-        body: Option<&str>,
-    ) -> Result<Issue> {
+    pub fn add(&self, adapter: &str, kind: IssueKind, title: &str, body: Option<&str>) -> Result<Issue> {
         let now = unix_now();
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -156,22 +144,13 @@ impl IssueStore {
         .map_err(Into::into)
     }
 
-    pub fn list(
-        &self,
-        adapter: Option<&str>,
-        status: Option<IssueStatus>,
-        limit: usize,
-    ) -> Result<Vec<Issue>> {
+    pub fn list(&self, adapter: Option<&str>, status: Option<IssueStatus>, limit: usize) -> Result<Vec<Issue>> {
         let conn = self.conn.lock().unwrap();
 
         // Build query dynamically based on filters
         let mut conditions = Vec::new();
-        if adapter.is_some() {
-            conditions.push("adapter = ?1");
-        }
-        if status.is_some() {
-            conditions.push("status = ?2");
-        }
+        if adapter.is_some() { conditions.push("adapter = ?1"); }
+        if status.is_some()  { conditions.push("status = ?2"); }
         let where_clause = if conditions.is_empty() {
             String::new()
         } else {
@@ -190,7 +169,10 @@ impl IssueStore {
         let adapter_val = adapter.unwrap_or("");
         let status_val = status.as_ref().map(|s| s.to_string()).unwrap_or_default();
 
-        let rows = stmt.query_map(params![adapter_val, status_val, limit as i64], row_to_issue)?;
+        let rows = stmt.query_map(
+            params![adapter_val, status_val, limit as i64],
+            row_to_issue,
+        )?;
         rows.map(|r| r.map_err(Into::into)).collect()
     }
 
@@ -222,12 +204,12 @@ impl IssueStore {
 
 fn row_to_issue(row: &rusqlite::Row<'_>) -> rusqlite::Result<Issue> {
     Ok(Issue {
-        id: row.get(0)?,
-        adapter: row.get(1)?,
-        kind: IssueKind::from(row.get::<_, String>(2)?.as_str()),
-        title: row.get(3)?,
-        body: row.get(4)?,
-        status: IssueStatus::from(row.get::<_, String>(5)?.as_str()),
+        id:         row.get(0)?,
+        adapter:    row.get(1)?,
+        kind:       IssueKind::from(row.get::<_, String>(2)?.as_str()),
+        title:      row.get(3)?,
+        body:       row.get(4)?,
+        status:     IssueStatus::from(row.get::<_, String>(5)?.as_str()),
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
     })

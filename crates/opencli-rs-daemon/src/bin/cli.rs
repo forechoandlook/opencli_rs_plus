@@ -6,9 +6,9 @@ use chrono::{DateTime, Duration, Utc};
 use clap::{Parser, Subcommand};
 #[path = "../tools.rs"]
 mod tools;
+use tools::{find_by_name, load_tools, search, summary};
 use serde_json::Value;
 use std::path::PathBuf;
-use tools::{find_by_name, load_tools, search, summary};
 
 fn default_addr() -> String {
     "127.0.0.1:10008".to_string()
@@ -190,32 +190,19 @@ fn parse_datetime(s: &str) -> Result<DateTime<Utc>> {
 
 fn cmd_status(addr: &str) -> Result<()> {
     let result = socket_request(addr, "daemon.status", serde_json::json!({}))?;
-    let status = result
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
-    let chrome = result
-        .get("chrome_running")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let status = result.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let chrome = result.get("chrome_running").and_then(|v| v.as_bool()).unwrap_or(false);
     println!("Daemon status: {}", status);
     println!("Chrome running: {}", chrome);
     if let Some(adapters) = result.get("adapters") {
-        println!(
-            "Adapters: {} total, {} enabled",
+        println!("Adapters: {} total, {} enabled",
             adapters.get("total").and_then(|v| v.as_i64()).unwrap_or(0),
-            adapters
-                .get("enabled")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0)
-        );
+            adapters.get("enabled").and_then(|v| v.as_i64()).unwrap_or(0));
     }
     if let Some(jobs) = result.get("jobs") {
-        println!(
-            "Jobs: {} pending, {} running",
+        println!("Jobs: {} pending, {} running",
             jobs.get("pending").and_then(|v| v.as_i64()).unwrap_or(0),
-            jobs.get("running").and_then(|v| v.as_i64()).unwrap_or(0)
-        );
+            jobs.get("running").and_then(|v| v.as_i64()).unwrap_or(0));
     }
     Ok(())
 }
@@ -241,67 +228,36 @@ fn cmd_restart(addr: &str, poll_interval: u64, db: Option<PathBuf>) -> Result<()
 }
 
 fn cmd_adapter_list(addr: &str, include_disabled: bool, include_hidden: bool) -> Result<()> {
-    let result = socket_request(
-        addr,
-        "adapter.list",
-        serde_json::json!({
-            "include_disabled": include_disabled,
-            "include_hidden": include_hidden,
-        }),
-    )?;
-    let adapters = result
-        .get("adapters")
-        .and_then(|v| v.as_array())
-        .map_or(&[] as &[_], |v| v.as_slice());
+    let result = socket_request(addr, "adapter.list", serde_json::json!({
+        "include_disabled": include_disabled,
+        "include_hidden": include_hidden,
+    }))?;
+    let adapters = result.get("adapters").and_then(|v| v.as_array()).map_or(&[] as &[_], |v| v.as_slice());
     let count = result.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
     if adapters.is_empty() {
         println!("No adapters found.");
         return Ok(());
     }
-    println!(
-        "{:30} {:10} {:12} {}",
-        "Name", "Enabled", "Browser", "Description"
-    );
+    println!("{:30} {:10} {:12} {}", "Name", "Enabled", "Browser", "Description");
     println!("{}", "-".repeat(80));
     for entry in adapters {
-        let name = entry
-            .get("full_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
-        let enabled = entry
-            .get("enabled")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let browser = entry
-            .get("browser")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let desc = entry
-            .get("description")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        println!(
-            "{:30} {:10} {:12} {}",
+        let name = entry.get("full_name").and_then(|v| v.as_str()).unwrap_or("?");
+        let enabled = entry.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+        let browser = entry.get("browser").and_then(|v| v.as_bool()).unwrap_or(false);
+        let desc = entry.get("description").and_then(|v| v.as_str()).unwrap_or("");
+        println!("{:30} {:10} {:12} {}",
             name,
             if enabled { "yes" } else { "no" },
             if browser { "yes" } else { "no" },
-            desc.chars().take(40).collect::<String>()
-        );
+            desc.chars().take(40).collect::<String>());
     }
     println!("\n{} adapters total", count);
     Ok(())
 }
 
 fn cmd_adapter_search(addr: &str, query: &str) -> Result<()> {
-    let result = socket_request(
-        addr,
-        "adapter.search",
-        serde_json::json!({ "query": query }),
-    )?;
-    let adapters = result
-        .get("adapters")
-        .and_then(|v| v.as_array())
-        .map_or(&[] as &[_], |v| v.as_slice());
+    let result = socket_request(addr, "adapter.search", serde_json::json!({ "query": query }))?;
+    let adapters = result.get("adapters").and_then(|v| v.as_array()).map_or(&[] as &[_], |v| v.as_slice());
     let count = result.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
     if adapters.is_empty() {
         println!("No adapters found matching '{}'.", query);
@@ -310,24 +266,10 @@ fn cmd_adapter_search(addr: &str, query: &str) -> Result<()> {
     println!("{:30} {:12} {}", "Name", "Browser", "Description");
     println!("{}", "-".repeat(70));
     for entry in adapters {
-        let name = entry
-            .get("full_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
-        let browser = entry
-            .get("browser")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let desc = entry
-            .get("description")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        println!(
-            "{:30} {:12} {}",
-            name,
-            if browser { "yes" } else { "no" },
-            desc.chars().take(35).collect::<String>()
-        );
+        let name = entry.get("full_name").and_then(|v| v.as_str()).unwrap_or("?");
+        let browser = entry.get("browser").and_then(|v| v.as_bool()).unwrap_or(false);
+        let desc = entry.get("description").and_then(|v| v.as_str()).unwrap_or("");
+        println!("{:30} {:12} {}", name, if browser { "yes" } else { "no" }, desc.chars().take(35).collect::<String>());
     }
     println!("\n{} results for '{}'", count, query);
     Ok(())
@@ -335,120 +277,69 @@ fn cmd_adapter_search(addr: &str, query: &str) -> Result<()> {
 
 fn cmd_adapter_enable(addr: &str, name: &str) -> Result<()> {
     let result = socket_request(addr, "adapter.enable", serde_json::json!({ "name": name }))?;
-    let enabled = result
-        .get("enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    println!(
-        "{}",
-        if enabled {
-            format!("Adapter '{}' enabled", name)
-        } else {
-            format!("Failed to enable '{}'", name)
-        }
-    );
+    let enabled = result.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+    println!("{}", if enabled { format!("Adapter '{}' enabled", name) } else { format!("Failed to enable '{}'", name) });
     Ok(())
 }
 
 fn cmd_adapter_disable(addr: &str, name: &str) -> Result<()> {
     let result = socket_request(addr, "adapter.disable", serde_json::json!({ "name": name }))?;
-    let enabled = result
-        .get("enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    println!(
-        "{}",
-        if !enabled {
-            format!("Adapter '{}' disabled", name)
-        } else {
-            format!("Failed to disable '{}'", name)
-        }
-    );
+    let enabled = result.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+    println!("{}", if !enabled { format!("Adapter '{}' disabled", name) } else { format!("Failed to disable '{}'", name) });
     Ok(())
 }
 
 fn cmd_adapter_sync(addr: &str, folder: Option<PathBuf>) -> Result<()> {
-    let result = socket_request(
-        addr,
-        "adapter.sync",
-        serde_json::json!({
-            "folder": folder.map(|p| p.display().to_string()),
-        }),
-    )?;
+    let result = socket_request(addr, "adapter.sync", serde_json::json!({
+        "folder": folder.map(|p| p.display().to_string()),
+    }))?;
     let synced = result.get("synced").and_then(|v| v.as_i64()).unwrap_or(0);
     let folder_str = result.get("folder").and_then(|v| v.as_str()).unwrap_or("?");
     println!("Synced {} adapters from '{}'", synced, folder_str);
     Ok(())
 }
 
-fn cmd_job_add(
-    addr: &str,
-    adapter: &str,
-    run_at: Option<String>,
-    delay: Option<i64>,
-    interval: Option<i64>,
-    args_json: Option<String>,
-) -> Result<()> {
+fn cmd_job_add(addr: &str, adapter: &str, run_at: Option<String>, delay: Option<i64>, interval: Option<i64>, args_json: Option<String>) -> Result<()> {
     let run_at_dt = match (run_at.as_deref(), delay) {
         (Some(s), _) => parse_datetime(s)?,
         (None, Some(d)) => Utc::now() + Duration::seconds(d),
         (None, None) => Utc::now(),
     };
-    let args_val: Option<Value> = args_json
-        .as_ref()
-        .and_then(|s| serde_json::from_str(s).ok());
-    let result = socket_request(
-        addr,
-        "job.add",
-        serde_json::json!({
-            "adapter": adapter,
-            "args": args_val,
-            "run_at": run_at_dt.to_rfc3339(),
-            "interval_seconds": interval,
-        }),
-    )?;
+    let args_val: Option<Value> = args_json.as_ref().and_then(|s| serde_json::from_str(s).ok());
+    let result = socket_request(addr, "job.add", serde_json::json!({
+        "adapter": adapter,
+        "args": args_val,
+        "run_at": run_at_dt.to_rfc3339(),
+        "interval_seconds": interval,
+    }))?;
     let job = &result["job"];
     println!("Job created: {}", job["id"].as_str().unwrap_or("?"));
-    println!(
-        "   Adapter: {}  |  Run at: {}  |  Status: {}",
+    println!("   Adapter: {}  |  Run at: {}  |  Status: {}",
         job["adapter"].as_str().unwrap_or("?"),
         job["run_at"].as_str().unwrap_or("?"),
-        job["status"].as_str().unwrap_or("?")
-    );
+        job["status"].as_str().unwrap_or("?"));
     Ok(())
 }
 
 fn cmd_job_list(addr: &str, status: Option<String>, limit: usize) -> Result<()> {
-    let result = socket_request(
-        addr,
-        "job.list",
-        serde_json::json!({
-            "status": status,
-            "limit": limit,
-        }),
-    )?;
-    let jobs = result
-        .get("jobs")
-        .and_then(|v| v.as_array())
-        .map_or(&[] as &[_], |v| v.as_slice());
+    let result = socket_request(addr, "job.list", serde_json::json!({
+        "status": status,
+        "limit": limit,
+    }))?;
+    let jobs = result.get("jobs").and_then(|v| v.as_array()).map_or(&[] as &[_], |v| v.as_slice());
     if jobs.is_empty() {
         println!("No jobs found.");
         return Ok(());
     }
-    println!(
-        "{:40} {:20} {:12} {:20}",
-        "ID", "Adapter", "Status", "Run At"
-    );
+    println!("{:40} {:20} {:12} {:20}", "ID", "Adapter", "Status", "Run At");
     println!("{}", "-".repeat(95));
     for job in jobs {
         let id = job["id"].as_str().unwrap_or("?");
-        println!(
-            "{:40} {:20} {:12} {}",
+        println!("{:40} {:20} {:12} {}",
             &id[..8.min(id.len())],
             job["adapter"].as_str().unwrap_or("?"),
             job["status"].as_str().unwrap_or("?"),
-            job["run_at"].as_str().unwrap_or("?")
-        );
+            job["run_at"].as_str().unwrap_or("?"));
     }
     println!("\n{} jobs total", jobs.len());
     Ok(())
@@ -462,15 +353,10 @@ fn cmd_job_show(addr: &str, id: &str) -> Result<()> {
     println!("Status:   {}", job["status"].as_str().unwrap_or("?"));
     println!("Run at:   {}", job["run_at"].as_str().unwrap_or("?"));
     if let Some(i) = job["interval_seconds"].as_i64() {
-        if i > 0 {
-            println!("Interval: {}s", i);
-        }
+        if i > 0 { println!("Interval: {}s", i); }
     }
     if let Some(args) = job.get("args").filter(|v| !v.is_null()) {
-        println!(
-            "Args:     {}",
-            serde_json::to_string_pretty(args).unwrap_or_default()
-        );
+        println!("Args:     {}", serde_json::to_string_pretty(args).unwrap_or_default());
     }
     if let Some(r) = job["result"].as_str() {
         println!("Result:   {}", r.chars().take(200).collect::<String>());
@@ -500,19 +386,13 @@ fn cmd_tools_search(query: &str) -> Result<()> {
         println!("No tools found for '{}'.", query);
         return Ok(());
     }
-    println!(
-        "{:25} {:20} {:10} {}",
-        "Name", "Binary", "Installed", "Description"
-    );
+    println!("{:25} {:20} {:10} {}", "Name", "Binary", "Installed", "Description");
     println!("{}", "-".repeat(85));
     for t in results {
-        println!(
-            "{:25} {:20} {:10} {}",
-            t.name,
-            t.binary,
+        println!("{:25} {:20} {:10} {}",
+            t.name, t.binary,
             if t.is_installed() { "yes" } else { "no" },
-            t.description.chars().take(35).collect::<String>()
-        );
+            t.description.chars().take(35).collect::<String>());
     }
     Ok(())
 }
@@ -523,19 +403,13 @@ fn cmd_tools_list() -> Result<()> {
         println!("No tools found. Add .md files to ~/.opencli-rs/tools/");
         return Ok(());
     }
-    println!(
-        "{:25} {:20} {:10} {}",
-        "Name", "Binary", "Installed", "Description"
-    );
+    println!("{:25} {:20} {:10} {}", "Name", "Binary", "Installed", "Description");
     println!("{}", "-".repeat(85));
     for t in &tools {
-        println!(
-            "{:25} {:20} {:10} {}",
-            t.name,
-            t.binary,
+        println!("{:25} {:20} {:10} {}",
+            t.name, t.binary,
             if t.is_installed() { "yes" } else { "no" },
-            t.description.chars().take(35).collect::<String>()
-        );
+            t.description.chars().take(35).collect::<String>());
     }
     Ok(())
 }
@@ -547,10 +421,7 @@ fn cmd_tools_info(name: &str) -> Result<()> {
         Some(t) => {
             println!("Name:        {}", t.name);
             println!("Binary:      {}", t.binary);
-            println!(
-                "Installed:   {}",
-                if t.is_installed() { "yes" } else { "no" }
-            );
+            println!("Installed:   {}", if t.is_installed() { "yes" } else { "no" });
             if let Some(hp) = &t.homepage {
                 println!("Homepage:    {}", hp);
             }
@@ -581,12 +452,10 @@ fn cmd_tools_summary() -> Result<()> {
     println!("{:25} {:10} {}", "Name", "Installed", "Description");
     println!("{}", "-".repeat(70));
     for s in items {
-        println!(
-            "{:25} {:10} {}",
+        println!("{:25} {:10} {}",
             s.name,
             if s.installed { "yes" } else { "no" },
-            s.description.chars().take(35).collect::<String>()
-        );
+            s.description.chars().take(35).collect::<String>());
     }
     Ok(())
 }
@@ -611,13 +480,7 @@ fn main() -> Result<()> {
         Command::Restart { poll_interval, db } => cmd_restart(&addr, poll_interval, db)?,
 
         Command::Job { sub } => match sub {
-            JobSubcommand::Add {
-                adapter,
-                run_at,
-                delay,
-                interval,
-                args: args_json,
-            } => {
+            JobSubcommand::Add { adapter, run_at, delay, interval, args: args_json } => {
                 cmd_job_add(&addr, &adapter, run_at, delay, interval, args_json)?;
             }
             JobSubcommand::List { status, limit } => cmd_job_list(&addr, status, limit)?,
@@ -628,10 +491,7 @@ fn main() -> Result<()> {
         },
 
         Command::Adapter { sub } => match sub {
-            AdapterSubcommand::List {
-                include_disabled,
-                include_hidden,
-            } => {
+            AdapterSubcommand::List { include_disabled, include_hidden } => {
                 cmd_adapter_list(&addr, include_disabled, include_hidden)?;
             }
             AdapterSubcommand::Search { query } => cmd_adapter_search(&addr, &query)?,
@@ -652,8 +512,7 @@ fn main() -> Result<()> {
                 anyhow::bail!("Usage: socket <method> [params_json]");
             }
             let method = &raw_args[0];
-            let params: Value = raw_args
-                .get(1)
+            let params: Value = raw_args.get(1)
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or(serde_json::json!({}));
             let result = socket_request(&addr, method, params)?;

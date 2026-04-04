@@ -1,11 +1,7 @@
 use colored::Colorize;
 use opencli_rs_browser::DaemonClient;
 fn is_binary_installed(binary: &str) -> bool {
-    let cmd = if cfg!(target_os = "windows") {
-        "where"
-    } else {
-        "which"
-    };
+    let cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
     std::process::Command::new(cmd)
         .arg(binary)
         .stdout(std::process::Stdio::null())
@@ -26,8 +22,7 @@ pub async fn run_doctor() {
             || std::path::Path::new("/Applications/Google Chrome.app").exists()
     } else if cfg!(target_os = "windows") {
         std::path::Path::new(r"C:\Program Files\Google\Chrome\Application\chrome.exe").exists()
-            || std::path::Path::new(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe")
-                .exists()
+            || std::path::Path::new(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe").exists()
             || is_binary_installed("chrome")
     } else {
         // Linux

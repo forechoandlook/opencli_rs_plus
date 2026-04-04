@@ -43,7 +43,8 @@ pub fn render_csv(data: &Value, columns: Option<&[String]>) -> String {
                     wtr.write_record(&[value_to_field(item)]).ok();
                 }
                 wtr.flush().ok();
-                String::from_utf8(wtr.into_inner().unwrap_or_default()).unwrap_or_default()
+                String::from_utf8(wtr.into_inner().unwrap_or_default())
+                    .unwrap_or_default()
             } else {
                 let mut wtr = csv::WriterBuilder::new().from_writer(vec![]);
                 wtr.write_record(&cols).ok();
@@ -55,7 +56,8 @@ pub fn render_csv(data: &Value, columns: Option<&[String]>) -> String {
                     wtr.write_record(&row).ok();
                 }
                 wtr.flush().ok();
-                String::from_utf8(wtr.into_inner().unwrap_or_default()).unwrap_or_default()
+                String::from_utf8(wtr.into_inner().unwrap_or_default())
+                    .unwrap_or_default()
             }
         }
         Value::Object(obj) => {
@@ -67,7 +69,8 @@ pub fn render_csv(data: &Value, columns: Option<&[String]>) -> String {
                 wtr.write_record(&[key.as_str(), &value_to_field(v)]).ok();
             }
             wtr.flush().ok();
-            String::from_utf8(wtr.into_inner().unwrap_or_default()).unwrap_or_default()
+            String::from_utf8(wtr.into_inner().unwrap_or_default())
+                .unwrap_or_default()
         }
         scalar => value_to_field(scalar),
     }

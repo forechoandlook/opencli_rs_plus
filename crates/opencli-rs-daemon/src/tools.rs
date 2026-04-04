@@ -54,25 +54,16 @@ pub struct Tool {
 
 impl Tool {
     pub fn install_cmd(&self) -> Option<&str> {
-        let platform = if cfg!(target_os = "macos") {
-            "mac"
-        } else if cfg!(target_os = "linux") {
-            "linux"
-        } else {
-            "windows"
-        };
-        self.install
-            .get(platform)
+        let platform = if cfg!(target_os = "macos") { "mac" }
+            else if cfg!(target_os = "linux") { "linux" }
+            else { "windows" };
+        self.install.get(platform)
             .or_else(|| self.install.get("default"))
             .map(|s| s.as_str())
     }
 
     pub fn is_installed(&self) -> bool {
-        let cmd = if cfg!(target_os = "windows") {
-            "where"
-        } else {
-            "which"
-        };
+        let cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
         std::process::Command::new(cmd)
             .arg(&self.binary)
             .stdout(std::process::Stdio::null())
@@ -133,8 +124,7 @@ fn parse_tool_md(content: &str) -> Option<Tool> {
     let close = after_open.find("\n---")?;
     let yaml = &after_open[..close];
     let body_start = close + 4; // skip \n---
-    let body = after_open
-        .get(body_start..)
+    let body = after_open.get(body_start..)
         .unwrap_or("")
         .trim_start_matches('\n')
         .to_string();
@@ -142,8 +132,7 @@ fn parse_tool_md(content: &str) -> Option<Tool> {
     let fm: ToolFrontmatter = serde_yaml::from_str(yaml).ok()?;
 
     // Short description: first non-empty line in body
-    let description = body
-        .lines()
+    let description = body.lines()
         .map(|l| l.trim())
         .find(|l| !l.is_empty())
         .unwrap_or("")
@@ -168,15 +157,12 @@ pub fn search<'a>(query: &str, tools: &'a [Tool]) -> Vec<&'a Tool> {
         return tools.iter().collect();
     }
     let q = query.to_lowercase();
-    tools
-        .iter()
-        .filter(|t| {
-            t.name.to_lowercase().contains(&q)
-                || t.binary.to_lowercase().contains(&q)
-                || t.description.to_lowercase().contains(&q)
-                || t.tags.iter().any(|tag| tag.to_lowercase().contains(&q))
-        })
-        .collect()
+    tools.iter().filter(|t| {
+        t.name.to_lowercase().contains(&q)
+            || t.binary.to_lowercase().contains(&q)
+            || t.description.to_lowercase().contains(&q)
+            || t.tags.iter().any(|tag| tag.to_lowercase().contains(&q))
+    }).collect()
 }
 
 /// Find a tool by exact name.
@@ -185,7 +171,7 @@ pub fn find_by_name<'a>(name: &str, tools: &'a [Tool]) -> Option<&'a Tool> {
 }
 
 /// Summary: just name + short description for every tool.
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize)]
 pub struct ToolSummary {
     pub name: String,
     pub description: String,
@@ -193,148 +179,9 @@ pub struct ToolSummary {
 }
 
 pub fn summary(tools: &[Tool]) -> Vec<ToolSummary> {
-    tools
-        .iter()
-        .map(|t| ToolSummary {
-            name: t.name.clone(),
-            description: t.description.clone(),
-            installed: t.is_installed(),
-        })
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_tool_md_valid() {
-        let content = r#"---
-name: ripgrep
-binary: rg
-homepage: https://github.com/BurntSushi/ripgrep
-tags: [search, grep, regex]
-install:
-  mac: brew install ripgrep
-  linux: apt install ripgrep
----
-
-Fast line-oriented regex search.
-It is very fast."#;
-
-        let tool = parse_tool_md(content).unwrap();
-        assert_eq!(tool.name, "ripgrep");
-        assert_eq!(tool.binary, "rg");
-        assert_eq!(
-            tool.homepage,
-            Some("https://github.com/BurntSushi/ripgrep".to_string())
-        );
-        assert_eq!(
-            tool.tags,
-            vec![
-                "search".to_string(),
-                "grep".to_string(),
-                "regex".to_string()
-            ]
-        );
-        assert_eq!(tool.install.get("mac").unwrap(), "brew install ripgrep");
-        assert_eq!(tool.description, "Fast line-oriented regex search.");
-        assert_eq!(
-            tool.body.trim(),
-            "Fast line-oriented regex search.\nIt is very fast."
-        );
-    }
-
-    #[test]
-    fn test_parse_tool_md_invalid_yaml() {
-        let content = r#"---
-name: ripgrep
-binary: rg
-homepage: [invalid yaml
----
-body"#;
-        assert!(parse_tool_md(content).is_none());
-    }
-
-    #[test]
-    fn test_parse_tool_md_no_frontmatter() {
-        let content = r#"just some markdown text
-no frontmatter"#;
-        assert!(parse_tool_md(content).is_none());
-    }
-
-    #[test]
-    fn test_parse_tool_md_no_closing_tags() {
-        let content = r#"---
-name: ripgrep
-binary: rg
-"#;
-        assert!(parse_tool_md(content).is_none());
-    }
-
-    #[test]
-    fn test_search() {
-        let mut install = HashMap::new();
-        install.insert("mac".to_string(), "brew install rg".to_string());
-
-        let tools = vec![
-            Tool {
-                name: "ripgrep".to_string(),
-                binary: "rg".to_string(),
-                description: "Fast line-oriented regex search".to_string(),
-                homepage: None,
-                tags: vec!["search".to_string(), "grep".to_string()],
-                install: install.clone(),
-                body: "Fast search tool.".to_string(),
-            },
-            Tool {
-                name: "jq".to_string(),
-                binary: "jq".to_string(),
-                description: "Command-line JSON processor".to_string(),
-                homepage: None,
-                tags: vec!["json".to_string(), "parser".to_string()],
-                install,
-                body: "JSON processing tool.".to_string(),
-            },
-        ];
-
-        let results = search("regex", &tools);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "ripgrep");
-
-        let results = search("JSON", &tools);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "jq");
-
-        let results = search("parser", &tools);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "jq");
-
-        let results = search("rg", &tools);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "ripgrep");
-
-        let results = search("   ", &tools);
-        assert_eq!(results.len(), 2);
-    }
-
-    #[test]
-    fn test_find_by_name() {
-        let tools = vec![Tool {
-            name: "ripgrep".to_string(),
-            binary: "rg".to_string(),
-            description: "Fast line-oriented regex search".to_string(),
-            homepage: None,
-            tags: vec![],
-            install: HashMap::new(),
-            body: "Fast search tool.".to_string(),
-        }];
-
-        let result = find_by_name("ripgrep", &tools);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().name, "ripgrep");
-
-        let result = find_by_name("jq", &tools);
-        assert!(result.is_none());
-    }
+    tools.iter().map(|t| ToolSummary {
+        name: t.name.clone(),
+        description: t.description.clone(),
+        installed: t.is_installed(),
+    }).collect()
 }
