@@ -101,32 +101,26 @@ jobs:
       - name: Prepare artifacts
         shell: bash
         run: |
-          PLAT="${{ matrix.asset_name }}"  # e.g. macos-arm64 / linux-x86_64 / windows-x86_64
-          # Strip the leading "opencli-daemon-" prefix to get the platform suffix
-          SUFFIX="${PLAT#opencli-daemon-}"
+          SUFFIX="${{ matrix.asset_name }}"
+          SUFFIX="${SUFFIX#opencli-daemon-}"   # strip prefix → macos-arm64 / linux-x86_64 / windows-x86_64
+          OUTDIR="target/${{ matrix.target }}/release"
 
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             EXT=".exe"
+            HASH_CMD="sha256sum"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            EXT=""
+            HASH_CMD="shasum -a 256"
           else
             EXT=""
+            HASH_CMD="sha256sum"
           fi
 
-          OUTDIR="target/${{ matrix.target }}/release"
-
-          declare -A BINS=(
-            ["opencli-daemon${EXT}"]="opencli-daemon-${SUFFIX}${EXT}"
-            ["opencli-cli${EXT}"]="opencli-cli-${SUFFIX}${EXT}"
-            ["opencli-rs${EXT}"]="opencli-rs-${SUFFIX}${EXT}"
-          )
-
-          for SRC_NAME in "${!BINS[@]}"; do
-            DEST="${BINS[$SRC_NAME]}"
-            cp "${OUTDIR}/${SRC_NAME}" "${DEST}"
-            if [[ "$RUNNER_OS" == "macOS" ]]; then
-              shasum -a 256 "${DEST}" > "${DEST}.sha256"
-            else
-              sha256sum "${DEST}" > "${DEST}.sha256"
-            fi
+          for BIN in opencli-daemon opencli-cli opencli-rs; do
+            SRC="${OUTDIR}/${BIN}${EXT}"
+            DEST="${BIN}-${SUFFIX}${EXT}"
+            cp "$SRC" "$DEST"
+            $HASH_CMD "$DEST" > "${DEST}.sha256"
           done
 
       - name: Upload artifact
