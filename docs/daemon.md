@@ -15,6 +15,27 @@
 
 调度 daemon 在执行需要浏览器的 adapter 时，通过 HTTP POST 调用 browser-daemon，browser-daemon 再通过 WebSocket 转发给 Chrome 插件执行。
 
+### 命令发现
+
+顶层帮助默认只展示内置命令和 daemon/client 命令，不直接展开全部 adapter，避免输出过长：
+
+```bash
+opencli --help
+```
+
+如果要查看所有 adapter family，再显式加 `--adapters`：
+
+```bash
+opencli --help --adapters
+```
+
+查看某个 adapter family 下的具体命令：
+
+```bash
+opencli zhihu --help
+opencli zhihu hot --help
+```
+
 ```
 opencli status / job / adapter / ...
     ↓ TCP JSON-RPC (127.0.0.1:10008)
@@ -57,6 +78,12 @@ opencli --addr 192.168.1.100:10008 status
 # 直接执行 adapter（无需 daemon）
 opencli zhihu hot
 opencli bilibili hot
+
+# 查看顶层命令
+opencli --help
+
+# 查看所有 adapter families
+opencli --help --adapters
 ```
 
 ### Adapter 管理

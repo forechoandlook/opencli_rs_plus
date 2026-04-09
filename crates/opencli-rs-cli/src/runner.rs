@@ -15,10 +15,199 @@ use crate::args::coerce_and_validate_args;
 use crate::commands::{completion, doctor, feedback, update};
 use crate::execution::execute_command;
 
+fn daemon_help_commands() -> Vec<Command> {
+    vec![
+        Command::new("daemon")
+            .about("Start the scheduler daemon")
+            .arg(
+                Arg::new("poll_interval")
+                    .long("poll-interval")
+                    .default_value("10")
+                    .help("Polling interval in seconds"),
+            )
+            .arg(
+                Arg::new("db")
+                    .long("db")
+                    .help("Path to the scheduler database"),
+            )
+            .arg(
+                Arg::new("addr")
+                    .long("addr")
+                    .help("Daemon listen address, e.g. 127.0.0.1:10008"),
+            ),
+        Command::new("status").about("Check daemon status"),
+        Command::new("stop").about("Stop the running daemon"),
+        Command::new("restart")
+            .about("Restart the daemon")
+            .arg(
+                Arg::new("poll_interval")
+                    .long("poll-interval")
+                    .default_value("10")
+                    .help("Polling interval in seconds"),
+            )
+            .arg(
+                Arg::new("db")
+                    .long("db")
+                    .help("Path to the scheduler database"),
+            ),
+        Command::new("job")
+            .about("Manage scheduled jobs")
+            .subcommand(
+                Command::new("add")
+                    .about("Add a new job")
+                    .arg(Arg::new("adapter").required(true))
+                    .arg(Arg::new("run_at").short('r').long("run-at"))
+                    .arg(Arg::new("delay").short('d').long("delay"))
+                    .arg(Arg::new("interval").short('i').long("interval"))
+                    .arg(Arg::new("args").short('a').long("args")),
+            )
+            .subcommand(
+                Command::new("list")
+                    .about("List jobs")
+                    .arg(Arg::new("status").short('s').long("status"))
+                    .arg(
+                        Arg::new("limit")
+                            .short('l')
+                            .long("limit")
+                            .default_value("50"),
+                    ),
+            )
+            .subcommand(
+                Command::new("show")
+                    .about("Show job details")
+                    .arg(Arg::new("id").required(true)),
+            )
+            .subcommand(
+                Command::new("cancel")
+                    .about("Cancel a job")
+                    .arg(Arg::new("id").required(true)),
+            )
+            .subcommand(
+                Command::new("delete")
+                    .about("Delete a job")
+                    .arg(Arg::new("id").required(true)),
+            )
+            .subcommand(Command::new("run").about("Trigger due jobs immediately")),
+        Command::new("adapter")
+            .about("Manage adapters")
+            .subcommand(
+                Command::new("list")
+                    .about("List adapters")
+                    .arg(
+                        Arg::new("include_disabled")
+                            .long("include-disabled")
+                            .action(ArgAction::SetTrue),
+                    )
+                    .arg(
+                        Arg::new("include_hidden")
+                            .long("include-hidden")
+                            .action(ArgAction::SetTrue),
+                    ),
+            )
+            .subcommand(
+                Command::new("search")
+                    .about("Search adapters")
+                    .arg(Arg::new("query").required(true)),
+            )
+            .subcommand(
+                Command::new("enable")
+                    .about("Enable an adapter")
+                    .arg(Arg::new("name").required(true)),
+            )
+            .subcommand(
+                Command::new("disable")
+                    .about("Disable an adapter")
+                    .arg(Arg::new("name").required(true)),
+            )
+            .subcommand(
+                Command::new("sync")
+                    .about("Sync adapters from a folder")
+                    .arg(Arg::new("folder").short('f').long("folder")),
+            ),
+        Command::new("plugin")
+            .about("Manage plugins")
+            .subcommand(
+                Command::new("install")
+                    .about("Install a plugin")
+                    .arg(Arg::new("path").required(true)),
+            )
+            .subcommand(
+                Command::new("uninstall")
+                    .about("Uninstall a plugin")
+                    .arg(Arg::new("name").required(true)),
+            )
+            .subcommand(Command::new("list").about("List installed plugins"))
+            .subcommand(
+                Command::new("update")
+                    .about("Update one plugin or all plugins")
+                    .arg(Arg::new("name")),
+            ),
+        Command::new("tools")
+            .about("Browse the local tool knowledge base")
+            .subcommand(
+                Command::new("search")
+                    .about("Search tools")
+                    .arg(Arg::new("query").required(true)),
+            )
+            .subcommand(Command::new("list").about("List all tools"))
+            .subcommand(
+                Command::new("info")
+                    .about("Show tool details")
+                    .arg(Arg::new("name").required(true)),
+            )
+            .subcommand(Command::new("summary").about("Show tool summary")),
+        Command::new("socket")
+            .about("Send a raw socket command for debugging")
+            .arg(Arg::new("args").num_args(1..).trailing_var_arg(true)),
+    ]
+}
+
+fn render_adapter_catalog(registry: &Registry) -> String {
+    let mut lines = Vec::new();
+    lines.push(String::from("Adapter families:"));
+    for site in registry.list_sites() {
+        let count = registry.list_commands(site).len();
+        lines.push(format!("  {site:<15} {count} command(s)"));
+    }
+    lines.push(String::new());
+    lines.push(String::from(
+        "Use `opencli <site> --help` to inspect commands for one adapter family.",
+    ));
+    lines.join("\n")
+}
+
 fn build_cli(registry: &Registry) -> Command {
+    let native_help = "Native commands:
+  doctor                Check local runtime dependencies and environment
+  update [--check]      Check GitHub releases and update this binary in place
+  feedback <title>      Save local feedback; add --open to open a GitHub issue draft
+  adapters              List all adapter families and command counts
+  tools                 List or search the local tool knowledge base
+  completion <shell>    Generate shell completions
+  explore <url>         Inspect a site and discover API capabilities
+  cascade <url>         Probe auth strategy for a specific API endpoint
+  generate <url>        Generate a new adapter from a target URL
+  summary [show <id>]   Browse adapter summaries
+
+Adapter commands:
+  opencli <site> <command> [args...]
+  opencli <site> --help
+  opencli <site> <command> --help
+
+Examples:
+  opencli adapters
+  opencli tools list
+  opencli zhihu hot
+  opencli twitter search --query openai
+  opencli feedback \"zhihu hot returns 403\" --adapter \"zhihu hot\" --kind broken --open
+  opencli update --check
+  opencli summary show zhihu
+  opencli explore https://example.com --goal \"find public API\"";
+
     let mut app = Command::new("opencli")
         .version(env!("CARGO_PKG_VERSION"))
         .about("AI-driven CLI tool — turns websites into command-line interfaces")
+        .after_help(native_help)
         .arg(
             Arg::new("format")
                 .long("format")
@@ -37,7 +226,13 @@ fn build_cli(registry: &Registry) -> Command {
         );
 
     for site in registry.list_sites() {
-        let mut site_cmd = Command::new(site.to_string());
+        let command_count = registry.list_commands(site).len();
+        let mut site_cmd = Command::new(site.to_string())
+            .about(format!("{command_count} adapter command(s) for {site}"))
+            .hide(true)
+            .after_help(
+                "Use `opencli <site> <command> --help` to inspect adapter-specific arguments.",
+            );
         for cmd in registry.list_commands(site) {
             let mut sub = Command::new(cmd.name.clone()).about(cmd.description.clone());
             for arg_def in &cmd.args {
@@ -66,7 +261,12 @@ fn build_cli(registry: &Registry) -> Command {
         app = app.subcommand(site_cmd);
     }
 
+    for daemon_cmd in daemon_help_commands() {
+        app = app.subcommand(daemon_cmd);
+    }
+
     app = app
+        .subcommand(Command::new("adapters").about("List all adapter families and command counts"))
         .subcommand(Command::new("doctor").about("Run diagnostics checks"))
         .subcommand(
             Command::new("update")
@@ -370,6 +570,10 @@ pub async fn run() {
         match site_name {
             "doctor" => {
                 doctor::run_doctor().await;
+                return;
+            }
+            "adapters" => {
+                println!("{}", render_adapter_catalog(&registry));
                 return;
             }
             "update" => {

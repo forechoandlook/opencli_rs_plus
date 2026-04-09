@@ -4,3 +4,8 @@
 - **Desktop/Electron App 适配**：`strategy: ui` + `domain: localhost` 时走 CDP 直连模式（`crates/opencli-rs-browser/src/electron_apps.rs`），需目标 App 开启 `--remote-debugging-port`。内置端口映射：antigravity=9234, cursor=9226, codex=9222, chatwise=9228。用户可通过 `~/.opencli-rs/apps.yaml` 扩展。
 - **Daemon Socket API**：JSON-RPC over TCP（127.0.0.1:10008），支持 daemon.*、job.*、adapter.* 方法。tools.* 已移除（本地直接执行）。
 - **Scheduler 注意事项**：args 为 null 时正常处理；执行前自动注入 YAML 中定义的 default 参数；job ID 支持前缀匹配。
+
+0409
+- **原生命令扩展**：新增 `opencli update` / `opencli update --check`，支持检查 GitHub Release 并原地更新当前二进制。
+- **反馈命令**：新增 `opencli feedback <title>`，默认写入 `~/.opencli-rs/feedback.jsonl`，加 `--open` 可打开预填好的 GitHub issue 页面。
+- **帮助输出收敛**：`opencli --help` 默认只显示内置命令和 daemon/client 命令；如需查看全部 adapter family，使用 `opencli --help --adapters`。
