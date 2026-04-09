@@ -5,7 +5,7 @@
  * Everything else is just JS code sent via 'exec'.
  */
 
-export type Action = 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions';
+export type Action = 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions' | 'bg_fetch';
 
 export interface Command {
   /** Unique request ID */
@@ -26,6 +26,14 @@ export interface Command {
   index?: number;
   /** Cookie domain filter */
   domain?: string;
+  /** HTTP method for bg_fetch (default: GET) */
+  method?: string;
+  /** Extra request headers for bg_fetch */
+  request_headers?: Record<string, string>;
+  /** Request body for bg_fetch */
+  body?: string;
+  /** URL to extract cookies from for bg_fetch (defaults to url) */
+  cookie_url?: string;
   /** Screenshot format: png (default) or jpeg */
   format?: 'png' | 'jpeg';
   /** JPEG quality (0-100), only for jpeg format */

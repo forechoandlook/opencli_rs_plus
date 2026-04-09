@@ -1,98 +1,80 @@
-mod adapter_manager;
-mod index;
-mod issues;
-mod plugin;
-mod scheduler;
-mod socket;
-mod store;
-mod tools;
-
-use adapter_manager::AdapterManager;
-use anyhow::Result;
 use clap::Parser;
-use issues::{default_issues_db_path, IssueStore};
-use scheduler::Scheduler;
-use socket::{serve, SocketState};
+use opencli_rs_daemon::{default_addr, run_daemon, run_client};
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::signal;
-use tracing::{error, info, Level};
-use tracing_subscriber::FmtSubscriber;
+use tracing::Level;
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use crate::store::JobStore;
-
-fn default_db_path() -> PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join(".opencli-rs").join("jobs.db"))
-        .unwrap_or_else(|| PathBuf::from("jobs.db"))
-}
-
-fn default_addr() -> String {
-    "127.0.0.1:10008".to_string()
-}
-
+/// Scheduler daemon subcommand args
 #[derive(Parser)]
-#[command(name = "opencli-daemon", about = "OpenCLI scheduler daemon")]
-struct Cli {
-    /// Polling interval in seconds
+struct DaemonArgs {
     #[arg(long, default_value = "10")]
     poll_interval: u64,
-    /// Database path (default: ~/.opencli-rs/jobs.db)
     #[arg(long)]
     db: Option<PathBuf>,
-    /// TCP address to listen on (default: 127.0.0.1:10008)
     #[arg(long)]
     addr: Option<String>,
 }
 
+// Subcommands that belong to the scheduler client
+const CLIENT_SUBCMDS: &[&str] = &[
+    "status", "stop", "restart", "job", "adapter", "plugin", "socket", "tools",
+];
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    // Init tracing once for the unified binary
     let _subscriber = FmtSubscriber::builder()
+        .with_env_filter(
+            EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| {
+                if std::env::var("OPENCLI_VERBOSE").is_ok() {
+                    EnvFilter::new("debug")
+                } else {
+                    EnvFilter::new("warn")
+                }
+            }),
+        )
         .with_max_level(Level::INFO)
         .with_target(false)
         .compact()
         .init();
 
-    let args = Cli::parse();
-    let addr = args.addr.unwrap_or_else(default_addr);
-    let db_path = args.db.unwrap_or_else(default_db_path);
+    let raw: Vec<String> = std::env::args().collect();
 
-    let job_store = Arc::new(JobStore::new(db_path).map_err(|e| anyhow::anyhow!("{}", e))?);
-    let adapter_manager = Arc::new(AdapterManager::new().await?);
-    let issue_store = Arc::new(IssueStore::new(default_issues_db_path())?);
-    let scheduler = Arc::new(Scheduler::new(
-        Arc::clone(&job_store),
-        Arc::clone(&adapter_manager),
-        args.poll_interval,
-    ));
+    // --daemon flag: browser-daemon mode (spawned by BrowserBridge internally)
+    if raw.iter().any(|a| a == "--daemon") {
+        opencli_rs_cli::runner::run().await;
+        return;
+    }
 
-    let sched = Arc::clone(&scheduler);
-    let sched_handle = tokio::spawn(async move {
-        sched.run_loop().await;
-    });
+    // Peek at first non-flag argument to decide routing
+    let subcmd = raw.iter().skip(1).find(|a| !a.starts_with('-')).map(|s| s.as_str());
 
-    let plugin_manager = adapter_manager.plugin_manager();
-
-    let socket_state = Arc::new(SocketState {
-        adapter_manager,
-        scheduler,
-        job_store,
-        issue_store,
-        plugin_manager,
-    });
-
-    let addr_clone = addr.clone();
-    let socket_handle = tokio::spawn(async move {
-        if let Err(e) = serve(&addr_clone, socket_state).await {
-            error!(error = %e, "Socket server error");
+    match subcmd {
+        // ── Scheduler daemon ───────────────────────────────────────────────
+        Some("daemon") => {
+            // Strip "daemon" from args before passing to clap
+            let daemon_args: Vec<String> = std::iter::once(raw[0].clone())
+                .chain(raw.iter().skip(2).cloned())
+                .collect();
+            let args = DaemonArgs::parse_from(daemon_args);
+            let addr = args.addr.unwrap_or_else(default_addr);
+            if let Err(e) = run_daemon(addr, args.db, args.poll_interval).await {
+                eprintln!("Daemon error: {}", e);
+                std::process::exit(1);
+            }
         }
-    });
 
-    info!(addr = %addr, poll_interval = args.poll_interval, "Daemon started");
+        // ── Scheduler client ───────────────────────────────────────────────
+        Some(s) if CLIENT_SUBCMDS.contains(&s) => {
+            if let Err(e) = run_client() {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
 
-    signal::ctrl_c().await?;
-    info!("Shutting down daemon");
-    sched_handle.abort();
-    socket_handle.abort();
-    Ok(())
+        // ── Adapter execution (default) ────────────────────────────────────
+        _ => {
+            opencli_rs_cli::runner::run().await;
+        }
+    }
 }

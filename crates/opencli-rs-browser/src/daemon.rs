@@ -26,7 +26,7 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(1800); // 30 minutes
 /// WebSocket heartbeat interval.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 /// Idle shutdown threshold.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+const IDLE_TIMEOUT: Duration = Duration::from_secs(1800);
 
 type PendingMap = HashMap<String, oneshot::Sender<DaemonResult>>;
 

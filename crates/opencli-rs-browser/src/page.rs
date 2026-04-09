@@ -227,6 +227,31 @@ impl IPage for DaemonPage {
         let reqs: Vec<NetworkRequest> = serde_json::from_value(val).unwrap_or_default();
         Ok(reqs)
     }
+
+    async fn bg_fetch(
+        &self,
+        url: &str,
+        cookie_url: Option<&str>,
+        method: Option<&str>,
+        headers: Option<std::collections::HashMap<String, String>>,
+        body: Option<&str>,
+    ) -> Result<Value, CliError> {
+        let mut cmd = DaemonCommand::new("bg_fetch").with_url(url);
+        if let Some(cu) = cookie_url {
+            cmd = cmd.with_cookie_url(cu);
+        }
+        if let Some(m) = method {
+            cmd = cmd.with_method(m);
+        }
+        if let Some(h) = headers {
+            cmd = cmd.with_request_headers(h);
+        }
+        if let Some(b) = body {
+            cmd = cmd.with_body(b);
+        }
+        // bg_fetch runs in the service worker — no workspace/tab needed
+        self.client.send_command(cmd).await
+    }
 }
 
 /// Simple base64 decoder (avoiding an extra dependency). Public for reuse by cdp module.

@@ -1,16 +1,24 @@
 ## Daemon 调度模式
 
-daemon 模式由两个独立进程组成：
+所有功能集成在单一 `opencli` 二进制中，内部由两个独立进程组成：
 
-- **`opencli-rs-daemon`**（调度 daemon）— 任务调度、adapter 管理、SQLite 持久化、TCP Socket API（默认端口 10008）
-- **`browser-daemon`**（浏览器 daemon，`opencli-rs-browser` crate 内）— 管理与 Chrome 插件的 WebSocket 长连接，代理 CDP 命令，监听端口 19825-19834
+- **调度 daemon**（`opencli daemon`）— 任务调度、adapter 管理、SQLite 持久化、TCP Socket API（默认端口 10008）
+- **browser-daemon**（浏览器 daemon，`opencli-rs-browser` crate 内）— 管理与 Chrome 插件的 WebSocket 长连接，代理 CDP 命令，监听端口 19825-19834
 
-两者关系：`opencli-rs-daemon` 在执行需要浏览器的 adapter 时，通过 HTTP POST 调用 `browser-daemon`，`browser-daemon` 再通过 WebSocket 转发给 Chrome 插件执行。
+`opencli` 命令路由规则：
+
+| 第一个参数 | 行为 |
+|---|---|
+| `daemon` | 启动调度 daemon |
+| `status` / `stop` / `restart` / `job` / `adapter` / `plugin` / `socket` / `tools` | 作为调度客户端连接 daemon |
+| 其他（如 `zhihu hot`）| 直接执行 adapter |
+
+调度 daemon 在执行需要浏览器的 adapter 时，通过 HTTP POST 调用 browser-daemon，browser-daemon 再通过 WebSocket 转发给 Chrome 插件执行。
 
 ```
-Client (CLI/TCP)
+opencli status / job / adapter / ...
     ↓ TCP JSON-RPC (127.0.0.1:10008)
-opencli-rs-daemon
+opencli daemon
     ├── AdapterManager  (adapter 加载/管理/搜索/禁用)
     ├── AdapterIndex    (FTS5 全文索引 + 使用统计，index.db)
     ├── PluginManager   (插件安装/卸载/更新，plugins.lock.json)
@@ -28,70 +36,76 @@ opencli-rs-daemon
 ### 启动和管理
 
 ```bash
-# 启动 daemon（后台运行，默认监听 127.0.0.1:10008）
-opencli-daemon --poll-interval 10
+# 启动 daemon（阻塞前台，建议配合 nohup 或 systemd 后台运行）
+opencli daemon
+opencli daemon --poll-interval 10
+opencli daemon --addr 0.0.0.0:10008   # 自定义地址
 
-# 自定义地址（支持跨机器访问）
-opencli-daemon --addr 0.0.0.0:10008
+# 后台运行示例（macOS/Linux）
+nohup opencli daemon > ~/.opencli-rs/daemon.log 2>&1 &
 
-# 查看状态（通过 cli 连接 daemon）
-opencli-cli status
+# 查看状态
+opencli status
 
 # 停止/重启
-opencli-cli stop
-opencli-cli restart
+opencli stop
+opencli restart
 
 # 连接远程 daemon
-opencli-cli --addr 192.168.1.100:10008 status
+opencli --addr 192.168.1.100:10008 status
+
+# 直接执行 adapter（无需 daemon）
+opencli zhihu hot
+opencli bilibili hot
 ```
 
 ### Adapter 管理
 
 ```bash
 # 查看所有 adapters（隐藏已禁用的）
-opencli-cli adapter list
+opencli adapter list
 
 # 搜索 adapters（FTS5/BM25 全文检索 + 使用热点混合排序）
-opencli-cli adapter search "zhihu"
+opencli adapter search "zhihu"
 
 # 查看使用热点（按累计调用次数排序，默认 top 20）
-opencli-cli socket adapter.hot '{"limit":10}'
+opencli socket adapter.hot '{"limit":10}'
 
 # 查看最近 7 天活跃 adapters
-opencli-cli socket adapter.trending '{"days":7,"limit":10}'
+opencli socket adapter.trending '{"days":7,"limit":10}'
 
 # 禁用/启用 adapter（持久化，不显示在 help 中）
-opencli-cli adapter disable "zhihu hot"
-opencli-cli adapter enable "zhihu hot"
+opencli adapter disable "zhihu hot"
+opencli adapter enable "zhihu hot"
 
 # 同步 adapters（从指定目录增量更新索引）
-opencli-cli adapter sync --folder /path/to/adapters
+opencli adapter sync --folder /path/to/adapters
 
 # 重新加载所有 adapters 并增量同步索引
-opencli-cli socket adapter.reload
+opencli socket adapter.reload
 
 # 强制全量重建 FTS 索引（索引损坏时使用）
-opencli-cli socket adapter.reindex
+opencli socket adapter.reindex
 ```
 
 ### Job 管理
 
 ```bash
 # 添加任务
-opencli-cli job add "zhihu hot" --delay 300              # 5分钟后执行
-opencli-cli job add "bilibili hot" --interval 3600       # 每小时循环
-opencli-cli job add "zhihu collection_items_api" --args '{"collection_id":"123"}' --run-at "2026-03-31T10:00:00Z"
+opencli job add "zhihu hot" --delay 300              # 5分钟后执行
+opencli job add "bilibili hot" --interval 3600       # 每小时循环
+opencli job add "zhihu collection_items_api" --args '{"collection_id":"123"}' --run-at "2026-03-31T10:00:00Z"
 
 # 查看任务
-opencli-cli job list --status pending
-opencli-cli job show <id>
+opencli job list --status pending
+opencli job show <id>
 
 # 取消/删除
-opencli-cli job cancel <id>
-opencli-cli job delete <id>
+opencli job cancel <id>
+opencli job delete <id>
 
 # 手动触发 due jobs
-opencli-cli job run
+opencli job run
 ```
 
 ### Issue 管理
@@ -100,29 +114,29 @@ opencli-cli job run
 
 ```bash
 # 上报问题（kind: broken | bad_description | other）
-opencli-cli socket issue.add '{"adapter":"bilibili feed","kind":"broken","title":"API v3 变更，返回 404","body":"2026-04 起接口地址改变"}'
+opencli socket issue.add '{"adapter":"bilibili feed","kind":"broken","title":"API v3 变更，返回 404","body":"2026-04 起接口地址改变"}'
 
 # 查看所有 open 问题
-opencli-cli socket issue.list
+opencli socket issue.list
 
 # 按 adapter 过滤
-opencli-cli socket issue.list '{"adapter":"bilibili feed"}'
+opencli socket issue.list '{"adapter":"bilibili feed"}'
 
 # 查看已关闭的问题
-opencli-cli socket issue.list '{"status":"closed"}'
+opencli socket issue.list '{"status":"closed"}'
 
 # 查看某条问题详情
-opencli-cli socket issue.show '{"id":1}'
+opencli socket issue.show '{"id":1}'
 
 # 关闭问题（已修复）
-opencli-cli socket issue.close '{"id":1}'
+opencli socket issue.close '{"id":1}'
 
 # 删除问题
-opencli-cli socket issue.delete '{"id":1}'
+opencli socket issue.delete '{"id":1}'
 
 # 导出为 JSON
-opencli-cli socket issue.export
-opencli-cli socket issue.export '{"status":"open"}' > issues.json
+opencli socket issue.export
+opencli socket issue.export '{"status":"open"}' > issues.json
 ```
 
 **issue kind：**
@@ -158,18 +172,18 @@ Fast line-oriented regex search tool.（第一行 = short description）
 ```
 
 ```bash
-opencli-cli tools search <query>    # 关键词搜索（名称、binary、描述、标签）
-opencli-cli tools list              # 列出所有工具
-opencli-cli tools info <name>       # 查看工具详情（含完整 markdown body）
-opencli-cli tools summary           # 所有工具名称 + 短描述 + 是否已安装
+opencli tools search <query>    # 关键词搜索（名称、binary、描述、标签）
+opencli tools list              # 列出所有工具
+opencli tools info <name>       # 查看工具详情（含完整 markdown body）
+opencli tools summary           # 所有工具名称 + 短描述 + 是否已安装
 ```
 
 ### Socket API（调试用）
 
 ```bash
 # 手动发送 socket 请求
-opencli-cli socket daemon.status
-opencli-cli socket adapter.search '{"query":"bilibili"}'
+opencli socket daemon.status
+opencli socket adapter.search '{"query":"bilibili"}'
 ```
 
 ### Plugin 管理
@@ -203,23 +217,23 @@ opencli-cli socket adapter.search '{"query":"bilibili"}'
 
 ```bash
 # 安装插件（整个仓库，裸 user/repo 自动补 github:）
-opencli-cli plugin install user/my-plugin
+opencli plugin install user/my-plugin
 # 安装仓库中的某个子目录
-opencli-cli plugin install user/monorepo/plugins/my-plugin
+opencli plugin install user/monorepo/plugins/my-plugin
 # 本地目录（符号链接，开发用）
-opencli-cli plugin install /path/to/local-plugin
+opencli plugin install /path/to/local-plugin
 
 # 查看已安装插件
-opencli-cli plugin list
+opencli plugin list
 
 # 更新指定插件（git pull 或重新克隆）
-opencli-cli plugin update my-plugin
+opencli plugin update my-plugin
 
 # 更新所有插件
-opencli-cli plugin update
+opencli plugin update
 
 # 卸载插件
-opencli-cli plugin uninstall my-plugin
+opencli plugin uninstall my-plugin
 ```
 
 安装/卸载/更新后 daemon 自动重新加载所有 adapter（等同于 `adapter.reload`）。

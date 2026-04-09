@@ -30,9 +30,9 @@ jobs:
             --exclude opencli-rs-cli \
             --exclude opencli-rs-external
 
-  # ── Step 2：打包 adapters + summaries（与平台无关，只需一次）───────────────
+  # ── Step 2：打包 adapters + summaries + extension（与平台无关，只需一次）────
   package-assets:
-    name: Package adapters & summaries
+    name: Package assets
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -48,6 +48,19 @@ jobs:
           tar -czf summaries.tar.gz summaries/
           sha256sum summaries.tar.gz > summaries.tar.gz.sha256
 
+      - name: Build Chrome extension
+        working-directory: extension
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package Chrome extension
+        run: |
+          cd extension
+          zip -r ../opencli-extension.zip dist/ manifest.json icons/ src/popup.html
+          cd ..
+          sha256sum opencli-extension.zip > opencli-extension.zip.sha256
+
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
@@ -57,9 +70,11 @@ jobs:
             adapters.tar.gz.sha256
             summaries.tar.gz
             summaries.tar.gz.sha256
+            opencli-extension.zip
+            opencli-extension.zip.sha256
           retention-days: 1
 
-  # ── Step 3：交叉编译 ─────────────────────────────────────────────────────────
+  # ── Step 3：交叉编译统一 binary ──────────────────────────────────────────────
   build:
     name: Build ${{ matrix.target }}
     needs: test
@@ -70,13 +85,13 @@ jobs:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
-            asset_name: opencli-daemon-macos-arm64
+            suffix: macos-arm64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            asset_name: opencli-daemon-linux-x86_64
+            suffix: linux-x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            asset_name: opencli-daemon-windows-x86_64
+            suffix: windows-x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -96,14 +111,13 @@ jobs:
           sudo apt-get install -y musl-tools
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} -p opencli-rs-daemon -p opencli-rs
+        run: cargo build --release --target ${{ matrix.target }} --bin opencli
 
-      - name: Prepare artifacts
+      - name: Prepare artifact
         shell: bash
         run: |
-          SUFFIX="${{ matrix.asset_name }}"
-          SUFFIX="${SUFFIX#opencli-daemon-}"   # strip prefix → macos-arm64 / linux-x86_64 / windows-x86_64
           OUTDIR="target/${{ matrix.target }}/release"
+          SUFFIX="${{ matrix.suffix }}"
 
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             EXT=".exe"
@@ -116,18 +130,15 @@ jobs:
             HASH_CMD="sha256sum"
           fi
 
-          for BIN in opencli-daemon opencli-cli opencli-rs; do
-            SRC="${OUTDIR}/${BIN}${EXT}"
-            DEST="${BIN}-${SUFFIX}${EXT}"
-            cp "$SRC" "$DEST"
-            $HASH_CMD "$DEST" > "${DEST}.sha256"
-          done
+          DEST="opencli-${SUFFIX}${EXT}"
+          cp "${OUTDIR}/opencli${EXT}" "$DEST"
+          $HASH_CMD "$DEST" > "${DEST}.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: "opencli-*"
+          name: opencli-${{ matrix.suffix }}
+          path: "opencli-${{ matrix.suffix }}*"
           retention-days: 1
 
   # ── Step 4：创建 GitHub Release ──────────────────────────────────────────────
@@ -163,7 +174,7 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | sed -n '2p')
+          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p')
           if [ -z "$PREV_TAG" ]; then
             RANGE="HEAD"
           else
@@ -205,63 +216,64 @@ jobs:
             curl -fsSL https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/install.sh | bash
             ```
 
-            脚本会自动：
-            1. 检测系统平台，下载对应二进制（3个）
-            2. 安装到 `/usr/local/bin/`
-            3. 解压 `adapters/` 和 `summaries/` 到 `~/.opencli-rs/`
+            脚本会自动检测平台，下载 `opencli` 二进制并安装 adapters。
 
             ### 手动安装
 
-            **1. 下载二进制（每个平台包含3个文件）**
+            **1. 下载 `opencli` 二进制**
 
-            | 平台 | 后缀 |
+            | 平台 | 文件 |
             |---|---|
-            | macOS Apple Silicon | `-macos-arm64` |
-            | Linux x86_64 | `-linux-x86_64` |
-            | Windows x86_64 | `-windows-x86_64.exe` |
-
-            每个平台有 `opencli-daemon-<suffix>`、`opencli-cli-<suffix>`、`opencli-rs-<suffix>` 三个二进制。
+            | macOS Apple Silicon | `opencli-macos-arm64` |
+            | Linux x86_64 | `opencli-linux-x86_64` |
+            | Windows x86_64 | `opencli-windows-x86_64.exe` |
 
             ```bash
-            # 以 macOS arm64 为例
-            for bin in opencli-daemon opencli-cli opencli-rs; do
-              curl -L .../${bin}-macos-arm64 -o ${bin}
-              chmod +x ${bin}
-              sudo mv ${bin} /usr/local/bin/
-            done
+            # macOS 示例
+            curl -L .../opencli-macos-arm64 -o opencli
+            chmod +x opencli
+            sudo mv opencli /usr/local/bin/
             ```
 
             **2. 安装 adapters（必须）**
 
             ```bash
+            mkdir -p ~/.opencli-rs
             curl -L .../adapters.tar.gz | tar -xz -C ~/.opencli-rs/
             ```
 
-            **3. 安装 summaries（可选，AI 搜索用）**
+            **3. 安装 Chrome 扩展（必须）**
+
+            下载 `opencli-extension.zip`，在 Chrome `chrome://extensions` 开启开发者模式，
+            解压后点击「加载已解压的扩展程序」选择 `dist/` 目录。
+
+            **4. 安装 summaries（可选，AI 搜索用）**
 
             ```bash
             curl -L .../summaries.tar.gz | tar -xz -C ~/.opencli-rs/
             ```
 
-            ### 校验文件完整性
+            ### 使用
 
             ```bash
-            sha256sum -c opencli-daemon-linux-x86_64.sha256
-            sha256sum -c adapters.tar.gz.sha256
+            opencli zhihu hot           # 执行 adapter
+            opencli daemon              # 启动调度 daemon
+            opencli status              # 查看 daemon 状态
+            opencli job list            # 管理定时任务
             ```
           files: |
-            artifacts/opencli-daemon-*
-            artifacts/opencli-cli-*
-            artifacts/opencli-rs-*
+            artifacts/opencli-macos-arm64*
+            artifacts/opencli-linux-x86_64*
+            artifacts/opencli-windows-x86_64*
             artifacts/adapters.tar.gz
             artifacts/adapters.tar.gz.sha256
             artifacts/summaries.tar.gz
             artifacts/summaries.tar.gz.sha256
-            artifacts/install.sh
+            artifacts/opencli-extension.zip
+            artifacts/opencli-extension.zip.sha256
           fail_on_unmatched_files: false
 
   # ── Step 5：生成并上传安装脚本 ───────────────────────────────────────────────
-  # 注意：install.sh 在 release 创建后单独上传，因为脚本里需要引用 release URL
   upload-install-script:
     name: Upload install script
     needs: release
@@ -278,73 +290,72 @@ jobs:
           REPO="${{ github.repository }}"
           BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
 
-          cat > install.sh << SCRIPT
+          cat > install.sh << 'SCRIPT_EOF'
           #!/usr/bin/env bash
           set -euo pipefail
 
-          TAG="${TAG}"
-          REPO="${REPO}"
-          BASE_URL="${BASE_URL}"
-          INSTALL_DIR="\${OPENCLI_INSTALL_DIR:-/usr/local/bin}"
-          DATA_DIR="\${OPENCLI_DATA_DIR:-\$HOME/.opencli-rs}"
+          TAG="__TAG__"
+          REPO="__REPO__"
+          BASE_URL="__BASE_URL__"
+          INSTALL_DIR="${OPENCLI_INSTALL_DIR:-/usr/local/bin}"
+          DATA_DIR="${OPENCLI_DATA_DIR:-$HOME/.opencli-rs}"
 
-          # ── 检测平台 ─────────────────────────────────────────────────────────
-          OS="\$(uname -s)"
-          ARCH="\$(uname -m)"
-
-          case "\$OS" in
-            Darwin)
-              SUFFIX="macos-arm64"
-              ;;
-            Linux)
-              SUFFIX="linux-x86_64"
-              ;;
+          OS="$(uname -s)"
+          case "$OS" in
+            Darwin)  SUFFIX="macos-arm64" ;;
+            Linux)   SUFFIX="linux-x86_64" ;;
             *)
-              echo "Unsupported OS: \$OS (Windows users: download *-windows-x86_64.exe files manually)"
+              echo "Unsupported OS: $OS"
+              echo "Windows users: download opencli-windows-x86_64.exe manually from:"
+              echo "  ${BASE_URL}/opencli-windows-x86_64.exe"
               exit 1
               ;;
           esac
 
-          echo "Platform: \$OS → suffix: \$SUFFIX"
+          echo "Platform: $OS → opencli-${SUFFIX}"
 
-          # ── 下载三个二进制 ────────────────────────────────────────────────────
-          TMP="\$(mktemp -d)"
-          trap 'rm -rf "\$TMP"' EXIT
+          TMP="$(mktemp -d)"
+          trap 'rm -rf "$TMP"' EXIT
 
-          for BIN in opencli-daemon opencli-cli opencli-rs; do
-            REMOTE="\${BIN}-\${SUFFIX}"
-            echo "Downloading \$REMOTE..."
-            curl -fsSL "\${BASE_URL}/\${REMOTE}" -o "\$TMP/\${BIN}"
-            chmod +x "\$TMP/\${BIN}"
-          done
+          echo "Downloading opencli-${SUFFIX}..."
+          curl -fsSL "${BASE_URL}/opencli-${SUFFIX}" -o "$TMP/opencli"
+          chmod +x "$TMP/opencli"
 
-          # ── 安装二进制 ───────────────────────────────────────────────────────
-          if [ -w "\$INSTALL_DIR" ]; then
-            mv "\$TMP"/opencli-* "\$INSTALL_DIR/"
+          if [ -w "$INSTALL_DIR" ]; then
+            mv "$TMP/opencli" "$INSTALL_DIR/opencli"
           else
-            echo "Installing to \$INSTALL_DIR (sudo required)..."
-            sudo mv "\$TMP"/opencli-* "\$INSTALL_DIR/"
+            echo "Installing to $INSTALL_DIR (sudo required)..."
+            sudo mv "$TMP/opencli" "$INSTALL_DIR/opencli"
           fi
-          echo "✓ Installed opencli-daemon, opencli-cli, opencli-rs to \$INSTALL_DIR/"
+          echo "✓ Installed opencli to $INSTALL_DIR/"
 
-          # ── 安装 adapters ────────────────────────────────────────────────────
-          mkdir -p "\$DATA_DIR"
+          mkdir -p "$DATA_DIR"
+
           echo "Downloading adapters..."
-          curl -fsSL "\${BASE_URL}/adapters.tar.gz" | tar -xz -C "\$DATA_DIR"
-          echo "✓ Adapters installed to \$DATA_DIR/adapters/"
+          curl -fsSL "${BASE_URL}/adapters.tar.gz" | tar -xz -C "$DATA_DIR"
+          echo "✓ Adapters installed to $DATA_DIR/adapters/"
 
-          # ── 安装 summaries ───────────────────────────────────────────────────
           echo "Downloading summaries..."
-          curl -fsSL "\${BASE_URL}/summaries.tar.gz" | tar -xz -C "\$DATA_DIR"
-          echo "✓ Summaries installed to \$DATA_DIR/summaries/"
+          curl -fsSL "${BASE_URL}/summaries.tar.gz" | tar -xz -C "$DATA_DIR" || true
+          echo "✓ Summaries installed (optional)"
 
           echo ""
           echo "Installation complete!"
-          echo "  opencli-daemon --help"
-          echo "  opencli-cli --help"
-          echo "  opencli-rs --help"
-          SCRIPT
+          echo ""
+          echo "Next step: install the Chrome extension"
+          echo "  1. Download opencli-extension.zip from:"
+          echo "     ${BASE_URL}/opencli-extension.zip"
+          echo "  2. Unzip it"
+          echo "  3. Open chrome://extensions, enable Developer mode"
+          echo "  4. Click 'Load unpacked' and select the unzipped folder"
+          echo ""
+          echo "Then run: opencli --help"
+          SCRIPT_EOF
 
+          # Replace placeholders
+          sed -i "s|__TAG__|${TAG}|g" install.sh
+          sed -i "s|__REPO__|${REPO}|g" install.sh
+          sed -i "s|__BASE_URL__|${BASE_URL}|g" install.sh
           chmod +x install.sh
 
       - name: Upload install.sh to release

@@ -684,6 +684,68 @@ impl StepHandler for CollectStep {
 // Registration
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// BgFetchStep — run a fetch in the extension service worker
+// ---------------------------------------------------------------------------
+// Extension opens a background tab to establish CDP connection, then runs fetch
+// with cookies injected. No visible window (extension creates background tab in
+// user's existing Chrome window or minimized fallback window).
+
+struct BgFetchStep;
+
+fn render_str(params: &Value, key: &str, ctx: &TemplateContext) -> Result<Option<String>, CliError> {
+    match params.get(key).and_then(|v| v.as_str()) {
+        Some(s) => match render_template_str(s, ctx)? {
+            Value::String(s) => Ok(Some(s)),
+            other => Ok(Some(other.to_string())),
+        },
+        None => Ok(None),
+    }
+}
+
+#[async_trait]
+impl StepHandler for BgFetchStep {
+    fn name(&self) -> &'static str {
+        "bg_fetch"
+    }
+
+    async fn execute(
+        &self,
+        page: Option<Arc<dyn IPage>>,
+        params: &Value,
+        data: &Value,
+        args: &HashMap<String, Value>,
+    ) -> Result<Value, CliError> {
+        let page = require_page(&page)?;
+        let ctx = default_ctx(data, args);
+
+        let url = render_str(params, "url", &ctx)?
+            .ok_or_else(|| CliError::pipeline("bg_fetch: missing required field 'url'"))?;
+        let cookie_url = render_str(params, "cookie_url", &ctx)?;
+        let method = params.get("method").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let request_headers: Option<std::collections::HashMap<String, String>> =
+            params.get("headers").and_then(|v| v.as_object()).map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            });
+        let body = params.get("body").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+        let result = page
+            .bg_fetch(
+                &url,
+                cookie_url.as_deref(),
+                method.as_deref(),
+                request_headers,
+                body.as_deref(),
+            )
+            .await?;
+
+        // Return { status, body } — let pipeline select the body
+        Ok(result)
+    }
+}
+
 pub fn register_browser_steps(registry: &mut StepRegistry) {
     registry.register(Arc::new(NavigateStep));
     registry.register(Arc::new(ClickStep));
@@ -695,6 +757,7 @@ pub fn register_browser_steps(registry: &mut StepRegistry) {
     registry.register(Arc::new(ScreenshotStep));
     registry.register(Arc::new(ScrollStep));
     registry.register(Arc::new(CollectStep));
+    registry.register(Arc::new(BgFetchStep));
 }
 
 // ---------------------------------------------------------------------------

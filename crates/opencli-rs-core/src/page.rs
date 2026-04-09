@@ -185,4 +185,21 @@ pub trait IPage: Send + Sync {
 
     /// Get network requests (captured)
     async fn get_network_requests(&self) -> Result<Vec<NetworkRequest>, CliError>;
+
+    /// Fetch a URL from the browser extension's background service worker context.
+    /// Cookies for `cookie_url` (defaults to `url`) are automatically injected.
+    /// No tab or window is opened — completely silent.
+    async fn bg_fetch(
+        &self,
+        url: &str,
+        cookie_url: Option<&str>,
+        method: Option<&str>,
+        headers: Option<std::collections::HashMap<String, String>>,
+        body: Option<&str>,
+    ) -> Result<Value, CliError> {
+        let _ = (url, cookie_url, method, headers, body);
+        Err(CliError::command_execution(
+            "bg_fetch is not supported by this page implementation",
+        ))
+    }
 }

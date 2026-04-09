@@ -8,12 +8,8 @@ name = "opencli_rs_daemon"
 path = "src/lib.rs"
 
 [[bin]]
-name = "opencli-daemon"
+name = "opencli"
 path = "src/main.rs"
-
-[[bin]]
-name = "opencli-cli"
-path = "src/bin/cli.rs"
 
 [dependencies]
 opencli-rs-core = { path = "../opencli-rs-core" }

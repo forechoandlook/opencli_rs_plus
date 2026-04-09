@@ -72,6 +72,7 @@ impl CliCommand {
                 "screenshot",
                 "intercept",
                 "tap",
+                "bg_fetch",
             ];
             for step in pipeline {
                 if let Some(obj) = step.as_object() {

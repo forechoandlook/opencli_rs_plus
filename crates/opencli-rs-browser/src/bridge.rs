@@ -272,8 +272,10 @@ fn is_chrome_running() -> bool {
 /// Opening a window activates the Service Worker, which then reconnects to the daemon.
 fn wake_chrome() {
     let result = if cfg!(target_os = "macos") {
+        // Use `open -a "Google Chrome"` without a URL: brings Chrome to foreground
+        // without opening a new window if windows already exist.
         std::process::Command::new("open")
-            .args(["-a", "Google Chrome", "about:blank"])
+            .args(["-a", "Google Chrome"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()

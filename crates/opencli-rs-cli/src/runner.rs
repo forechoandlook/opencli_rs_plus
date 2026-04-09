@@ -1,6 +1,5 @@
-mod args;
-mod commands;
-mod execution;
+//! Core adapter-execution entry point. Called from both the standalone binary
+//! and the unified `opencli` binary in the daemon crate.
 
 use clap::{Arg, ArgAction, Command};
 use clap_complete::Shell;
@@ -11,14 +10,13 @@ use opencli_rs_output::render;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::str::FromStr;
-use tracing_subscriber::EnvFilter;
 
 use crate::args::coerce_and_validate_args;
 use crate::commands::{completion, doctor};
 use crate::execution::execute_command;
 
 fn build_cli(registry: &Registry) -> Command {
-    let mut app = Command::new("opencli-rs")
+    let mut app = Command::new("opencli")
         .version(env!("CARGO_PKG_VERSION"))
         .about("AI-driven CLI tool — turns websites into command-line interfaces")
         .arg(
@@ -38,13 +36,10 @@ fn build_cli(registry: &Registry) -> Command {
                 .help("Enable verbose output"),
         );
 
-    // Add site subcommands from the adapter registry
     for site in registry.list_sites() {
         let mut site_cmd = Command::new(site.to_string());
-
         for cmd in registry.list_commands(site) {
             let mut sub = Command::new(cmd.name.clone()).about(cmd.description.clone());
-
             for arg_def in &cmd.args {
                 let mut arg = if arg_def.positional {
                     Arg::new(arg_def.name.clone())
@@ -58,8 +53,6 @@ fn build_cli(registry: &Registry) -> Command {
                     arg = arg.required(true);
                 }
                 if let Some(default) = &arg_def.default {
-                    // Value::String("x").to_string() produces "\"x\"" (JSON-encoded),
-                    // but clap needs the raw string value.
                     let default_str = match default {
                         Value::String(s) => s.clone(),
                         other => other.to_string(),
@@ -73,7 +66,6 @@ fn build_cli(registry: &Registry) -> Command {
         app = app.subcommand(site_cmd);
     }
 
-    // Built-in utility subcommands
     app = app
         .subcommand(Command::new("doctor").about("Run diagnostics checks"))
         .subcommand(
@@ -91,51 +83,21 @@ fn build_cli(registry: &Registry) -> Command {
                 .about("Explore a website's API surface and discover endpoints")
                 .arg(Arg::new("url").required(true).help("URL to explore"))
                 .arg(Arg::new("site").long("site").help("Override site name"))
-                .arg(
-                    Arg::new("goal")
-                        .long("goal")
-                        .help("Hint for capability naming (e.g. search, hot)"),
-                )
-                .arg(
-                    Arg::new("wait")
-                        .long("wait")
-                        .default_value("3")
-                        .help("Initial wait seconds"),
-                )
-                .arg(
-                    Arg::new("auto")
-                        .long("auto")
-                        .action(ArgAction::SetTrue)
-                        .help(
-                        "Enable interactive fuzzing (click buttons/tabs to trigger hidden APIs)",
-                    ),
-                )
-                .arg(Arg::new("click").long("click").help(
-                    "Comma-separated labels to click before fuzzing (e.g. 'Comments,CC,字幕')",
-                )),
+                .arg(Arg::new("goal").long("goal").help("Hint for capability naming"))
+                .arg(Arg::new("wait").long("wait").default_value("3").help("Initial wait seconds"))
+                .arg(Arg::new("auto").long("auto").action(ArgAction::SetTrue).help("Enable interactive fuzzing"))
+                .arg(Arg::new("click").long("click").help("Comma-separated labels to click")),
         )
         .subcommand(
             Command::new("cascade")
                 .about("Auto-detect authentication strategy for an API endpoint")
-                .arg(
-                    Arg::new("url")
-                        .required(true)
-                        .help("API endpoint URL to probe"),
-                ),
+                .arg(Arg::new("url").required(true).help("API endpoint URL to probe")),
         )
         .subcommand(
             Command::new("generate")
                 .about("One-shot: explore + synthesize + select best adapter")
-                .arg(
-                    Arg::new("url")
-                        .required(true)
-                        .help("URL to generate adapter for"),
-                )
-                .arg(
-                    Arg::new("goal")
-                        .long("goal")
-                        .help("What you want (e.g. hot, search, trending)"),
-                )
+                .arg(Arg::new("url").required(true).help("URL to generate adapter for"))
+                .arg(Arg::new("goal").long("goal").help("What you want"))
                 .arg(Arg::new("site").long("site").help("Override site name")),
         )
         .subcommand(
@@ -152,16 +114,12 @@ fn build_cli(registry: &Registry) -> Command {
 }
 
 fn find_summaries_dir() -> Option<std::path::PathBuf> {
-    // 1. Local ./summaries/ in dev mode
     let local = std::path::PathBuf::from("summaries");
     if local.exists() && local.is_dir() {
         return Some(local);
     }
-    // 2. ~/.opencli-rs/summaries/
     if let Ok(home) = std::env::var("HOME") {
-        let user = std::path::PathBuf::from(home)
-            .join(".opencli-rs")
-            .join("summaries");
+        let user = std::path::PathBuf::from(home).join(".opencli-rs").join("summaries");
         if user.exists() && user.is_dir() {
             return Some(user);
         }
@@ -174,10 +132,18 @@ fn read_summary_content(summaries_dir: &std::path::Path, adapter: &str) -> Optio
     std::fs::read_to_string(&path).ok()
 }
 
+fn parse_description_from_summary(content: &str) -> String {
+    content
+        .lines()
+        .find(|l| l.trim().starts_with("description:"))
+        .and_then(|l| l.splitn(2, ':').nth(1))
+        .map(|s| s.trim().trim_matches('"').trim())
+        .unwrap_or("")
+        .to_string()
+}
+
 fn run_summary() {
     let mut adapters_sorted: Vec<(String, String)> = Vec::new();
-
-    // 1. Scan summaries/ directory
     if let Some(dir) = find_summaries_dir() {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
@@ -194,8 +160,6 @@ fn run_summary() {
             }
         }
     }
-
-    // 2. Scan adapters/{name}/summary.md files
     let adapter_dirs = std::path::PathBuf::from("adapters");
     if adapter_dirs.exists() {
         if let Ok(entries) = std::fs::read_dir(&adapter_dirs) {
@@ -205,8 +169,7 @@ fn run_summary() {
                     let summary_path = path.join("summary.md");
                     if summary_path.exists() {
                         if let Ok(content) = std::fs::read_to_string(&summary_path) {
-                            let adapter_name =
-                                path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                            let adapter_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
                             let description = parse_description_from_summary(&content);
                             if !description.is_empty() {
                                 adapters_sorted.push((adapter_name.to_string(), description));
@@ -217,46 +180,27 @@ fn run_summary() {
             }
         }
     }
-
     adapters_sorted.sort_by(|a, b| a.0.cmp(&b.0));
     adapters_sorted.dedup_by(|a, b| a.0 == b.0);
-
     for (name, desc) in adapters_sorted {
         println!("{}: {}", name, desc);
     }
 }
 
-fn parse_description_from_summary(content: &str) -> String {
-    content
-        .lines()
-        .find(|l| l.trim().starts_with("description:"))
-        .and_then(|l| l.splitn(2, ':').nth(1))
-        .map(|s| s.trim().trim_matches('"').trim())
-        .unwrap_or("")
-        .to_string()
-}
-
 fn run_summary_show(adapter: &str) {
-    // 1. Try ./summaries/{adapter}.md or ~/.opencli-rs/summaries/{adapter}.md
     if let Some(dir) = find_summaries_dir() {
         if let Some(content) = read_summary_content(&dir, adapter) {
             println!("{}", content);
             return;
         }
     }
-
-    // 2. Try ./adapters/{adapter}/summary.md (local dev)
-    let local = std::path::PathBuf::from("adapters")
-        .join(adapter)
-        .join("summary.md");
+    let local = std::path::PathBuf::from("adapters").join(adapter).join("summary.md");
     if local.exists() {
         if let Ok(content) = std::fs::read_to_string(&local) {
             println!("{}", content);
             return;
         }
     }
-
-    // 3. Try ~/.opencli-rs/adapters/{adapter}/summary.md
     if let Ok(home) = std::env::var("HOME") {
         let user = std::path::PathBuf::from(home)
             .join(".opencli-rs")
@@ -270,7 +214,6 @@ fn run_summary_show(adapter: &str) {
             }
         }
     }
-
     eprintln!("Adapter '{}' not found in summaries.", adapter);
     std::process::exit(1);
 }
@@ -286,23 +229,11 @@ fn print_error(err: &opencli_rs_core::CliError) {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    // 1. Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| {
-            if std::env::var("OPENCLI_VERBOSE").is_ok() {
-                EnvFilter::new("debug")
-            } else {
-                EnvFilter::new("warn")
-            }
-        }))
-        .init();
-
-    // Check for --daemon flag (used by BrowserBridge to spawn daemon as subprocess)
+/// Main adapter-execution entry point. Assumes tracing is already initialized.
+pub async fn run() {
+    // Check for --daemon flag (browser-daemon spawning by BrowserBridge)
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--daemon") {
-        // Parse --port argument (priority: CLI arg > env var > default)
         let port: u16 = {
             let mut port = None;
             let mut iter = args.iter();
@@ -321,32 +252,27 @@ async fn main() {
             })
             .unwrap_or(19825)
         };
-        tracing::info!(port = port, "Starting daemon server");
+        tracing::info!(port, "Starting browser daemon");
         match opencli_rs_browser::Daemon::start(port).await {
             Ok(daemon) => {
-                // Wait for shutdown signal (ctrl+c)
                 tokio::signal::ctrl_c().await.ok();
-                tracing::info!("Shutting down daemon");
+                tracing::info!("Shutting down browser daemon");
                 let _ = daemon.shutdown().await;
             }
             Err(e) => {
-                eprintln!("Failed to start daemon: {}", e);
+                eprintln!("Failed to start browser daemon: {}", e);
                 std::process::exit(1);
             }
         }
         return;
     }
 
-    // 2. Create registry and discover adapters (first-run extraction + directory scan)
     let mut registry = Registry::new();
-
     match discover_adapters(&mut registry) {
         Ok(n) => tracing::debug!(count = n, "Discovered adapters"),
         Err(e) => tracing::warn!(error = %e, "Failed to discover adapters"),
     }
 
-    // Dev mode: if ./adapters/ exists in the current directory, always load it fresh (no cache).
-    // Local adapters override ~/.opencli-rs/adapters/ adapters with the same name.
     let local_adapters_dir = std::path::PathBuf::from("adapters");
     if local_adapters_dir.exists() && local_adapters_dir.is_dir() {
         match scan_dir_no_cache(&local_adapters_dir, &mut registry) {
@@ -356,22 +282,17 @@ async fn main() {
         }
     }
 
-    // 3. Build clap app with dynamic subcommands
     let app = build_cli(&registry);
     let matches = app.get_matches();
 
     let format_str = matches.get_one::<String>("format").unwrap().clone();
     let verbose = matches.get_flag("verbose");
-
     if verbose {
         tracing::info!("Verbose mode enabled");
     }
-
     let output_format = OutputFormat::from_str(&format_str).unwrap_or_default();
 
-    // 5. Route: find matching site+command or external CLI
     if let Some((site_name, site_matches)) = matches.subcommand() {
-        // Handle built-in utility subcommands
         match site_name {
             "doctor" => {
                 doctor::run_doctor().await;
@@ -399,7 +320,6 @@ async fn main() {
                     .get_one::<String>("click")
                     .map(|s| s.split(',').map(|l| l.trim().to_string()).collect())
                     .unwrap_or_default();
-
                 let mut bridge = opencli_rs_browser::BrowserBridge::new(
                     std::env::var("OPENCLI_DAEMON_PORT")
                         .ok()
@@ -421,65 +341,37 @@ async fn main() {
                         let result = opencli_rs_ai::explore(page.as_ref(), url, options).await;
                         let _ = page.close().await;
                         match result {
-                            Ok(manifest) => {
-                                let output =
-                                    serde_json::to_string_pretty(&manifest).unwrap_or_default();
-                                println!("{}", output);
-                            }
-                            Err(e) => {
-                                print_error(&e);
-                                std::process::exit(1);
-                            }
+                            Ok(manifest) => println!("{}", serde_json::to_string_pretty(&manifest).unwrap_or_default()),
+                            Err(e) => { print_error(&e); std::process::exit(1); }
                         }
                     }
-                    Err(e) => {
-                        print_error(&e);
-                        std::process::exit(1);
-                    }
+                    Err(e) => { print_error(&e); std::process::exit(1); }
                 }
                 return;
             }
             "cascade" => {
                 let url = site_matches.get_one::<String>("url").unwrap();
-
                 let mut bridge = opencli_rs_browser::BrowserBridge::new(
-                    std::env::var("OPENCLI_DAEMON_PORT")
-                        .ok()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(19825),
+                    std::env::var("OPENCLI_DAEMON_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(19825),
                 );
                 match bridge.connect().await {
                     Ok(page) => {
                         let result = opencli_rs_ai::cascade(page.as_ref(), url).await;
                         let _ = page.close().await;
                         match result {
-                            Ok(r) => {
-                                let output = serde_json::to_string_pretty(&r).unwrap_or_default();
-                                println!("{}", output);
-                            }
-                            Err(e) => {
-                                print_error(&e);
-                                std::process::exit(1);
-                            }
+                            Ok(r) => println!("{}", serde_json::to_string_pretty(&r).unwrap_or_default()),
+                            Err(e) => { print_error(&e); std::process::exit(1); }
                         }
                     }
-                    Err(e) => {
-                        print_error(&e);
-                        std::process::exit(1);
-                    }
+                    Err(e) => { print_error(&e); std::process::exit(1); }
                 }
                 return;
             }
             "summary" => {
-                if let Some((sub_name, sub_matches)) = site_matches.subcommand() {
-                    match sub_name {
-                        "show" => {
-                            let adapter = sub_matches.get_one::<String>("adapter").unwrap();
-                            run_summary_show(adapter);
-                            return;
-                        }
-                        _ => {}
-                    }
+                if let Some(("show", sub_matches)) = site_matches.subcommand() {
+                    let adapter = sub_matches.get_one::<String>("adapter").unwrap();
+                    run_summary_show(adapter);
+                    return;
                 }
                 run_summary();
                 return;
@@ -487,136 +379,77 @@ async fn main() {
             "generate" => {
                 let url = site_matches.get_one::<String>("url").unwrap();
                 let goal = site_matches.get_one::<String>("goal").cloned();
-                let _site = site_matches.get_one::<String>("site").cloned();
-
                 let mut bridge = opencli_rs_browser::BrowserBridge::new(
-                    std::env::var("OPENCLI_DAEMON_PORT")
-                        .ok()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(19825),
+                    std::env::var("OPENCLI_DAEMON_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(19825),
                 );
                 match bridge.connect().await {
                     Ok(page) => {
-                        let gen_result = opencli_rs_ai::generate(
-                            page.as_ref(),
-                            url,
-                            goal.as_deref().unwrap_or(""),
-                        )
-                        .await;
+                        let gen_result = opencli_rs_ai::generate(page.as_ref(), url, goal.as_deref().unwrap_or("")).await;
                         let _ = page.close().await;
                         match gen_result {
                             Ok(candidate) => {
-                                // Save to ~/.opencli-rs/adapters/{site}/{name}.yaml
-                                let home = std::env::var("HOME")
-                                    .or_else(|_| std::env::var("USERPROFILE"))
-                                    .unwrap_or_else(|_| ".".to_string());
-                                let dir = std::path::PathBuf::from(&home)
-                                    .join(".opencli-rs")
-                                    .join("adapters")
-                                    .join(&candidate.site);
+                                let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_else(|_| ".".to_string());
+                                let dir = std::path::PathBuf::from(&home).join(".opencli-rs").join("adapters").join(&candidate.site);
                                 let _ = std::fs::create_dir_all(&dir);
                                 let path = dir.join(format!("{}.yaml", candidate.name));
                                 match std::fs::write(&path, &candidate.yaml) {
                                     Ok(_) => {
-                                        eprintln!(
-                                            "✅ Generated adapter: {} {}",
-                                            candidate.site, candidate.name
-                                        );
-                                        eprintln!(
-                                            "   Strategy: {:?}, Confidence: {:.0}%",
-                                            candidate.strategy,
-                                            candidate.confidence * 100.0
-                                        );
+                                        eprintln!("✅ Generated adapter: {} {}", candidate.site, candidate.name);
+                                        eprintln!("   Strategy: {:?}, Confidence: {:.0}%", candidate.strategy, candidate.confidence * 100.0);
                                         eprintln!("   Saved to: {}", path.display());
-                                        eprintln!();
-                                        eprintln!("   Run it now:");
-                                        eprintln!(
-                                            "   opencli-rs {} {}",
-                                            candidate.site, candidate.name
-                                        );
+                                        eprintln!("\n   Run it now:");
+                                        eprintln!("   opencli {} {}", candidate.site, candidate.name);
                                     }
-                                    Err(e) => {
-                                        eprintln!("Generated adapter but failed to save: {}", e);
-                                        eprintln!();
-                                        println!("{}", candidate.yaml);
-                                    }
+                                    Err(e) => { eprintln!("Generated but failed to save: {}", e); println!("{}", candidate.yaml); }
                                 }
                             }
-                            Err(e) => {
-                                print_error(&e);
-                                std::process::exit(1);
-                            }
+                            Err(e) => { print_error(&e); std::process::exit(1); }
                         }
                     }
-                    Err(e) => {
-                        print_error(&e);
-                        std::process::exit(1);
-                    }
+                    Err(e) => { print_error(&e); std::process::exit(1); }
                 }
                 return;
             }
             _ => {}
         }
 
-        // Check if it's a registered site
         if let Some((cmd_name, cmd_matches)) = site_matches.subcommand() {
             if let Some(cmd) = registry.get(site_name, cmd_name) {
-                // Collect raw args from clap matches
                 let mut raw_args: HashMap<String, String> = HashMap::new();
                 for arg_def in &cmd.args {
                     if let Some(val) = cmd_matches.get_one::<String>(&arg_def.name) {
                         raw_args.insert(arg_def.name.clone(), val.clone());
                     }
                 }
-
-                // Coerce and validate
                 let kwargs = match coerce_and_validate_args(&cmd.args, &raw_args) {
                     Ok(kw) => kw,
-                    Err(e) => {
-                        print_error(&e);
-                        std::process::exit(1);
-                    }
+                    Err(e) => { print_error(&e); std::process::exit(1); }
                 };
-
                 let start = std::time::Instant::now();
-
                 match execute_command(cmd, kwargs).await {
                     Ok(data) => {
                         let opts = RenderOptions {
                             format: output_format,
-                            columns: if cmd.columns.is_empty() {
-                                None
-                            } else {
-                                Some(cmd.columns.clone())
-                            },
+                            columns: if cmd.columns.is_empty() { None } else { Some(cmd.columns.clone()) },
                             title: None,
                             elapsed: Some(start.elapsed()),
                             source: Some(cmd.full_name()),
                             footer_extra: None,
                         };
-                        let output = render(&data, &opts);
-                        println!("{}", output);
+                        println!("{}", render(&data, &opts));
                     }
-                    Err(e) => {
-                        print_error(&e);
-                        std::process::exit(1);
-                    }
+                    Err(e) => { print_error(&e); std::process::exit(1); }
                 }
             } else {
                 eprintln!("Unknown command: {} {}", site_name, cmd_name);
                 std::process::exit(1);
             }
         } else {
-            // Site specified but no command — show site help
-            // Re-build and print help for just this site subcommand
             let app = build_cli(&registry);
-            let app_clone = app;
-            // Try to print subcommand help
-            let _ = app_clone.try_get_matches_from(vec!["opencli-rs", site_name, "--help"]);
+            let _ = app.try_get_matches_from(vec!["opencli", site_name, "--help"]);
         }
     } else {
-        // No subcommand specified
-        eprintln!("opencli-rs v{}", env!("CARGO_PKG_VERSION"));
+        eprintln!("opencli v{}", env!("CARGO_PKG_VERSION"));
         eprintln!("No command specified. Use --help for usage.");
         std::process::exit(1);
     }
