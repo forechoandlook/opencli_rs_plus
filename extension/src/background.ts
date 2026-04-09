@@ -96,15 +96,14 @@ function scheduleReconnect(): void {
 }
 
 // ─── Automation session ───────────────────────────────────────────────
-// Automation tabs are opened in the user's existing Chrome window as
-// background (non-focused) tabs. No new window is created unless Chrome
-// has no normal windows at all. Only the tabs we create are tracked and
-// cleaned up — the user's window itself is never closed.
+// Reuses existing user Chrome windows when available (tabs in background).
+// Only creates new windows if none exist. Tracks tab IDs so we only close
+// our own tabs (not user's tabs or windows).
 
 type AutomationSession = {
   windowId: number;
-  ownWindow: boolean;          // true = we created this window, close it on cleanup
-  tabIds: Set<number>;         // tabs we created in this session
+  ownWindow: boolean;          // true = we created this window, safe to close it
+  tabIds: Set<number>;         // tabs we created, for selective cleanup
   idleTimer: ReturnType<typeof setTimeout> | null;
   idleDeadlineAt: number;
 };
@@ -126,16 +125,19 @@ function resetWindowIdleTimer(workspace: string): void {
     if (!current) return;
     try {
       if (current.ownWindow) {
+        // We own the window — safe to close it
         await chrome.windows.remove(current.windowId);
         console.log(`[opencli] Automation window ${current.windowId} (${workspace}) closed (idle timeout)`);
       } else {
-        // Close only the tabs we opened in the user's window
+        // Reusing user's window — only close our tabs
         const tabIdArray = [...current.tabIds];
-        if (tabIdArray.length) await chrome.tabs.remove(tabIdArray);
-        console.log(`[opencli] Automation tabs [${tabIdArray}] (${workspace}) closed (idle timeout)`);
+        if (tabIdArray.length) {
+          await chrome.tabs.remove(tabIdArray);
+          console.log(`[opencli] Automation tabs [${tabIdArray.join(',')}] (${workspace}) closed (idle timeout)`);
+        }
       }
-    } catch {
-      // Already gone
+    } catch (err) {
+      console.error(`[opencli] Error cleaning up session: ${err}`);
     }
     automationSessions.delete(workspace);
   }, WINDOW_IDLE_TIMEOUT);
@@ -143,8 +145,8 @@ function resetWindowIdleTimer(workspace: string): void {
 
 /**
  * Get (or create) the automation session for a workspace.
- * Prefers an existing Chrome normal window so no new window appears.
- * Returns the windowId to use for creating tabs.
+ * Prefers to reuse an existing user Chrome window (tabs are background).
+ * Only creates a new small window if no existing windows are available.
  */
 async function getAutomationWindow(workspace: string): Promise<number> {
   const existing = automationSessions.get(workspace);
@@ -158,7 +160,7 @@ async function getAutomationWindow(workspace: string): Promise<number> {
     }
   }
 
-  // Try to reuse an existing normal (non-incognito) Chrome window
+  // Try to reuse an existing user window
   const windows = await chrome.windows.getAll({ windowTypes: ['normal'] });
   const userWindow = windows.find(w => !w.incognito && w.id !== undefined);
 
@@ -170,16 +172,27 @@ async function getAutomationWindow(workspace: string): Promise<number> {
     ownWindow = false;
     console.log(`[opencli] Reusing existing window ${windowId} (${workspace})`);
   } else {
-    // No existing window — create a minimized one as fallback
-    const win = await chrome.windows.create({
-      url: 'data:text/html,<html></html>',
-      focused: false,
-      width: 1280,
-      height: 900,
-      type: 'normal',
-      state: 'minimized',
-    });
-    windowId = win.id!;
+    // No existing window — create a small one as fallback
+    let win;
+    try {
+      win = await chrome.windows.create({
+        url: 'data:text/html,<html></html>',
+        focused: false,
+        width: 200,
+        height: 200,
+        left: 0,
+        top: 0,
+        type: 'normal',
+      });
+    } catch (err) {
+      console.error(`[opencli] Failed to create automation window: ${err}`);
+      throw err;
+    }
+    if (!win.id) {
+      console.error(`[opencli] Window created but no ID`);
+      throw new Error('Failed to create automation window: no window ID');
+    }
+    windowId = win.id;
     ownWindow = true;
     console.log(`[opencli] Created automation window ${windowId} (${workspace})`);
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -197,7 +210,7 @@ async function getAutomationWindow(workspace: string): Promise<number> {
   return windowId;
 }
 
-// Clean up if user closes our owned window
+// Clean up if our automation window closes
 chrome.windows.onRemoved.addListener((windowId) => {
   for (const [workspace, session] of automationSessions.entries()) {
     if (session.windowId === windowId && session.ownWindow) {
@@ -208,7 +221,7 @@ chrome.windows.onRemoved.addListener((windowId) => {
   }
 });
 
-// Track when automation tabs are closed externally
+// Track when our tabs are closed externally
 chrome.tabs.onRemoved.addListener((tabId) => {
   for (const session of automationSessions.values()) {
     session.tabIds.delete(tabId);
@@ -338,8 +351,9 @@ async function resolveTabId(tabId: number | undefined, workspace: string): Promi
 async function listAutomationTabs(workspace: string): Promise<chrome.tabs.Tab[]> {
   const session = automationSessions.get(workspace);
   if (!session) return [];
+
   if (session.ownWindow) {
-    // We own the window — all tabs in it are automation tabs
+    // We own the window — all tabs are ours
     try {
       return await chrome.tabs.query({ windowId: session.windowId });
     } catch {
@@ -347,11 +361,13 @@ async function listAutomationTabs(workspace: string): Promise<chrome.tabs.Tab[]>
       return [];
     }
   }
+
   // Reusing user's window — only return tabs we created
   const tabs: chrome.tabs.Tab[] = [];
   for (const tabId of session.tabIds) {
     try {
-      tabs.push(await chrome.tabs.get(tabId));
+      const tab = await chrome.tabs.get(tabId);
+      tabs.push(tab);
     } catch {
       session.tabIds.delete(tabId); // tab was closed
     }
@@ -536,9 +552,10 @@ async function handleCloseWindow(cmd: Command, workspace: string): Promise<Resul
   if (session) {
     try {
       if (session.ownWindow) {
+        // We own the window — safe to close it
         await chrome.windows.remove(session.windowId);
       } else {
-        // Only close the tabs we opened — leave user's window intact
+        // Reusing user's window — only close our tabs
         const tabIdArray = [...session.tabIds];
         if (tabIdArray.length) await chrome.tabs.remove(tabIdArray);
       }
