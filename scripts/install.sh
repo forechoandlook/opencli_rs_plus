@@ -5,7 +5,7 @@
 set -e
 
 REPO="nashsu/opencli-rs"
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="~/.local/bin"
 BINARY_NAME="opencli-rs"
 
 # Colors

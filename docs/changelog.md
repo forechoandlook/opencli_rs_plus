@@ -8,4 +8,4 @@
 0409
 - **原生命令扩展**：新增 `opencli update` / `opencli update --check`，支持检查 GitHub Release 并原地更新当前二进制。
 - **反馈命令**：新增 `opencli feedback <title>`，默认写入 `~/.opencli-rs/feedback.jsonl`，加 `--open` 可打开预填好的 GitHub issue 页面。
-- **帮助输出收敛**：`opencli --help` 默认只显示内置命令和 daemon/client 命令；如需查看全部 adapter family，使用 `opencli --help --adapters`。
+- **帮助输出收敛**：`opencli --help` 默认只显示内置命令和 daemon/client 命令.
