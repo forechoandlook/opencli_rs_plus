@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use crate::args::coerce_and_validate_args;
-use crate::commands::{completion, doctor};
+use crate::commands::{completion, doctor, feedback, update};
 use crate::execution::execute_command;
 
 fn build_cli(registry: &Registry) -> Command {
@@ -68,6 +68,49 @@ fn build_cli(registry: &Registry) -> Command {
 
     app = app
         .subcommand(Command::new("doctor").about("Run diagnostics checks"))
+        .subcommand(
+            Command::new("update")
+                .about("Check the latest version and update this binary in place")
+                .arg(
+                    Arg::new("check")
+                        .long("check")
+                        .action(ArgAction::SetTrue)
+                        .help("Only check for updates without installing"),
+                ),
+        )
+        .subcommand(
+            Command::new("feedback")
+                .about("Save local feedback and optionally open a GitHub issue draft")
+                .arg(
+                    Arg::new("title")
+                        .required(true)
+                        .help("Short feedback title"),
+                )
+                .arg(
+                    Arg::new("body")
+                        .long("body")
+                        .short('m')
+                        .help("Detailed feedback text"),
+                )
+                .arg(
+                    Arg::new("adapter")
+                        .long("adapter")
+                        .help("Related adapter, e.g. 'zhihu hot'"),
+                )
+                .arg(
+                    Arg::new("kind")
+                        .long("kind")
+                        .default_value("other")
+                        .value_parser(["broken", "bad_description", "other"])
+                        .help("Feedback kind"),
+                )
+                .arg(
+                    Arg::new("open")
+                        .long("open")
+                        .action(ArgAction::SetTrue)
+                        .help("Open a prefilled GitHub issue in the browser"),
+                ),
+        )
         .subcommand(
             Command::new("completion")
                 .about("Generate shell completions")
@@ -327,6 +370,31 @@ pub async fn run() {
         match site_name {
             "doctor" => {
                 doctor::run_doctor().await;
+                return;
+            }
+            "update" => {
+                let check_only = site_matches.get_flag("check");
+                if let Err(err) = update::run_update(check_only).await {
+                    eprintln!("Update failed: {err}");
+                    std::process::exit(1);
+                }
+                return;
+            }
+            "feedback" => {
+                let title = site_matches.get_one::<String>("title").unwrap();
+                let body = site_matches.get_one::<String>("body").map(String::as_str);
+                let adapter = site_matches
+                    .get_one::<String>("adapter")
+                    .map(String::as_str);
+                let kind = site_matches
+                    .get_one::<String>("kind")
+                    .map(String::as_str)
+                    .unwrap_or("other");
+                let open_issue = site_matches.get_flag("open");
+                if let Err(err) = feedback::save_feedback(adapter, kind, title, body, open_issue) {
+                    eprintln!("Feedback failed: {err}");
+                    std::process::exit(1);
+                }
                 return;
             }
             "completion" => {
