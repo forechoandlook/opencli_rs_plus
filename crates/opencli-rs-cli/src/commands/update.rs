@@ -150,6 +150,9 @@ pub async fn run_update(check_only: bool) -> Result<()> {
     println!("Updated opencli to {}.", latest);
     println!("Binary path: {}", current_exe.display());
     println!("Restart any running opencli commands to use the new version.");
-    println!("Source: https://github.com/{REPO}/releases/tag/{}", release.tag_name);
+    println!(
+        "Source: https://github.com/{REPO}/releases/tag/{}",
+        release.tag_name
+    );
     Ok(())
 }
