@@ -693,7 +693,11 @@ impl StepHandler for CollectStep {
 
 struct BgFetchStep;
 
-fn render_str(params: &Value, key: &str, ctx: &TemplateContext) -> Result<Option<String>, CliError> {
+fn render_str(
+    params: &Value,
+    key: &str,
+    ctx: &TemplateContext,
+) -> Result<Option<String>, CliError> {
     match params.get(key).and_then(|v| v.as_str()) {
         Some(s) => match render_template_str(s, ctx)? {
             Value::String(s) => Ok(Some(s)),
@@ -722,14 +726,22 @@ impl StepHandler for BgFetchStep {
         let url = render_str(params, "url", &ctx)?
             .ok_or_else(|| CliError::pipeline("bg_fetch: missing required field 'url'"))?;
         let cookie_url = render_str(params, "cookie_url", &ctx)?;
-        let method = params.get("method").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let request_headers: Option<std::collections::HashMap<String, String>> =
-            params.get("headers").and_then(|v| v.as_object()).map(|obj| {
+        let method = params
+            .get("method")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let request_headers: Option<std::collections::HashMap<String, String>> = params
+            .get("headers")
+            .and_then(|v| v.as_object())
+            .map(|obj| {
                 obj.iter()
                     .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
                     .collect()
             });
-        let body = params.get("body").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let body = params
+            .get("body")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         let result = page
             .bg_fetch(

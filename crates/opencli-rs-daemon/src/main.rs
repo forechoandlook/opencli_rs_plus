@@ -1,5 +1,5 @@
 use clap::Parser;
-use opencli_rs_daemon::{default_addr, run_daemon, run_client};
+use opencli_rs_daemon::{default_addr, run_client, run_daemon};
 use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -24,15 +24,13 @@ const CLIENT_SUBCMDS: &[&str] = &[
 async fn main() {
     // Init tracing once for the unified binary
     let _subscriber = FmtSubscriber::builder()
-        .with_env_filter(
-            EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| {
-                if std::env::var("OPENCLI_VERBOSE").is_ok() {
-                    EnvFilter::new("debug")
-                } else {
-                    EnvFilter::new("warn")
-                }
-            }),
-        )
+        .with_env_filter(EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| {
+            if std::env::var("OPENCLI_VERBOSE").is_ok() {
+                EnvFilter::new("debug")
+            } else {
+                EnvFilter::new("warn")
+            }
+        }))
         .with_max_level(Level::INFO)
         .with_target(false)
         .compact()
@@ -47,7 +45,11 @@ async fn main() {
     }
 
     // Peek at first non-flag argument to decide routing
-    let subcmd = raw.iter().skip(1).find(|a| !a.starts_with('-')).map(|s| s.as_str());
+    let subcmd = raw
+        .iter()
+        .skip(1)
+        .find(|a| !a.starts_with('-'))
+        .map(|s| s.as_str());
 
     match subcmd {
         // ── Scheduler daemon ───────────────────────────────────────────────

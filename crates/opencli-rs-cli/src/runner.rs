@@ -83,20 +83,46 @@ fn build_cli(registry: &Registry) -> Command {
                 .about("Explore a website's API surface and discover endpoints")
                 .arg(Arg::new("url").required(true).help("URL to explore"))
                 .arg(Arg::new("site").long("site").help("Override site name"))
-                .arg(Arg::new("goal").long("goal").help("Hint for capability naming"))
-                .arg(Arg::new("wait").long("wait").default_value("3").help("Initial wait seconds"))
-                .arg(Arg::new("auto").long("auto").action(ArgAction::SetTrue).help("Enable interactive fuzzing"))
-                .arg(Arg::new("click").long("click").help("Comma-separated labels to click")),
+                .arg(
+                    Arg::new("goal")
+                        .long("goal")
+                        .help("Hint for capability naming"),
+                )
+                .arg(
+                    Arg::new("wait")
+                        .long("wait")
+                        .default_value("3")
+                        .help("Initial wait seconds"),
+                )
+                .arg(
+                    Arg::new("auto")
+                        .long("auto")
+                        .action(ArgAction::SetTrue)
+                        .help("Enable interactive fuzzing"),
+                )
+                .arg(
+                    Arg::new("click")
+                        .long("click")
+                        .help("Comma-separated labels to click"),
+                ),
         )
         .subcommand(
             Command::new("cascade")
                 .about("Auto-detect authentication strategy for an API endpoint")
-                .arg(Arg::new("url").required(true).help("API endpoint URL to probe")),
+                .arg(
+                    Arg::new("url")
+                        .required(true)
+                        .help("API endpoint URL to probe"),
+                ),
         )
         .subcommand(
             Command::new("generate")
                 .about("One-shot: explore + synthesize + select best adapter")
-                .arg(Arg::new("url").required(true).help("URL to generate adapter for"))
+                .arg(
+                    Arg::new("url")
+                        .required(true)
+                        .help("URL to generate adapter for"),
+                )
                 .arg(Arg::new("goal").long("goal").help("What you want"))
                 .arg(Arg::new("site").long("site").help("Override site name")),
         )
@@ -119,7 +145,9 @@ fn find_summaries_dir() -> Option<std::path::PathBuf> {
         return Some(local);
     }
     if let Ok(home) = std::env::var("HOME") {
-        let user = std::path::PathBuf::from(home).join(".opencli-rs").join("summaries");
+        let user = std::path::PathBuf::from(home)
+            .join(".opencli-rs")
+            .join("summaries");
         if user.exists() && user.is_dir() {
             return Some(user);
         }
@@ -169,7 +197,8 @@ fn run_summary() {
                     let summary_path = path.join("summary.md");
                     if summary_path.exists() {
                         if let Ok(content) = std::fs::read_to_string(&summary_path) {
-                            let adapter_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                            let adapter_name =
+                                path.file_name().and_then(|s| s.to_str()).unwrap_or("");
                             let description = parse_description_from_summary(&content);
                             if !description.is_empty() {
                                 adapters_sorted.push((adapter_name.to_string(), description));
@@ -194,7 +223,9 @@ fn run_summary_show(adapter: &str) {
             return;
         }
     }
-    let local = std::path::PathBuf::from("adapters").join(adapter).join("summary.md");
+    let local = std::path::PathBuf::from("adapters")
+        .join(adapter)
+        .join("summary.md");
     if local.exists() {
         if let Ok(content) = std::fs::read_to_string(&local) {
             println!("{}", content);
@@ -341,29 +372,49 @@ pub async fn run() {
                         let result = opencli_rs_ai::explore(page.as_ref(), url, options).await;
                         let _ = page.close().await;
                         match result {
-                            Ok(manifest) => println!("{}", serde_json::to_string_pretty(&manifest).unwrap_or_default()),
-                            Err(e) => { print_error(&e); std::process::exit(1); }
+                            Ok(manifest) => println!(
+                                "{}",
+                                serde_json::to_string_pretty(&manifest).unwrap_or_default()
+                            ),
+                            Err(e) => {
+                                print_error(&e);
+                                std::process::exit(1);
+                            }
                         }
                     }
-                    Err(e) => { print_error(&e); std::process::exit(1); }
+                    Err(e) => {
+                        print_error(&e);
+                        std::process::exit(1);
+                    }
                 }
                 return;
             }
             "cascade" => {
                 let url = site_matches.get_one::<String>("url").unwrap();
                 let mut bridge = opencli_rs_browser::BrowserBridge::new(
-                    std::env::var("OPENCLI_DAEMON_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(19825),
+                    std::env::var("OPENCLI_DAEMON_PORT")
+                        .ok()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(19825),
                 );
                 match bridge.connect().await {
                     Ok(page) => {
                         let result = opencli_rs_ai::cascade(page.as_ref(), url).await;
                         let _ = page.close().await;
                         match result {
-                            Ok(r) => println!("{}", serde_json::to_string_pretty(&r).unwrap_or_default()),
-                            Err(e) => { print_error(&e); std::process::exit(1); }
+                            Ok(r) => {
+                                println!("{}", serde_json::to_string_pretty(&r).unwrap_or_default())
+                            }
+                            Err(e) => {
+                                print_error(&e);
+                                std::process::exit(1);
+                            }
                         }
                     }
-                    Err(e) => { print_error(&e); std::process::exit(1); }
+                    Err(e) => {
+                        print_error(&e);
+                        std::process::exit(1);
+                    }
                 }
                 return;
             }
@@ -380,33 +431,65 @@ pub async fn run() {
                 let url = site_matches.get_one::<String>("url").unwrap();
                 let goal = site_matches.get_one::<String>("goal").cloned();
                 let mut bridge = opencli_rs_browser::BrowserBridge::new(
-                    std::env::var("OPENCLI_DAEMON_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(19825),
+                    std::env::var("OPENCLI_DAEMON_PORT")
+                        .ok()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(19825),
                 );
                 match bridge.connect().await {
                     Ok(page) => {
-                        let gen_result = opencli_rs_ai::generate(page.as_ref(), url, goal.as_deref().unwrap_or("")).await;
+                        let gen_result = opencli_rs_ai::generate(
+                            page.as_ref(),
+                            url,
+                            goal.as_deref().unwrap_or(""),
+                        )
+                        .await;
                         let _ = page.close().await;
                         match gen_result {
                             Ok(candidate) => {
-                                let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_else(|_| ".".to_string());
-                                let dir = std::path::PathBuf::from(&home).join(".opencli-rs").join("adapters").join(&candidate.site);
+                                let home = std::env::var("HOME")
+                                    .or_else(|_| std::env::var("USERPROFILE"))
+                                    .unwrap_or_else(|_| ".".to_string());
+                                let dir = std::path::PathBuf::from(&home)
+                                    .join(".opencli-rs")
+                                    .join("adapters")
+                                    .join(&candidate.site);
                                 let _ = std::fs::create_dir_all(&dir);
                                 let path = dir.join(format!("{}.yaml", candidate.name));
                                 match std::fs::write(&path, &candidate.yaml) {
                                     Ok(_) => {
-                                        eprintln!("✅ Generated adapter: {} {}", candidate.site, candidate.name);
-                                        eprintln!("   Strategy: {:?}, Confidence: {:.0}%", candidate.strategy, candidate.confidence * 100.0);
+                                        eprintln!(
+                                            "✅ Generated adapter: {} {}",
+                                            candidate.site, candidate.name
+                                        );
+                                        eprintln!(
+                                            "   Strategy: {:?}, Confidence: {:.0}%",
+                                            candidate.strategy,
+                                            candidate.confidence * 100.0
+                                        );
                                         eprintln!("   Saved to: {}", path.display());
                                         eprintln!("\n   Run it now:");
-                                        eprintln!("   opencli {} {}", candidate.site, candidate.name);
+                                        eprintln!(
+                                            "   opencli {} {}",
+                                            candidate.site, candidate.name
+                                        );
                                     }
-                                    Err(e) => { eprintln!("Generated but failed to save: {}", e); println!("{}", candidate.yaml); }
+                                    Err(e) => {
+                                        eprintln!("Generated but failed to save: {}", e);
+                                        println!("{}", candidate.yaml);
+                                    }
                                 }
                             }
-                            Err(e) => { print_error(&e); std::process::exit(1); }
+                            Err(e) => {
+                                print_error(&e);
+                                std::process::exit(1);
+                            }
                         }
                     }
-                    Err(e) => { print_error(&e); std::process::exit(1); }
+                    Err(e) => {
+                        print_error(&e);
+                        std::process::exit(1);
+                    }
                 }
                 return;
             }
@@ -423,14 +506,21 @@ pub async fn run() {
                 }
                 let kwargs = match coerce_and_validate_args(&cmd.args, &raw_args) {
                     Ok(kw) => kw,
-                    Err(e) => { print_error(&e); std::process::exit(1); }
+                    Err(e) => {
+                        print_error(&e);
+                        std::process::exit(1);
+                    }
                 };
                 let start = std::time::Instant::now();
                 match execute_command(cmd, kwargs).await {
                     Ok(data) => {
                         let opts = RenderOptions {
                             format: output_format,
-                            columns: if cmd.columns.is_empty() { None } else { Some(cmd.columns.clone()) },
+                            columns: if cmd.columns.is_empty() {
+                                None
+                            } else {
+                                Some(cmd.columns.clone())
+                            },
                             title: None,
                             elapsed: Some(start.elapsed()),
                             source: Some(cmd.full_name()),
@@ -438,7 +528,10 @@ pub async fn run() {
                         };
                         println!("{}", render(&data, &opts));
                     }
-                    Err(e) => { print_error(&e); std::process::exit(1); }
+                    Err(e) => {
+                        print_error(&e);
+                        std::process::exit(1);
+                    }
                 }
             } else {
                 eprintln!("Unknown command: {} {}", site_name, cmd_name);
