@@ -94,10 +94,10 @@ pub fn builtin_apps() -> HashMap<&'static str, ElectronApp> {
 /// User-defined app entry from apps.yaml.
 #[derive(Debug, Deserialize)]
 struct UserApp {
-    port: u16,
-    process_name: String,
-    #[serde(default)]
-    display_name: Option<String>,
+    port: u16
+    // process_name: String,
+    // #[serde(default)]
+    // display_name: Option<String>,
 }
 
 /// Look up the CDP port for a site. Checks builtin registry first, then

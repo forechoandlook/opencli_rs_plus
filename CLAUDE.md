@@ -4,6 +4,7 @@
 
 1. 使用中文，当有问题解决不了的时候及时停下反思.
 2. 开发新的adapters的时候 加载 playwright cli skills 尽可能使用api的方式，需要先通过playwright调试，最后固化为adapters 开发测试通过 `cargo run --` 实现, 参考 docs/develop.md
+3. 功能修改等需要记录到 docs/changelog.md 中
 
 ## 项目概述
 

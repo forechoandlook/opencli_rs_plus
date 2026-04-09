@@ -13,7 +13,7 @@ fn default_addr() -> String {
 }
 
 #[derive(Parser)]
-#[command(name = "opencli-cli", about = "OpenCLI daemon client")]
+#[command(name = "opencli", about = "OpenCLI daemon client")]
 struct Cli {
     /// TCP address of daemon (default: 127.0.0.1:10008)
     #[arg(long, global = true)]
