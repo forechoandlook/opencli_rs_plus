@@ -4,20 +4,11 @@
  * Lets the user set the daemon port and shows connection status.
  */
 
-import { getStoredPort, storePort, daemonWsUrl, DAEMON_PORT } from './protocol';
+import { checkDaemonConnection, detectDaemonPort, getStoredPort, storePort, DAEMON_PORT } from './protocol';
 
 function setStatus(el: HTMLElement, text: string, color: string): void {
   el.textContent = text;
   el.style.color = color;
-}
-
-async function checkConnection(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const ws = new WebSocket(daemonWsUrl(port));
-    const timer = setTimeout(() => { ws.close(); resolve(false); }, 2000);
-    ws.onopen = () => { clearTimeout(timer); ws.close(); resolve(true); };
-    ws.onerror = () => { clearTimeout(timer); resolve(false); };
-  });
 }
 
 async function init(): Promise<void> {
@@ -33,11 +24,14 @@ async function init(): Promise<void> {
     portInput.value = String(savedPort);
   }
 
-  // Check current connection status
+  // Prefer an actively reachable daemon port over a stale saved/default port.
   setStatus(statusEl, 'Checking…', '#888');
-  const currentPort = parseInt(portInput.value, 10) || DAEMON_PORT;
-  const connected = await checkConnection(currentPort);
-  if (connected) {
+  const detectedPort = await detectDaemonPort(savedPort);
+  if (detectedPort !== null) {
+    portInput.value = String(detectedPort);
+    if (detectedPort !== savedPort) {
+      await storePort(detectedPort);
+    }
     setStatus(statusEl, 'Connected', '#0d0');
   } else {
     setStatus(statusEl, 'Not connected', '#e55');
@@ -53,7 +47,7 @@ async function init(): Promise<void> {
 
     await storePort(port);
     setStatus(statusEl, 'Checking…', '#888');
-    const ok = await checkConnection(port);
+    const ok = await checkDaemonConnection(port);
     if (ok) {
       setStatus(statusEl, 'Saved — Connected', '#0d0');
     } else {

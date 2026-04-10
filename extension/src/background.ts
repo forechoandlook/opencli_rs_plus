@@ -9,6 +9,7 @@ import type { Command, Result } from './protocol';
 import {
   daemonWsUrl,
   DAEMON_PORT,
+  detectDaemonPort,
   getStoredPort,
   storePort,
   WS_RECONNECT_BASE_DELAY,
@@ -44,8 +45,12 @@ console.error = (...args: unknown[]) => { _origError(...args); forwardLog('error
 async function connect(): Promise<void> {
   if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
 
-  // Load port from storage, fall back to default
-  const port = (await getStoredPort()) ?? DAEMON_PORT;
+  // Load saved port, then actively scan the daemon port range when needed.
+  const savedPort = await getStoredPort();
+  const port = (await detectDaemonPort(savedPort)) ?? savedPort ?? DAEMON_PORT;
+  if (port !== savedPort) {
+    await storePort(port);
+  }
   const wsUrl = daemonWsUrl(port);
   try {
     ws = new WebSocket(wsUrl);
@@ -640,6 +645,8 @@ export const __test__ = {
     }
     automationSessions.set(workspace, {
       windowId,
+      ownWindow: false,
+      tabIds: new Set<number>(),
       idleTimer: null,
       idleDeadlineAt: Date.now() + WINDOW_IDLE_TIMEOUT,
     });

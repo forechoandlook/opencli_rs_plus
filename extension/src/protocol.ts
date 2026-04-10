@@ -56,6 +56,8 @@ export interface Result {
 /** Default daemon port */
 export const DAEMON_PORT = 19825;
 export const DAEMON_HOST = 'localhost';
+export const DAEMON_PORT_RANGE_START = 19825;
+export const DAEMON_PORT_RANGE_END = 19834;
 
 /** Storage key for the configured daemon port */
 export const STORAGE_KEY_PORT = 'opencli_daemon_port';
@@ -74,6 +76,46 @@ export async function storePort(port: number): Promise<void> {
 /** Build WebSocket URL for a specific port */
 export function daemonWsUrl(port: number): string {
   return `ws://${DAEMON_HOST}:${port}/ext`;
+}
+
+/** Check whether a daemon WebSocket is reachable on the given port */
+export async function checkDaemonConnection(port: number, timeoutMs = 1200): Promise<boolean> {
+  return new Promise((resolve) => {
+    const ws = new WebSocket(daemonWsUrl(port));
+    const timer = setTimeout(() => {
+      try { ws.close(); } catch { /* ignore */ }
+      resolve(false);
+    }, timeoutMs);
+    ws.onopen = () => {
+      clearTimeout(timer);
+      ws.close();
+      resolve(true);
+    };
+    ws.onerror = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+  });
+}
+
+/** Find the first reachable daemon port, preferring the given port when present. */
+export async function detectDaemonPort(preferredPort?: number | null): Promise<number | null> {
+  const tried = new Set<number>();
+  const ports: number[] = [];
+  if (preferredPort && preferredPort >= 1 && preferredPort <= 65535) {
+    ports.push(preferredPort);
+    tried.add(preferredPort);
+  }
+  for (let port = DAEMON_PORT_RANGE_START; port <= DAEMON_PORT_RANGE_END; port++) {
+    if (!tried.has(port)) ports.push(port);
+  }
+
+  for (const port of ports) {
+    if (await checkDaemonConnection(port)) {
+      return port;
+    }
+  }
+  return null;
 }
 
 /** Base reconnect delay for extension WebSocket (ms) */

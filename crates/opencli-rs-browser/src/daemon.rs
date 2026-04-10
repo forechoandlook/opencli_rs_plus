@@ -1,4 +1,5 @@
 use axum::{
+    extract::DefaultBodyLimit,
     extract::{
         ws::{Message, WebSocket},
         State, WebSocketUpgrade,
@@ -27,6 +28,8 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(1800); // 30 minutes
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 /// Idle shutdown threshold.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(1800);
+/// Allow large extension command payloads such as bg_fetch API responses.
+const COMMAND_BODY_LIMIT: usize = 32 * 1024 * 1024;
 
 type PendingMap = HashMap<String, oneshot::Sender<DaemonResult>>;
 
@@ -70,6 +73,7 @@ impl Daemon {
             .route("/status", get(status_handler))
             .route("/command", post(command_handler))
             .route("/ext", get(ws_handler))
+            .layer(DefaultBodyLimit::max(COMMAND_BODY_LIMIT))
             .with_state(state.clone());
 
         let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}"))
