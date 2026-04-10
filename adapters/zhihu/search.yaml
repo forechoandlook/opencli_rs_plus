@@ -25,24 +25,60 @@ pipeline:
       (async () => {
         const strip = (html) => (html || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/<em>/g, '').replace(/<\/em>/g, '').trim();
         const d = ${{ data }};
-        return (d?.data || [])
-          .filter(item => item.type === 'search_result')
-          .map(item => {
-            const obj = item.object || {};
-            const q = obj.question || {};
-            return {
-              type: obj.type,
-              title: strip(obj.title || q.name || ''),
-              excerpt: strip(obj.excerpt || '').substring(0, 100),
-              author: obj.author?.name || '',
-              votes: obj.voteup_count || 0,
-              url: obj.type === 'answer'
-                ? 'https://www.zhihu.com/question/' + q.id + '/answer/' + obj.id
-                : obj.type === 'article'
-                ? 'https://zhuanlan.zhihu.com/p/' + obj.id
-                : 'https://www.zhihu.com/question/' + obj.id,
-            };
-          });
+        const toEntry = (obj) => {
+          if (!obj || !obj.type) return null;
+          const q = obj.question || {};
+          const title = strip(obj.title || q.title || q.name || obj.name || '');
+          if (!title) return null;
+          let url = '';
+          if (obj.type === 'answer' && q.id && obj.id) {
+            url = 'https://www.zhihu.com/question/' + q.id + '/answer/' + obj.id;
+          } else if (obj.type === 'article' && obj.id) {
+            url = 'https://zhuanlan.zhihu.com/p/' + obj.id;
+          } else if (obj.type === 'question' && obj.id) {
+            url = 'https://www.zhihu.com/question/' + obj.id;
+          } else if (typeof obj.url === 'string' && obj.url) {
+            url = obj.url
+              .replace('https://api.zhihu.com/articles/', 'https://zhuanlan.zhihu.com/p/')
+              .replace('https://api.zhihu.com/questions/', 'https://www.zhihu.com/question/');
+          }
+          return {
+            type: obj.type,
+            title,
+            excerpt: strip(obj.excerpt || obj.description || '').substring(0, 100),
+            author: obj.author?.name || '',
+            votes: obj.voteup_count || 0,
+            url,
+          };
+        };
+
+        const items = [];
+        const seen = new Set();
+        const pushEntry = (obj) => {
+          const entry = toEntry(obj);
+          if (!entry) return;
+          const key = entry.url || `${entry.type}:${entry.title}:${entry.author}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          items.push(entry);
+        };
+
+        for (const item of (d?.data || [])) {
+          if (item.type === 'search_result') {
+            pushEntry(item.object);
+            continue;
+          }
+          const contentItems = item.object?.content_items || [];
+          for (const sub of contentItems) {
+            pushEntry(sub?.object);
+          }
+          const subContents = item.object?.sub_contents || [];
+          for (const sub of subContents) {
+            pushEntry(sub?.object);
+          }
+        }
+
+        return items;
       })()
 
   - map:

@@ -16,7 +16,9 @@
 - **版本号重置起点**：工作区版本已改回 `0.0.1`，为重新整理 tag/release 序列做准备。
 - **知乎收藏夹 API 提速**：`zhihu collection_items_api` 改为使用 `bg_fetch` 直接在扩展后台发起请求并注入知乎 cookies，去掉 `navigate + 页面内 fetch`，避免知乎首页导航常见的 15 秒超时拖慢整条命令。
 - **只读接口批量提速**：`zhihu search` 改为 `bg_fetch` 后台取数，避免为借 cookie 先开页面导致的额外导航等待；`zhihu feed_api` 与 `weibo hot` 实测存在 payload / 权限边界，暂不切换。
+- **知乎搜索结果修正**：`zhihu search` 现在会同时解析标准 `search_result` 与顶部聚合卡片里的 `content_items/sub_contents`，避免 `--limit` 明明传了更大值却只返回少量结果。
 - **API 调试 dump 开关**：新增 `OPENCLI_API_DUMP` / `OPENCLI_API_DUMP_DIR`，开启后自动落盘 `fetch` 与 `bg_fetch` 的原始响应，便于排查接口边界、保留调试证据和批量识别可提速的 adapter。
 - **大响应与多端口连接修复**：浏览器 daemon 的 `/command` body limit 提升到 32MB，避免大 `bg_fetch` 结果触发 413；扩展与 popup 现在会主动扫描 `19825-19834`，自动选中可连的 daemon port 并保存，减轻多浏览器安装插件时的手动配置负担。
 - **端口切换修正**：CLI 的浏览器入口不再在未设置 `OPENCLI_DAEMON_PORT` 时死绑 `19825`；扩展 popup 保存端口后会立即通知 background 断开旧连接并重连到新 port，避免“设置了 19826 但未生效”的假切换。
 - **端口 pin 语义修正**：扩展区分自动探测端口与用户手工设置的端口；手工保存的 port 现在会被标记为 pinned，不再被自动扫描覆盖，避免多浏览器安装插件时两个 popup 都被重写到同一个端口。
+- **Adapter 维护分类起步**：新增 `scripts/classify-adapters.sh` 与首版分类文档/清单，先把全库 adapter 按 `ui_automation`、`api_bg_fetch`、`api_page_fetch`、`api_direct_fetch`、`api_write_or_mutation`、`page_navigation_dom` 等类别收口，作为后续回归与巡检的基础。
