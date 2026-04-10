@@ -10,6 +10,12 @@
 - **反馈命令**：新增 `opencli feedback <title>`，默认写入 `~/.opencli-rs/feedback.jsonl`，加 `--open` 可打开预填好的 GitHub issue 页面。
 - **帮助输出收敛**：`opencli --help` 默认只显示内置命令和 daemon/client 命令.
 
+0410-2
+- **CLI 结构重构**：`runner.rs` 拆分为三个模块：`cli_builder.rs`（Command 树构建）、`dispatch.rs`（内置命令分发）、`runner.rs`（薄路由层）。消除了原先 800 行大杂烩。
+- **`--help` 视觉分组**：通过 `display_order` 将子命令分成三组——TOOLS（本地无需 daemon）、AI FEATURES（需要浏览器）、DAEMON MANAGEMENT（需要 daemon）。`[daemon]` 前缀标注让用户一眼看出哪些命令依赖 daemon。去除了原先在 `after_help` 里手写的重复命令列表。
+- **`job` 子命令帮助补全**：`run_at`、`delay`、`interval`、`args` 全部补充格式说明和示例；`cancel` vs `delete` 语义差异通过 long_about 区分（cancel 保留历史，delete 永久删除）。
+- **`adapter search` 离线 fallback**：daemon 未运行时自动 fallback 到本地文件扫描（`discover_adapters` + 大小写不敏感子串匹配），结果尾部标注来源 `(daemon)` 或 `(local scan)`。
+
 0410
 - **版本来源收口**：`opencli update` 与发布安装链路不再依赖 GitHub API 的 `tag_name` 判定版本，统一改为读取 release 固定路径 `releases/latest/download/latest` 的纯文本版本文件。
 - **下载入口固定化**：自更新与 `install.sh` 统一走 `releases/latest/download/<asset>` 固定路径，避免版本判断与资产下载来自不同来源。

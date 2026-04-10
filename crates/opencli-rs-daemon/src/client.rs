@@ -77,32 +77,67 @@ enum ToolsSubcommand {
 
 #[derive(Subcommand)]
 enum JobSubcommand {
-    /// Add a new job
+    /// Schedule an adapter to run once or repeatedly
+    ///
+    /// Job life-cycle:  pending → running → done | failed | cancelled
+    ///
+    /// Examples:
+    ///   opencli job add zhihu/hot
+    ///   opencli job add zhihu/hot --delay 300           # run in 5 min
+    ///   opencli job add zhihu/hot --interval 3600       # run hourly
+    ///   opencli job add twitter/search --args '{"query":"rust"}'
     Add {
+        /// Adapter to schedule, in the form 'site/command', e.g. zhihu/hot
         adapter: String,
+
+        /// Absolute run time (ISO 8601 or 'now'). Mutually exclusive with --delay.
+        /// Examples: 2026-01-01T09:00:00, now
         #[arg(short, long)]
         run_at: Option<String>,
+
+        /// Run after N seconds from now. Mutually exclusive with --run-at.
         #[arg(short = 'd', long)]
         delay: Option<i64>,
+
+        /// Repeat every N seconds (omit for a one-shot job).
+        /// Example: --interval 3600 for hourly execution.
         #[arg(short, long)]
         interval: Option<i64>,
+
+        /// Adapter arguments as a JSON object.
+        /// Example: --args '{"query":"rust","limit":20}'
         #[arg(short, long)]
         args: Option<String>,
     },
-    /// List jobs
+    /// List jobs, optionally filtered by status
     List {
+        /// Filter by status: pending | running | done | failed | cancelled
         #[arg(short, long)]
         status: Option<String>,
+        /// Maximum number of jobs to return
         #[arg(short, long, default_value = "50")]
         limit: usize,
     },
-    /// Show job details
-    Show { id: String },
-    /// Cancel a job
-    Cancel { id: String },
-    /// Delete a job
-    Delete { id: String },
-    /// Trigger due jobs immediately
+    /// Show full details of a job by ID (a unique prefix is sufficient)
+    Show {
+        /// Job ID (a unique prefix is sufficient)
+        id: String,
+    },
+    /// Cancel a pending job — keeps the history record, stops execution
+    ///
+    /// Use 'delete' if you want to remove the record entirely.
+    Cancel {
+        /// Job ID (a unique prefix is sufficient)
+        id: String,
+    },
+    /// Delete a job record permanently from the database
+    ///
+    /// Use 'cancel' if you want to stop execution but keep the history.
+    Delete {
+        /// Job ID (a unique prefix is sufficient)
+        id: String,
+    },
+    /// Force-trigger all due jobs immediately (useful for testing)
     Run,
 }
 
@@ -314,43 +349,88 @@ fn cmd_adapter_list(addr: &str, include_disabled: bool, include_hidden: bool) ->
 }
 
 fn cmd_adapter_search(addr: &str, query: &str) -> Result<()> {
-    let result = socket_request(
-        addr,
-        "adapter.search",
-        serde_json::json!({ "query": query }),
-    )?;
-    let adapters = result
-        .get("adapters")
-        .and_then(|v| v.as_array())
-        .map_or(&[] as &[_], |v| v.as_slice());
-    let count = result.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
-    if adapters.is_empty() {
+    // Try daemon first; fall back to local scan if it isn't running.
+    match socket_request(addr, "adapter.search", serde_json::json!({ "query": query })) {
+        Ok(result) => {
+            let adapters = result
+                .get("adapters")
+                .and_then(|v| v.as_array())
+                .map_or(&[] as &[_], |v| v.as_slice());
+            let count = result.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
+            if adapters.is_empty() {
+                println!("No adapters found matching '{}'.", query);
+                return Ok(());
+            }
+            println!("{:30} {:12} {}", "Name", "Browser", "Description");
+            println!("{}", "-".repeat(70));
+            for entry in adapters {
+                let name = entry
+                    .get("full_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let browser = entry
+                    .get("browser")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let desc = entry.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                println!(
+                    "{:30} {:12} {}",
+                    name,
+                    if browser { "yes" } else { "no" },
+                    desc.chars().take(35).collect::<String>()
+                );
+            }
+            println!("\n{} results for '{}' (daemon)", count, query);
+        }
+        Err(e) if e.to_string().contains("Failed to connect") => {
+            // Daemon is not running — fall back to local file-system scan
+            eprintln!("(daemon not running, searching local adapter files)");
+            cmd_adapter_search_local(query)?;
+        }
+        Err(e) => return Err(e),
+    }
+    Ok(())
+}
+
+/// Local fallback: scan the adapter registry from disk and do a simple
+/// case-insensitive substring match against name, site, and description.
+fn cmd_adapter_search_local(query: &str) -> Result<()> {
+    use opencli_rs_core::Registry;
+    use opencli_rs_discovery::discover_adapters;
+
+    let mut registry = Registry::new();
+    let _ = discover_adapters(&mut registry);
+
+    let q = query.to_lowercase();
+    let mut hits = Vec::new();
+    for site in registry.list_sites() {
+        for cmd in registry.list_commands(site) {
+            let haystack =
+                format!("{} {} {}", cmd.full_name(), site, cmd.description).to_lowercase();
+            if haystack.contains(&q) {
+                hits.push(cmd.clone());
+            }
+        }
+    }
+
+    if hits.is_empty() {
         println!("No adapters found matching '{}'.", query);
         return Ok(());
     }
+
     println!("{:30} {:12} {}", "Name", "Browser", "Description");
     println!("{}", "-".repeat(70));
-    for entry in adapters {
-        let name = entry
-            .get("full_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
-        let browser = entry
-            .get("browser")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let desc = entry
-            .get("description")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+    for cmd in &hits {
+        let browser = cmd.needs_browser();
+        let desc = cmd.description.as_str();
         println!(
             "{:30} {:12} {}",
-            name,
+            cmd.full_name(),
             if browser { "yes" } else { "no" },
             desc.chars().take(35).collect::<String>()
         );
     }
-    println!("\n{} results for '{}'", count, query);
+    println!("\n{} results for '{}' (local scan)", hits.len(), query);
     Ok(())
 }
 
