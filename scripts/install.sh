@@ -1,12 +1,12 @@
 #!/bin/sh
 # opencli-rs installer — detects OS/Arch and downloads the right binary
-# Usage: curl -fsSL https://raw.githubusercontent.com/nashsu/opencli-rs/main/scripts/install.sh | sh
+# Usage: curl -fsSL https://github.com/forechoandlook/opencli_rs_plus/releases/latest/download/install.sh | sh
 
 set -e
 
-REPO="nashsu/opencli-rs"
+REPO="forechoandlook/opencli_rs_plus"
 INSTALL_DIR="~/.local/bin"
-BINARY_NAME="opencli-rs"
+BINARY_NAME="opencli"
 
 # Colors
 RED='\033[0;31m'
@@ -39,7 +39,7 @@ TARGET="${ARCH}-${OS}"
 
 # Get latest version
 info "Detecting latest version..."
-VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+VERSION=$(curl -fsSL "https://github.com/${REPO}/releases/latest/download/latest")
 if [ -z "$VERSION" ]; then
     error "Could not detect latest version. Check https://github.com/${REPO}/releases"
 fi
@@ -54,7 +54,7 @@ else
     ARCHIVE="${BINARY_NAME}-${TARGET}.tar.gz"
 fi
 
-URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE}"
+URL="https://github.com/${REPO}/releases/latest/download/${ARCHIVE}"
 
 # Download
 info "Downloading ${ARCHIVE}..."
@@ -62,7 +62,7 @@ TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 if ! curl -fsSL "$URL" -o "${TMPDIR}/${ARCHIVE}"; then
-    error "Download failed. Binary may not exist for ${TARGET}.\nCheck: https://github.com/${REPO}/releases/tag/${VERSION}"
+    error "Download failed. Binary may not exist for ${TARGET}.\nCheck: https://github.com/${REPO}/releases/latest"
 fi
 
 # Extract

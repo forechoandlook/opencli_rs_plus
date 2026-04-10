@@ -358,8 +358,13 @@ jobs:
           sed -i "s|__BASE_URL__|${BASE_URL}|g" install.sh
           chmod +x install.sh
 
-      - name: Upload install.sh to release
+      - name: Generate latest version file
+        run: |
+          printf '%s\n' "${GITHUB_REF_NAME#v}" > latest
+
+      - name: Upload install metadata to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ github.ref_name }}" install.sh --clobber
+          gh release upload "${{ github.ref_name }}" latest --clobber

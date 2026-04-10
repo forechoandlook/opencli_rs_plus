@@ -1,25 +1,13 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use semver::Version;
-use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const REPO: &str = "forechoandlook/opencli_rs_plus";
-const RELEASES_API: &str =
-    "https://api.github.com/repos/forechoandlook/opencli_rs_plus/releases/latest";
-
-#[derive(Debug, Deserialize)]
-struct ReleaseAsset {
-    name: String,
-    browser_download_url: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ReleaseInfo {
-    tag_name: String,
-    html_url: String,
-    assets: Vec<ReleaseAsset>,
-}
+const LATEST_VERSION_URL: &str =
+    "https://github.com/forechoandlook/opencli_rs_plus/releases/latest/download/latest";
+const RELEASES_LATEST_URL: &str =
+    "https://github.com/forechoandlook/opencli_rs_plus/releases/latest";
 
 fn parse_version(raw: &str) -> Result<Version> {
     Version::parse(raw.trim_start_matches('v'))
@@ -45,20 +33,28 @@ async fn fetch_latest_release() -> Result<(ReleaseInfo, Version)> {
         .build()
         .context("failed to build HTTP client")?;
 
-    let response = client
-        .get(RELEASES_API)
+    let latest_raw = client
+        .get(LATEST_VERSION_URL)
         .send()
         .await
-        .context("failed to query latest release")?
+        .context("failed to query latest version")?
         .error_for_status()
-        .context("latest release query failed")?;
-
-    let release: ReleaseInfo = response
-        .json()
+        .context("latest version query failed")?
+        .text()
         .await
-        .context("failed to parse latest release response")?;
-    let latest = parse_version(&release.tag_name)?;
-    Ok((release, latest))
+        .context("failed to read latest version response")?;
+
+    let latest = parse_version(latest_raw.trim())?;
+    Ok((
+        ReleaseInfo {
+            version: latest.clone(),
+        },
+        latest,
+    ))
+}
+
+struct ReleaseInfo {
+    version: Version,
 }
 
 fn temp_download_path(asset_name: &str) -> PathBuf {
@@ -112,27 +108,23 @@ pub async fn run_update(check_only: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!("Update available: {}", release.html_url);
+    println!("Update available: {}", RELEASES_LATEST_URL);
     if check_only {
         return Ok(());
     }
 
     let asset_name = asset_name_for_current_platform()?;
-    let asset = release
-        .assets
-        .iter()
-        .find(|asset| asset.name == asset_name)
-        .ok_or_else(|| anyhow!("release asset not found for current platform: {asset_name}"))?;
-
     let current_exe = std::env::current_exe().context("failed to locate current executable")?;
     let download_path = temp_download_path(asset_name);
+    let asset_download_url =
+        format!("https://github.com/{REPO}/releases/latest/download/{asset_name}");
 
     let client = reqwest::Client::builder()
         .user_agent(format!("opencli/{}", env!("CARGO_PKG_VERSION")))
         .build()
         .context("failed to build HTTP client")?;
     let bytes = client
-        .get(&asset.browser_download_url)
+        .get(&asset_download_url)
         .send()
         .await
         .with_context(|| format!("failed to download {asset_name}"))?
@@ -147,12 +139,9 @@ pub async fn run_update(check_only: bool) -> Result<()> {
     make_executable(&download_path)?;
     replace_current_exe(&download_path, &current_exe)?;
 
-    println!("Updated opencli to {}.", latest);
+    println!("Updated opencli to {}.", release.version);
     println!("Binary path: {}", current_exe.display());
     println!("Restart any running opencli commands to use the new version.");
-    println!(
-        "Source: https://github.com/{REPO}/releases/tag/{}",
-        release.tag_name
-    );
+    println!("Source: {}", RELEASES_LATEST_URL);
     Ok(())
 }

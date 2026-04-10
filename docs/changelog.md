@@ -9,3 +9,8 @@
 - **原生命令扩展**：新增 `opencli update` / `opencli update --check`，支持检查 GitHub Release 并原地更新当前二进制。
 - **反馈命令**：新增 `opencli feedback <title>`，默认写入 `~/.opencli-rs/feedback.jsonl`，加 `--open` 可打开预填好的 GitHub issue 页面。
 - **帮助输出收敛**：`opencli --help` 默认只显示内置命令和 daemon/client 命令.
+
+0410
+- **版本来源收口**：`opencli update` 与发布安装链路不再依赖 GitHub API 的 `tag_name` 判定版本，统一改为读取 release 固定路径 `releases/latest/download/latest` 的纯文本版本文件。
+- **下载入口固定化**：自更新与 `install.sh` 统一走 `releases/latest/download/<asset>` 固定路径，避免版本判断与资产下载来自不同来源。
+- **版本号重置起点**：工作区版本已改回 `0.0.1`，为重新整理 tag/release 序列做准备。
