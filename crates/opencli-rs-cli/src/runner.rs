@@ -16,13 +16,11 @@ use crate::commands::{completion, doctor, feedback, update};
 use crate::execution::execute_command;
 
 fn browser_bridge_from_env() -> opencli_rs_browser::BrowserBridge {
-    match std::env::var("OPENCLI_DAEMON_PORT")
+    let port = std::env::var("OPENCLI_DAEMON_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
-    {
-        Some(port) => opencli_rs_browser::BrowserBridge::new(port),
-        None => opencli_rs_browser::BrowserBridge::default_port(),
-    }
+        .unwrap_or(19825);
+    opencli_rs_browser::BrowserBridge::new(port)
 }
 
 fn daemon_help_commands() -> Vec<Command> {

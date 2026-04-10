@@ -5,11 +5,12 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Get daemon port from env when explicitly pinned.
-fn daemon_port() -> Option<u16> {
+/// Get daemon port from env or fall back to the stable default 19825.
+fn daemon_port() -> u16 {
     std::env::var("OPENCLI_DAEMON_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
+        .unwrap_or(19825)
 }
 
 /// Get command timeout from env or command config or default (60s)
@@ -73,10 +74,7 @@ async fn execute_command_inner(
             Arc::new(CdpPage::connect(&ws_url).await?)
         } else {
             // Standard browser session via Chrome extension
-            let mut bridge = match daemon_port() {
-                Some(port) => BrowserBridge::new(port),
-                None => BrowserBridge::default_port(),
-            };
+            let mut bridge = BrowserBridge::new(daemon_port());
             bridge.connect().await?
         };
 

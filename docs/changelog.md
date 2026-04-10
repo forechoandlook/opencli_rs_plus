@@ -22,3 +22,5 @@
 - **端口切换修正**：CLI 的浏览器入口不再在未设置 `OPENCLI_DAEMON_PORT` 时死绑 `19825`；扩展 popup 保存端口后会立即通知 background 断开旧连接并重连到新 port，避免“设置了 19826 但未生效”的假切换。
 - **端口 pin 语义修正**：扩展区分自动探测端口与用户手工设置的端口；手工保存的 port 现在会被标记为 pinned，不再被自动扫描覆盖，避免多浏览器安装插件时两个 popup 都被重写到同一个端口。
 - **Adapter 维护分类起步**：新增 `scripts/classify-adapters.sh` 与首版分类文档/清单，先把全库 adapter 按 `ui_automation`、`api_bg_fetch`、`api_page_fetch`、`api_direct_fetch`、`api_write_or_mutation`、`page_navigation_dom` 等类别收口，作为后续回归与巡检的基础。
+- **首版本地回归 smoke**：新增 `docs/generated/regression-p1.tsv` 与 `scripts/regression-smoke.sh`，先覆盖高价值 API 类 adapter，输出 TSV/Markdown 回归结果并支持按 case 打开 API dump。
+- **浏览器端口语义收紧**：CLI 浏览器桥接默认固定使用 `19825`，只有显式设置 `OPENCLI_DAEMON_PORT` 时才切到其他端口，不再在未指定时自动漂移到 `19826+`。

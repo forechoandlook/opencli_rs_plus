@@ -38,6 +38,8 @@
 
 - 分类脚本: [scripts/classify-adapters.sh](/Users/zzwy/tmp/opencli-rs/scripts/classify-adapters.sh)
 - 首版分类清单: [docs/generated/adapter-classification.tsv](/Users/zzwy/tmp/opencli-rs/docs/generated/adapter-classification.tsv)
+- P1 回归清单: [docs/generated/regression-p1.tsv](/Users/zzwy/tmp/opencli-rs/docs/generated/regression-p1.tsv)
+- 本地 smoke 回归脚本: [scripts/regression-smoke.sh](/Users/zzwy/tmp/opencli-rs/scripts/regression-smoke.sh)
 
 ## 推荐回归顺序
 
@@ -52,3 +54,14 @@
 - 前三类最容易积累 dump 样本，也最容易做结构回归
 - `page_navigation_dom` 次之
 - `ui_automation` 和写操作适合更谨慎、更小范围地回归
+
+## 触发建议
+
+本地显式触发:
+
+```bash
+scripts/regression-smoke.sh
+scripts/regression-smoke.sh docs/generated/regression-p1.tsv
+```
+
+回归结果会输出到 `docs/generated/regression-smoke-*.tsv` 和 `docs/generated/regression-smoke-*.md`

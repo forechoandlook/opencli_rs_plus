@@ -1,0 +1,7 @@
+adapter	args	expect_min_rows	expect_fields	timeout_secs	enable_api_dump
+zhihu hot	--limit 5	5	title,url	30	1
+zhihu search	codex --limit 5	5	title,type,author	30	1
+zhihu collection_items_api	962229997 --limit 5	5	title,type,author	30	1
+arxiv search	quantization --limit 5	5	title,url	30	0
+apple-podcasts search	ai --limit 5	5	title,url	30	0
+bbc news	--limit 5	5	title,url	30	0
