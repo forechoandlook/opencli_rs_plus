@@ -22,6 +22,13 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let connectedPort: number | null = null;
 
+type ConnectionState = {
+  configuredPort: number;
+  pinned: boolean;
+  connectedPort: number | null;
+  connected: boolean;
+};
+
 // ─── Console log forwarding ──────────────────────────────────────────
 // Hook console.log/warn/error to forward logs to daemon via WebSocket.
 
@@ -43,14 +50,24 @@ console.error = (...args: unknown[]) => { _origError(...args); forwardLog('error
 
 // ─── WebSocket connection ────────────────────────────────────────────
 
-async function connect(): Promise<void> {
+async function getConnectionState(): Promise<ConnectionState> {
+  const { port: savedPort, pinned } = await getStoredPortConfig();
+  return {
+    configuredPort: savedPort ?? DAEMON_PORT,
+    pinned,
+    connectedPort,
+    connected: ws?.readyState === WebSocket.OPEN && connectedPort !== null,
+  };
+}
+
+async function connect(): Promise<ConnectionState> {
   // Respect user-pinned ports; only auto-detect when the port is not pinned.
   const { port: savedPort, pinned } = await getStoredPortConfig();
   const port = pinned
     ? (savedPort ?? DAEMON_PORT)
     : ((await detectDaemonPort(savedPort)) ?? savedPort ?? DAEMON_PORT);
   if ((ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) && connectedPort === port) {
-    return;
+    return await getConnectionState();
   }
   if (ws && connectedPort !== null && connectedPort !== port) {
     try { ws.close(); } catch { /* ignore */ }
@@ -64,7 +81,7 @@ async function connect(): Promise<void> {
     ws = new WebSocket(wsUrl);
   } catch {
     scheduleReconnect();
-    return;
+    return await getConnectionState();
   }
 
   ws.onopen = () => {
@@ -98,6 +115,27 @@ async function connect(): Promise<void> {
     connectedPort = null;
     ws?.close();
   };
+
+  const connected = await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), 1200);
+    ws!.addEventListener('open', () => {
+      clearTimeout(timer);
+      resolve(true);
+    }, { once: true });
+    ws!.addEventListener('error', () => {
+      clearTimeout(timer);
+      resolve(false);
+    }, { once: true });
+    ws!.addEventListener('close', () => {
+      clearTimeout(timer);
+      resolve(false);
+    }, { once: true });
+  });
+
+  if (!connected) {
+    connectedPort = null;
+  }
+  return await getConnectionState();
 }
 
 function scheduleReconnect(): void {
@@ -630,10 +668,16 @@ async function handleSessions(cmd: Command): Promise<Result> {
 
 chrome.runtime.onMessage.addListener((message: { type: string }, _sender, sendResponse) => {
   if (message.type === 'getPort') {
-    void getStoredPort().then((port) => {
+    void getStoredPortConfig().then(({ port }) => {
       sendResponse({ port: port ?? DAEMON_PORT });
     });
     return true; // async response
+  }
+  if (message.type === 'getConnectionState') {
+    void getConnectionState().then((state) => {
+      sendResponse(state);
+    });
+    return true;
   }
   if (message.type === 'setPort') {
     const port = (message as { type: string; port: number }).port;
@@ -648,9 +692,9 @@ chrome.runtime.onMessage.addListener((message: { type: string }, _sender, sendRe
         ws = null;
         connectedPort = null;
       }
-      await connect();
+      const state = await connect();
+      sendResponse(state);
     });
-    sendResponse({ ok: true });
     return true;
   }
   return false;
