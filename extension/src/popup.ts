@@ -4,7 +4,7 @@
  * Lets the user set the daemon port and shows connection status.
  */
 
-import { checkDaemonConnection, detectDaemonPort, getStoredPortConfig, storePort, DAEMON_PORT } from './protocol';
+import { checkDaemonConnection, getStoredPortConfig, storePort, DAEMON_PORT } from './protocol';
 
 function setStatus(el: HTMLElement, text: string, color: string): void {
   el.textContent = text;
@@ -24,30 +24,15 @@ async function init(): Promise<void> {
     portInput.value = String(savedPort);
   }
 
-  // Only auto-detect when the user has not manually pinned a port.
+  // Popup should reflect the current stored choice quickly instead of blocking on
+  // multi-port auto-detection. Background can keep its own detection logic.
   setStatus(statusEl, 'Checking…', '#888');
   const currentPort = savedPort ?? DAEMON_PORT;
-  if (pinned) {
-    const ok = await checkDaemonConnection(currentPort);
-    if (ok) {
-      setStatus(statusEl, 'Connected', '#0d0');
-    } else {
-      setStatus(statusEl, `Pinned (${currentPort}) not connected`, '#e55');
-    }
+  const ok = await checkDaemonConnection(currentPort, 700);
+  if (ok) {
+    setStatus(statusEl, pinned ? `Pinned (${currentPort}) connected` : `Auto (${currentPort}) connected`, '#0d0');
   } else {
-    const detectedPort = await detectDaemonPort(savedPort);
-    if (detectedPort !== null) {
-      portInput.value = String(detectedPort);
-      if (detectedPort !== savedPort) {
-        await storePort(detectedPort, false);
-        try {
-          await chrome.runtime.sendMessage({ type: 'setPort', port: detectedPort });
-        } catch { /* ignore */ }
-      }
-      setStatus(statusEl, 'Connected', '#0d0');
-    } else {
-      setStatus(statusEl, 'Not connected', '#e55');
-    }
+    setStatus(statusEl, pinned ? `Pinned (${currentPort}) not connected` : `Auto (${currentPort}) not connected`, '#e55');
   }
 
   // Save button
