@@ -61,6 +61,12 @@ export const DAEMON_PORT_RANGE_END = 19834;
 
 /** Storage key for the configured daemon port */
 export const STORAGE_KEY_PORT = 'opencli_daemon_port';
+export const STORAGE_KEY_PORT_PINNED = 'opencli_daemon_port_pinned';
+
+export type StoredPortConfig = {
+  port: number | null;
+  pinned: boolean;
+};
 
 /** Get the configured daemon port from chrome.storage.local */
 export async function getStoredPort(): Promise<number | null> {
@@ -68,9 +74,21 @@ export async function getStoredPort(): Promise<number | null> {
   return (result[STORAGE_KEY_PORT] as number) ?? null;
 }
 
+/** Get the configured daemon port and whether it was manually pinned by the user. */
+export async function getStoredPortConfig(): Promise<StoredPortConfig> {
+  const result = await chrome.storage.local.get([STORAGE_KEY_PORT, STORAGE_KEY_PORT_PINNED]);
+  return {
+    port: (result[STORAGE_KEY_PORT] as number) ?? null,
+    pinned: Boolean(result[STORAGE_KEY_PORT_PINNED]),
+  };
+}
+
 /** Save the daemon port to chrome.storage.local */
-export async function storePort(port: number): Promise<void> {
-  await chrome.storage.local.set({ [STORAGE_KEY_PORT]: port });
+export async function storePort(port: number, pinned = false): Promise<void> {
+  await chrome.storage.local.set({
+    [STORAGE_KEY_PORT]: port,
+    [STORAGE_KEY_PORT_PINNED]: pinned,
+  });
 }
 
 /** Build WebSocket URL for a specific port */

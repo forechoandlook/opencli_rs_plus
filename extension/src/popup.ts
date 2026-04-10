@@ -4,7 +4,7 @@
  * Lets the user set the daemon port and shows connection status.
  */
 
-import { checkDaemonConnection, detectDaemonPort, getStoredPort, storePort, DAEMON_PORT } from './protocol';
+import { checkDaemonConnection, detectDaemonPort, getStoredPortConfig, storePort, DAEMON_PORT } from './protocol';
 
 function setStatus(el: HTMLElement, text: string, color: string): void {
   el.textContent = text;
@@ -19,25 +19,35 @@ async function init(): Promise<void> {
   if (!portInput || !statusEl || !saveBtn) return;
 
   // Load saved port
-  const savedPort = await getStoredPort();
+  const { port: savedPort, pinned } = await getStoredPortConfig();
   if (savedPort !== null) {
     portInput.value = String(savedPort);
   }
 
-  // Prefer an actively reachable daemon port over a stale saved/default port.
+  // Only auto-detect when the user has not manually pinned a port.
   setStatus(statusEl, 'Checking…', '#888');
-  const detectedPort = await detectDaemonPort(savedPort);
-  if (detectedPort !== null) {
-    portInput.value = String(detectedPort);
-    if (detectedPort !== savedPort) {
-      await storePort(detectedPort);
-      try {
-        await chrome.runtime.sendMessage({ type: 'setPort', port: detectedPort });
-      } catch { /* ignore */ }
+  const currentPort = savedPort ?? DAEMON_PORT;
+  if (pinned) {
+    const ok = await checkDaemonConnection(currentPort);
+    if (ok) {
+      setStatus(statusEl, 'Connected', '#0d0');
+    } else {
+      setStatus(statusEl, `Pinned (${currentPort}) not connected`, '#e55');
     }
-    setStatus(statusEl, 'Connected', '#0d0');
   } else {
-    setStatus(statusEl, 'Not connected', '#e55');
+    const detectedPort = await detectDaemonPort(savedPort);
+    if (detectedPort !== null) {
+      portInput.value = String(detectedPort);
+      if (detectedPort !== savedPort) {
+        await storePort(detectedPort, false);
+        try {
+          await chrome.runtime.sendMessage({ type: 'setPort', port: detectedPort });
+        } catch { /* ignore */ }
+      }
+      setStatus(statusEl, 'Connected', '#0d0');
+    } else {
+      setStatus(statusEl, 'Not connected', '#e55');
+    }
   }
 
   // Save button
@@ -48,7 +58,7 @@ async function init(): Promise<void> {
       return;
     }
 
-    await storePort(port);
+    await storePort(port, true);
     try {
       await chrome.runtime.sendMessage({ type: 'setPort', port });
     } catch { /* ignore */ }

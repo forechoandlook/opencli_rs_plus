@@ -10,7 +10,7 @@ import {
   daemonWsUrl,
   DAEMON_PORT,
   detectDaemonPort,
-  getStoredPort,
+  getStoredPortConfig,
   storePort,
   WS_RECONNECT_BASE_DELAY,
   WS_RECONNECT_MAX_DELAY,
@@ -44,9 +44,11 @@ console.error = (...args: unknown[]) => { _origError(...args); forwardLog('error
 // ─── WebSocket connection ────────────────────────────────────────────
 
 async function connect(): Promise<void> {
-  // Load saved port, then actively scan the daemon port range when needed.
-  const savedPort = await getStoredPort();
-  const port = (await detectDaemonPort(savedPort)) ?? savedPort ?? DAEMON_PORT;
+  // Respect user-pinned ports; only auto-detect when the port is not pinned.
+  const { port: savedPort, pinned } = await getStoredPortConfig();
+  const port = pinned
+    ? (savedPort ?? DAEMON_PORT)
+    : ((await detectDaemonPort(savedPort)) ?? savedPort ?? DAEMON_PORT);
   if ((ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) && connectedPort === port) {
     return;
   }
@@ -54,8 +56,8 @@ async function connect(): Promise<void> {
     try { ws.close(); } catch { /* ignore */ }
     ws = null;
   }
-  if (port !== savedPort) {
-    await storePort(port);
+  if (!pinned && port !== savedPort) {
+    await storePort(port, false);
   }
   const wsUrl = daemonWsUrl(port);
   try {
@@ -635,7 +637,7 @@ chrome.runtime.onMessage.addListener((message: { type: string }, _sender, sendRe
   }
   if (message.type === 'setPort') {
     const port = (message as { type: string; port: number }).port;
-    void storePort(port).then(async () => {
+    void storePort(port, true).then(async () => {
       reconnectAttempts = 0;
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
