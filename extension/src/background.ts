@@ -20,6 +20,7 @@ import * as executor from './cdp';
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
+let connectedPort: number | null = null;
 
 // ─── Console log forwarding ──────────────────────────────────────────
 // Hook console.log/warn/error to forward logs to daemon via WebSocket.
@@ -43,11 +44,16 @@ console.error = (...args: unknown[]) => { _origError(...args); forwardLog('error
 // ─── WebSocket connection ────────────────────────────────────────────
 
 async function connect(): Promise<void> {
-  if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
-
   // Load saved port, then actively scan the daemon port range when needed.
   const savedPort = await getStoredPort();
   const port = (await detectDaemonPort(savedPort)) ?? savedPort ?? DAEMON_PORT;
+  if ((ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) && connectedPort === port) {
+    return;
+  }
+  if (ws && connectedPort !== null && connectedPort !== port) {
+    try { ws.close(); } catch { /* ignore */ }
+    ws = null;
+  }
   if (port !== savedPort) {
     await storePort(port);
   }
@@ -60,6 +66,7 @@ async function connect(): Promise<void> {
   }
 
   ws.onopen = () => {
+    connectedPort = port;
     console.log(`[opencli] Connected to daemon on port ${port}`);
     reconnectAttempts = 0; // Reset on successful connection
     if (reconnectTimer) {
@@ -79,12 +86,14 @@ async function connect(): Promise<void> {
   };
 
   ws.onclose = () => {
+    connectedPort = null;
     console.log('[opencli] Disconnected from daemon');
     ws = null;
     scheduleReconnect();
   };
 
   ws.onerror = () => {
+    connectedPort = null;
     ws?.close();
   };
 }
@@ -626,8 +635,21 @@ chrome.runtime.onMessage.addListener((message: { type: string }, _sender, sendRe
   }
   if (message.type === 'setPort') {
     const port = (message as { type: string; port: number }).port;
-    void storePort(port);
+    void storePort(port).then(async () => {
+      reconnectAttempts = 0;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (ws) {
+        try { ws.close(); } catch { /* ignore */ }
+        ws = null;
+        connectedPort = null;
+      }
+      await connect();
+    });
     sendResponse({ ok: true });
+    return true;
   }
   return false;
 });

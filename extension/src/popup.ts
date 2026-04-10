@@ -31,6 +31,9 @@ async function init(): Promise<void> {
     portInput.value = String(detectedPort);
     if (detectedPort !== savedPort) {
       await storePort(detectedPort);
+      try {
+        await chrome.runtime.sendMessage({ type: 'setPort', port: detectedPort });
+      } catch { /* ignore */ }
     }
     setStatus(statusEl, 'Connected', '#0d0');
   } else {
@@ -46,6 +49,9 @@ async function init(): Promise<void> {
     }
 
     await storePort(port);
+    try {
+      await chrome.runtime.sendMessage({ type: 'setPort', port });
+    } catch { /* ignore */ }
     setStatus(statusEl, 'Checking…', '#888');
     const ok = await checkDaemonConnection(port);
     if (ok) {

@@ -15,6 +15,16 @@ use crate::args::coerce_and_validate_args;
 use crate::commands::{completion, doctor, feedback, update};
 use crate::execution::execute_command;
 
+fn browser_bridge_from_env() -> opencli_rs_browser::BrowserBridge {
+    match std::env::var("OPENCLI_DAEMON_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+    {
+        Some(port) => opencli_rs_browser::BrowserBridge::new(port),
+        None => opencli_rs_browser::BrowserBridge::default_port(),
+    }
+}
+
 fn daemon_help_commands() -> Vec<Command> {
     vec![
         Command::new("daemon")
@@ -623,12 +633,7 @@ pub async fn run() {
                     .get_one::<String>("click")
                     .map(|s| s.split(',').map(|l| l.trim().to_string()).collect())
                     .unwrap_or_default();
-                let mut bridge = opencli_rs_browser::BrowserBridge::new(
-                    std::env::var("OPENCLI_DAEMON_PORT")
-                        .ok()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(19825),
-                );
+                let mut bridge = browser_bridge_from_env();
                 match bridge.connect().await {
                     Ok(page) => {
                         let options = opencli_rs_ai::ExploreOptions {
@@ -663,12 +668,7 @@ pub async fn run() {
             }
             "cascade" => {
                 let url = site_matches.get_one::<String>("url").unwrap();
-                let mut bridge = opencli_rs_browser::BrowserBridge::new(
-                    std::env::var("OPENCLI_DAEMON_PORT")
-                        .ok()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(19825),
-                );
+                let mut bridge = browser_bridge_from_env();
                 match bridge.connect().await {
                     Ok(page) => {
                         let result = opencli_rs_ai::cascade(page.as_ref(), url).await;
@@ -702,12 +702,7 @@ pub async fn run() {
             "generate" => {
                 let url = site_matches.get_one::<String>("url").unwrap();
                 let goal = site_matches.get_one::<String>("goal").cloned();
-                let mut bridge = opencli_rs_browser::BrowserBridge::new(
-                    std::env::var("OPENCLI_DAEMON_PORT")
-                        .ok()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(19825),
-                );
+                let mut bridge = browser_bridge_from_env();
                 match bridge.connect().await {
                     Ok(page) => {
                         let gen_result = opencli_rs_ai::generate(
