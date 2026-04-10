@@ -86,6 +86,41 @@ fn dump_value_to_file(value: &Value, path: &Path) {
     }
 }
 
+fn api_dump_enabled() -> bool {
+    matches!(
+        std::env::var("OPENCLI_API_DUMP"),
+        Ok(v) if matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON")
+    )
+}
+
+fn sanitize_dump_part(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    while out.contains("__") {
+        out = out.replace("__", "_");
+    }
+    out.trim_matches('_').chars().take(80).collect()
+}
+
+fn dump_api_response(step: &str, url: &str, value: &Value) {
+    if !api_dump_enabled() {
+        return;
+    }
+    let base_dir = std::env::var("OPENCLI_API_DUMP_DIR")
+        .unwrap_or_else(|_| "./data/api-dumps".to_string());
+    let step_part = sanitize_dump_part(step);
+    let url_part = sanitize_dump_part(url);
+    let path = format!("{base_dir}/{step_part}_{url_part}_{{ts_ms}}.json");
+    let resolved_path = resolve_dump_path(&path, 0);
+    dump_value_to_file(value, Path::new(&resolved_path));
+}
+
 // ---------------------------------------------------------------------------
 // NavigateStep
 // ---------------------------------------------------------------------------
@@ -752,6 +787,8 @@ impl StepHandler for BgFetchStep {
                 body.as_deref(),
             )
             .await?;
+
+        dump_api_response("bg_fetch", &url, &result);
 
         // Return { status, body } — let pipeline select the body
         Ok(result)

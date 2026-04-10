@@ -1,5 +1,8 @@
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
@@ -8,6 +11,68 @@ use serde_json::Value;
 
 use crate::step_registry::{StepHandler, StepRegistry};
 use crate::template::{render_template, render_template_str, TemplateContext};
+
+fn resolve_dump_path(path_tpl: &str) -> String {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    path_tpl
+        .replace("{ts}", &now.as_secs().to_string())
+        .replace("{ts_ms}", &now.as_millis().to_string())
+}
+
+fn api_dump_enabled() -> bool {
+    matches!(
+        std::env::var("OPENCLI_API_DUMP"),
+        Ok(v) if matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON")
+    )
+}
+
+fn sanitize_dump_part(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    while out.contains("__") {
+        out = out.replace("__", "_");
+    }
+    out.trim_matches('_').chars().take(80).collect()
+}
+
+fn dump_value_to_file(value: &Value, path: &Path) {
+    let content = match value {
+        Value::Object(_) | Value::Array(_) => {
+            serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_string())
+        }
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => String::new(),
+    };
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            let _ = fs::create_dir_all(parent);
+        }
+    }
+    let _ = fs::write(path, &content);
+}
+
+fn dump_api_response(step: &str, url: &str, value: &Value) {
+    if !api_dump_enabled() {
+        return;
+    }
+    let base_dir = std::env::var("OPENCLI_API_DUMP_DIR")
+        .unwrap_or_else(|_| "./data/api-dumps".to_string());
+    let step_part = sanitize_dump_part(step);
+    let url_part = sanitize_dump_part(url);
+    let path = format!("{base_dir}/{step_part}_{url_part}_{{ts_ms}}.json");
+    let resolved_path = resolve_dump_path(&path);
+    dump_value_to_file(value, Path::new(&resolved_path));
+}
 
 /// Helper to create an HTTP CliError.
 fn http_error(msg: impl Into<String>) -> CliError {
@@ -241,6 +306,7 @@ impl StepHandler for FetchStep {
                                 rendered_body.as_ref(),
                             )
                             .await
+                            .inspect(|value| dump_api_response("fetch", &url_str, value))
                         }
                     })
                     .buffer_unordered(10)
@@ -280,14 +346,16 @@ impl StepHandler for FetchStep {
                 None => None,
             };
 
-            do_request_with_client(
+            let result = do_request_with_client(
                 &self.client,
                 &url_str,
                 &method,
                 rendered_headers.as_ref(),
                 rendered_body.as_ref(),
             )
-            .await
+            .await?;
+            dump_api_response("fetch", &url_str, &result);
+            Ok(result)
         }
     }
 }

@@ -16,3 +16,4 @@
 - **版本号重置起点**：工作区版本已改回 `0.0.1`，为重新整理 tag/release 序列做准备。
 - **知乎收藏夹 API 提速**：`zhihu collection_items_api` 改为使用 `bg_fetch` 直接在扩展后台发起请求并注入知乎 cookies，去掉 `navigate + 页面内 fetch`，避免知乎首页导航常见的 15 秒超时拖慢整条命令。
 - **只读接口批量提速**：`zhihu search` 改为 `bg_fetch` 后台取数，避免为借 cookie 先开页面导致的额外导航等待；`zhihu feed_api` 与 `weibo hot` 实测存在 payload / 权限边界，暂不切换。
+- **API 调试 dump 开关**：新增 `OPENCLI_API_DUMP` / `OPENCLI_API_DUMP_DIR`，开启后自动落盘 `fetch` 与 `bg_fetch` 的原始响应，便于排查接口边界、保留调试证据和批量识别可提速的 adapter。

@@ -56,3 +56,5 @@ pipeline:
 - OPENCLI_BROWSER_COMMAND_TIMEOUT, 命令超时（秒） 默认60
 - OPENCLI_BROWSER_CONNECT_TIMEOUT, 浏览器连接超时（秒） 默认30
 - OPENCLI_BROWSER_EXPLORE_TIMEOUT, Explore 超时（秒） 默认120
+- OPENCLI_API_DUMP, 设为 `1`/`true` 后自动 dump `fetch` 和 `bg_fetch` 的原始 API 响应到磁盘，便于调试和批量识别可后台化的 adapter
+- OPENCLI_API_DUMP_DIR, API dump 目录，默认 `./data/api-dumps`
