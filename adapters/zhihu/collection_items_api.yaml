@@ -21,27 +21,18 @@ args:
     description: "Offset for pagination"
 
 pipeline:
-  - navigate:
-      url: "https://www.zhihu.com"
-      settleMs: 100
+  - bg_fetch:
+      url: "https://www.zhihu.com/api/v4/collections/${{ args.collection_id }}/items?limit=${{ args.limit }}&offset=${{ args.offset }}"
+      cookie_url: "https://www.zhihu.com"
+
+  - select: body.data
 
   - evaluate: |
-      (async () => {
-        const collectionId = '${{ args.collection_id }}';
-        const apiUrl = `https://www.zhihu.com/api/v4/collections/${collectionId}/items?limit=${{ args.limit }}&offset=${{ args.offset }}`;
-
-        const response = await fetch(apiUrl, { credentials: 'include' });
-        if (!response.ok) {
-          throw new Error(`API request failed: ${response.status} ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        const items = data?.data || [];
-
+      (() => {
+        const items = Array.isArray(${{ data }}) ? ${{ data }} : [];
         if (items.length === 0 && ${{ args.offset }} === 0) {
-          throw new Error(`No items found in collection ${collectionId}`);
+          throw new Error(`No items found in collection ${{ args.collection_id }}`);
         }
-
         return items;
       })()
 

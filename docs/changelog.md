@@ -14,3 +14,5 @@
 - **版本来源收口**：`opencli update` 与发布安装链路不再依赖 GitHub API 的 `tag_name` 判定版本，统一改为读取 release 固定路径 `releases/latest/download/latest` 的纯文本版本文件。
 - **下载入口固定化**：自更新与 `install.sh` 统一走 `releases/latest/download/<asset>` 固定路径，避免版本判断与资产下载来自不同来源。
 - **版本号重置起点**：工作区版本已改回 `0.0.1`，为重新整理 tag/release 序列做准备。
+- **知乎收藏夹 API 提速**：`zhihu collection_items_api` 改为使用 `bg_fetch` 直接在扩展后台发起请求并注入知乎 cookies，去掉 `navigate + 页面内 fetch`，避免知乎首页导航常见的 15 秒超时拖慢整条命令。
+- **只读接口批量提速**：`zhihu search` 改为 `bg_fetch` 后台取数，避免为借 cookie 先开页面导致的额外导航等待；`zhihu feed_api` 与 `weibo hot` 实测存在 payload / 权限边界，暂不切换。
