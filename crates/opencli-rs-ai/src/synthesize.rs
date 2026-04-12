@@ -58,10 +58,7 @@ pub fn synthesize(
     manifest: &ExploreManifest,
     options: SynthesizeOptions,
 ) -> Result<Vec<AdapterCandidate>, CliError> {
-    let site = options
-        .site
-        .as_deref()
-        .unwrap_or(manifest.url.as_str());
+    let site = options.site.as_deref().unwrap_or(manifest.url.as_str());
     let site_name = detect_site_name(site);
 
     // Build capabilities from endpoints
@@ -514,8 +511,8 @@ fn build_recommended_args(
     goal: Option<&str>,
 ) -> Vec<RecommendedArg> {
     let qp = extract_query_param_names(url);
-    let has_search = qp.iter().any(|p| SEARCH_PARAMS.contains(&p.as_str()))
-        || (goal == Some("search"));
+    let has_search =
+        qp.iter().any(|p| SEARCH_PARAMS.contains(&p.as_str())) || (goal == Some("search"));
     let has_pagination = qp.iter().any(|p| PAGINATION_PARAMS.contains(&p.as_str()));
 
     let mut args = Vec::new();

@@ -3,8 +3,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 /// Supported output formats.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputFormat {
     #[default]
     Table,
@@ -13,7 +12,6 @@ pub enum OutputFormat {
     Csv,
     Markdown,
 }
-
 
 impl fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

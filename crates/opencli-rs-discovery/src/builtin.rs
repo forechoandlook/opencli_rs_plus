@@ -120,10 +120,7 @@ fn scan_dir_recursive(
         let path = entry.path();
         if path.is_dir() {
             scan_dir_recursive(base, &path, entries, registry, count)?;
-        } else if path
-            .extension()
-            .is_some_and(|e| e == "yaml" || e == "yml")
-        {
+        } else if path.extension().is_some_and(|e| e == "yaml" || e == "yml") {
             let rel = path
                 .strip_prefix(base)
                 .unwrap_or(&path)

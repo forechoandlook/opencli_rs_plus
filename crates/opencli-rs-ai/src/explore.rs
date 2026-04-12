@@ -512,10 +512,9 @@ async fn re_fetch_missing_bodies(page: &dyn IPage, network: &mut [NetworkRequest
                         // Also populate status and content_type since Performance API doesn't provide them
                         entry.status = Some(200);
                         if entry.headers.is_empty() {
-                            entry.headers.insert(
-                                "content-type".to_string(),
-                                "application/json".to_string(),
-                            );
+                            entry
+                                .headers
+                                .insert("content-type".to_string(), "application/json".to_string());
                         }
                     }
                 }
@@ -922,7 +921,8 @@ fn infer_capabilities_from_endpoints(
         if used_names.contains(&cap_name) {
             let suffix = ep
                 .pattern
-                .split('/').rfind(|s| !s.is_empty() && !s.starts_with('{') && !s.contains('.'))
+                .split('/')
+                .rfind(|s| !s.is_empty() && !s.starts_with('{') && !s.contains('.'))
                 .map(|s| s.to_string());
             cap_name = if let Some(s) = suffix {
                 format!("{}_{}", cap_name, s)

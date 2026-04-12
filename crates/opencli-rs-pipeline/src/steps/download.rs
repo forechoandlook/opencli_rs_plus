@@ -646,15 +646,17 @@ async fn execute_media_batch_download(
             let filepath = format!("{}/{}", output_dir, filename);
 
             match client.get(url).send().await {
-                Ok(resp) if resp.status().is_success() => if let Ok(bytes) = resp.bytes().await {
-                    if std::fs::write(&filepath, &bytes).is_ok() {
-                        let size = format_size(bytes.len());
-                        results.push(serde_json::json!({
-                            "index": idx, "type": "image", "status": "ok", "size": size
-                        }));
-                        continue;
+                Ok(resp) if resp.status().is_success() => {
+                    if let Ok(bytes) = resp.bytes().await {
+                        if std::fs::write(&filepath, &bytes).is_ok() {
+                            let size = format_size(bytes.len());
+                            results.push(serde_json::json!({
+                                "index": idx, "type": "image", "status": "ok", "size": size
+                            }));
+                            continue;
+                        }
                     }
-                },
+                }
                 _ => {}
             }
             results.push(serde_json::json!({
@@ -666,15 +668,17 @@ async fn execute_media_batch_download(
             let filepath = format!("{}/{}", output_dir, filename);
 
             match client.get(url).send().await {
-                Ok(resp) if resp.status().is_success() => if let Ok(bytes) = resp.bytes().await {
-                    if std::fs::write(&filepath, &bytes).is_ok() {
-                        let size = format_size(bytes.len());
-                        results.push(serde_json::json!({
-                            "index": idx, "type": "video", "status": "ok", "size": size
-                        }));
-                        continue;
+                Ok(resp) if resp.status().is_success() => {
+                    if let Ok(bytes) = resp.bytes().await {
+                        if std::fs::write(&filepath, &bytes).is_ok() {
+                            let size = format_size(bytes.len());
+                            results.push(serde_json::json!({
+                                "index": idx, "type": "video", "status": "ok", "size": size
+                            }));
+                            continue;
+                        }
                     }
-                },
+                }
                 _ => {}
             }
             results.push(serde_json::json!({
