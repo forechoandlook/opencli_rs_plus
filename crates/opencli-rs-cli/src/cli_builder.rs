@@ -85,55 +85,32 @@ pub fn daemon_help_commands() -> Vec<Command> {
                             .required(true)
                             .help("Adapter to schedule: 'site/command', e.g. zhihu/hot"),
                     )
-                    .arg(
-                        Arg::new("run_at")
-                            .short('r')
-                            .long("run-at")
-                            .help(
-                                "Absolute run time (ISO 8601 or 'now'). \
+                    .arg(Arg::new("run_at").short('r').long("run-at").help(
+                        "Absolute run time (ISO 8601 or 'now'). \
                                  Mutually exclusive with --delay. \
                                  Examples: 2026-01-01T09:00:00, now",
-                            ),
-                    )
-                    .arg(
-                        Arg::new("delay")
-                            .short('d')
-                            .long("delay")
-                            .help(
-                                "Run after N seconds from now. \
+                    ))
+                    .arg(Arg::new("delay").short('d').long("delay").help(
+                        "Run after N seconds from now. \
                                  Mutually exclusive with --run-at.",
-                            ),
-                    )
-                    .arg(
-                        Arg::new("interval")
-                            .short('i')
-                            .long("interval")
-                            .help(
-                                "Repeat every N seconds. \
+                    ))
+                    .arg(Arg::new("interval").short('i').long("interval").help(
+                        "Repeat every N seconds. \
                                  Omit for a one-shot job. \
                                  Example: --interval 3600 for hourly.",
-                            ),
-                    )
-                    .arg(
-                        Arg::new("args")
-                            .short('a')
-                            .long("args")
-                            .help(
-                                "Adapter arguments as a JSON object. \
+                    ))
+                    .arg(Arg::new("args").short('a').long("args").help(
+                        "Adapter arguments as a JSON object. \
                                  Example: --args '{\"query\":\"rust\",\"limit\":20}'",
-                            ),
-                    ),
+                    )),
             )
             .subcommand(
                 Command::new("list")
                     .about("List jobs, optionally filtered by status")
                     .arg(
-                        Arg::new("status")
-                            .short('s')
-                            .long("status")
-                            .help(
-                                "Filter by status: pending | running | done | failed | cancelled",
-                            ),
+                        Arg::new("status").short('s').long("status").help(
+                            "Filter by status: pending | running | done | failed | cancelled",
+                        ),
                     )
                     .arg(
                         Arg::new("limit")
@@ -271,8 +248,7 @@ pub fn daemon_help_commands() -> Vec<Command> {
                 Command::new("update")
                     .about("Update a plugin, or all plugins if name is omitted")
                     .arg(
-                        Arg::new("name")
-                            .help("Plugin name; omit to update all installed plugins"),
+                        Arg::new("name").help("Plugin name; omit to update all installed plugins"),
                     ),
             ),
         Command::new("socket")
@@ -401,9 +377,7 @@ pub fn build_cli(registry: &Registry) -> Command {
                         .about("Show full details for a tool")
                         .arg(Arg::new("name").required(true)),
                 )
-                .subcommand(
-                    Command::new("summary").about("Show one-line summaries for all tools"),
-                ),
+                .subcommand(Command::new("summary").about("Show one-line summaries for all tools")),
         )
         .subcommand(
             Command::new("doctor")

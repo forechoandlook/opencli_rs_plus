@@ -45,7 +45,9 @@ pub async fn dispatch_builtin(
         "feedback" => {
             let title = site_matches.get_one::<String>("title").unwrap();
             let body = site_matches.get_one::<String>("body").map(String::as_str);
-            let adapter = site_matches.get_one::<String>("adapter").map(String::as_str);
+            let adapter = site_matches
+                .get_one::<String>("adapter")
+                .map(String::as_str);
             let kind = site_matches
                 .get_one::<String>("kind")
                 .map(String::as_str)

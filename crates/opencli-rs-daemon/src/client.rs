@@ -350,7 +350,11 @@ fn cmd_adapter_list(addr: &str, include_disabled: bool, include_hidden: bool) ->
 
 fn cmd_adapter_search(addr: &str, query: &str) -> Result<()> {
     // Try daemon first; fall back to local scan if it isn't running.
-    match socket_request(addr, "adapter.search", serde_json::json!({ "query": query })) {
+    match socket_request(
+        addr,
+        "adapter.search",
+        serde_json::json!({ "query": query }),
+    ) {
         Ok(result) => {
             let adapters = result
                 .get("adapters")
@@ -372,7 +376,10 @@ fn cmd_adapter_search(addr: &str, query: &str) -> Result<()> {
                     .get("browser")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let desc = entry.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                let desc = entry
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 println!(
                     "{:30} {:12} {}",
                     name,

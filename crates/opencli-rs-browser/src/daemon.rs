@@ -31,7 +31,9 @@ fn write_extension_log(level: &str, msg: &str, ts: u64) {
     use std::io::Write;
     let Some(home) = dirs::home_dir() else { return };
     let log_dir = home.join(".opencli-rs").join("logs");
-    if std::fs::create_dir_all(&log_dir).is_err() { return }
+    if std::fs::create_dir_all(&log_dir).is_err() {
+        return;
+    }
 
     // One file per day: extension-20260410.jsonl
     let filename = format_log_date();
@@ -40,7 +42,11 @@ fn write_extension_log(level: &str, msg: &str, ts: u64) {
     let entry = serde_json::json!({ "ts": ts, "level": level, "msg": msg });
     let line = entry.to_string() + "\n";
 
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
         let _ = f.write_all(line.as_bytes());
     }
 }
@@ -321,9 +327,9 @@ async fn handle_extension_ws(state: Arc<DaemonState>, socket: WebSocket) {
                         let msg = v.get("msg").and_then(|m| m.as_str()).unwrap_or("");
                         let ts = v.get("ts").and_then(|t| t.as_u64()).unwrap_or(0);
                         match level {
-                            "warn"  => warn!(target: "extension", "{msg}"),
+                            "warn" => warn!(target: "extension", "{msg}"),
                             "error" => error!(target: "extension", "{msg}"),
-                            _       => info!(target: "extension", "{msg}"),
+                            _ => info!(target: "extension", "{msg}"),
                         }
                         write_extension_log(level, msg, ts);
                         continue;

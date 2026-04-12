@@ -65,8 +65,8 @@ fn dump_api_response(step: &str, url: &str, value: &Value) {
     if !api_dump_enabled() {
         return;
     }
-    let base_dir = std::env::var("OPENCLI_API_DUMP_DIR")
-        .unwrap_or_else(|_| "./data/api-dumps".to_string());
+    let base_dir =
+        std::env::var("OPENCLI_API_DUMP_DIR").unwrap_or_else(|_| "./data/api-dumps".to_string());
     let step_part = sanitize_dump_part(step);
     let url_part = sanitize_dump_part(url);
     let path = format!("{base_dir}/{step_part}_{url_part}_{{ts_ms}}.json");
