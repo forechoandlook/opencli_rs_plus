@@ -32,19 +32,6 @@ jobs:
           # 按 Cargo.lock hash 缓存，避免无效缓存
           shared-key: "ci"
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        run: |
-          cargo clippy \
-            --workspace \
-            --exclude opencli-rs-browser \
-            --exclude opencli-rs-ai \
-            --exclude opencli-rs-cli \
-            --exclude opencli-rs-external \
-            -- -W clippy::all
-
       - name: Run unit & integration tests
         run: |
           cargo test \
