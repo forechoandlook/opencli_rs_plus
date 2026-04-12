@@ -77,6 +77,12 @@ pub struct PluginManager {
     lock_path: PathBuf,
 }
 
+impl Default for PluginManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PluginManager {
     pub fn new() -> Self {
         let base = dirs::home_dir()
@@ -280,9 +286,7 @@ impl PluginManager {
         // Always clean up the full clone temp dir (rename moved it; copy left it behind)
         let _ = fs::remove_dir_all(&tmp_dir);
 
-        if let Err(e) = result {
-            return Err(e);
-        }
+        result?;
 
         let now = Utc::now().to_rfc3339();
         self.upsert_lock(&manifest.name, original_source)?;

@@ -23,7 +23,7 @@ const CLIENT_SUBCMDS: &[&str] = &[
 #[tokio::main]
 async fn main() {
     // Init tracing once for the unified binary
-    let _subscriber = FmtSubscriber::builder()
+    FmtSubscriber::builder()
         .with_env_filter(EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| {
             if std::env::var("OPENCLI_VERBOSE").is_ok() {
                 EnvFilter::new("debug")

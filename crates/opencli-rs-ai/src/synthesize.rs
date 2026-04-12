@@ -61,7 +61,7 @@ pub fn synthesize(
     let site = options
         .site
         .as_deref()
-        .unwrap_or_else(|| manifest.url.as_str());
+        .unwrap_or(manifest.url.as_str());
     let site_name = detect_site_name(site);
 
     // Build capabilities from endpoints
@@ -75,7 +75,7 @@ pub fn synthesize(
     let mut used_names = HashSet::new();
 
     for cap in &top_caps {
-        let endpoint = choose_endpoint(&cap, &manifest.endpoints);
+        let endpoint = choose_endpoint(cap, &manifest.endpoints);
         let endpoint = match endpoint {
             Some(ep) => ep,
             None => continue,
@@ -92,7 +92,7 @@ pub fn synthesize(
         }
         used_names.insert(cap_name.clone());
 
-        let yaml = build_candidate_yaml(&site_name, manifest, &cap, endpoint);
+        let yaml = build_candidate_yaml(&site_name, manifest, cap, endpoint);
         let description = format!(
             "{} (auto-generated)",
             if cap.description.is_empty() {
@@ -154,7 +154,7 @@ fn build_capabilities_from_endpoints(
 ) -> Vec<SynthesizeCapability> {
     let mut endpoints = manifest.endpoints.clone();
     // When goal is "search", boost endpoints with search params
-    let is_search_goal = goal.map_or(false, |g| g == "search");
+    let is_search_goal = goal == Some("search");
     endpoints.sort_by(|a, b| {
         if is_search_goal {
             // Prioritize endpoints with search params
@@ -204,7 +204,7 @@ fn build_capabilities_from_endpoints(
 
         caps.push(SynthesizeCapability {
             name: cap_name.clone(),
-            description: format!("{}", cap_name),
+            description: cap_name.to_string(),
             strategy: ep.auth_level,
             confidence: ep.confidence,
             endpoint: Some(ep.url.clone()),
@@ -379,7 +379,7 @@ fn build_candidate_yaml(
                         && p[1..].chars().all(|c| c.is_ascii_digit());
                     !re_version
                 })
-                .last();
+                .next_back();
             if let Some(cp) = capture_part {
                 tap_parts.push(format!("      capture: {}", cp));
             }
@@ -515,7 +515,7 @@ fn build_recommended_args(
 ) -> Vec<RecommendedArg> {
     let qp = extract_query_param_names(url);
     let has_search = qp.iter().any(|p| SEARCH_PARAMS.contains(&p.as_str()))
-        || goal.map_or(false, |g| g == "search");
+        || (goal == Some("search"));
     let has_pagination = qp.iter().any(|p| PAGINATION_PARAMS.contains(&p.as_str()));
 
     let mut args = Vec::new();
@@ -717,7 +717,7 @@ fn url_last_segment(url: &str) -> Option<String> {
                 && !s.chars().all(|c| c.is_ascii_digit())
                 && !(s.len() >= 8 && s.chars().all(|c| c.is_ascii_hexdigit()))
         })
-        .last()
+        .next_back()
         .map(|s| {
             s.chars()
                 .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })

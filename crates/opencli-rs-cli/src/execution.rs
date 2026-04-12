@@ -60,7 +60,7 @@ async fn execute_command_inner(
             && cmd
                 .domain
                 .as_deref()
-                .map_or(false, |d| d == "localhost" || d.starts_with("localhost:"));
+                .is_some_and(|d| d == "localhost" || d.starts_with("localhost:"));
 
         let page: Arc<dyn IPage> = if is_electron {
             let port = get_app_port(&cmd.site).ok_or_else(|| {
@@ -84,7 +84,7 @@ async fn execute_command_inner(
             .as_ref()
             .and_then(|steps| steps.first())
             .and_then(|step| step.as_object())
-            .map_or(false, |obj| obj.contains_key("navigate"));
+            .is_some_and(|obj| obj.contains_key("navigate"));
 
         let should_pre_navigate = matches!(cmd.strategy, Strategy::Cookie | Strategy::Header);
         if should_pre_navigate && !pipeline_starts_with_navigate {

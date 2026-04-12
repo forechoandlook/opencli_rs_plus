@@ -90,7 +90,7 @@ impl CdpPage {
 
         {
             let mut ws = self.ws_write.lock().await;
-            ws.send(Message::Text(msg.to_string().into()))
+            ws.send(Message::Text(msg.to_string()))
                 .await
                 .map_err(|e| CliError::browser_connect(format!("CDP send error: {e}")))?;
         }

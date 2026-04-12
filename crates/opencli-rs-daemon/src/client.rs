@@ -315,8 +315,8 @@ fn cmd_adapter_list(addr: &str, include_disabled: bool, include_hidden: bool) ->
         return Ok(());
     }
     println!(
-        "{:30} {:10} {:12} {}",
-        "Name", "Enabled", "Browser", "Description"
+        "{:30} {:10} {:12} Description",
+        "Name", "Enabled", "Browser"
     );
     println!("{}", "-".repeat(80));
     for entry in adapters {
@@ -365,7 +365,7 @@ fn cmd_adapter_search(addr: &str, query: &str) -> Result<()> {
                 println!("No adapters found matching '{}'.", query);
                 return Ok(());
             }
-            println!("{:30} {:12} {}", "Name", "Browser", "Description");
+            println!("{:30} {:12} Description", "Name", "Browser");
             println!("{}", "-".repeat(70));
             for entry in adapters {
                 let name = entry
@@ -425,7 +425,7 @@ fn cmd_adapter_search_local(query: &str) -> Result<()> {
         return Ok(());
     }
 
-    println!("{:30} {:12} {}", "Name", "Browser", "Description");
+    println!("{:30} {:12} Description", "Name", "Browser");
     println!("{}", "-".repeat(70));
     for cmd in &hits {
         let browser = cmd.needs_browser();
@@ -609,8 +609,8 @@ fn cmd_tools_search(query: &str) -> Result<()> {
         return Ok(());
     }
     println!(
-        "{:25} {:20} {:10} {}",
-        "Name", "Binary", "Installed", "Description"
+        "{:25} {:20} {:10} Description",
+        "Name", "Binary", "Installed"
     );
     println!("{}", "-".repeat(85));
     for t in results {
@@ -632,8 +632,8 @@ fn cmd_tools_list() -> Result<()> {
         return Ok(());
     }
     println!(
-        "{:25} {:20} {:10} {}",
-        "Name", "Binary", "Installed", "Description"
+        "{:25} {:20} {:10} Description",
+        "Name", "Binary", "Installed"
     );
     println!("{}", "-".repeat(85));
     for t in &tools {
@@ -686,7 +686,7 @@ fn cmd_tools_summary() -> Result<()> {
         return Ok(());
     }
     let items = summary(&tools);
-    println!("{:25} {:10} {}", "Name", "Installed", "Description");
+    println!("{:25} {:10} Description", "Name", "Installed");
     println!("{}", "-".repeat(70));
     for s in items {
         println!(
@@ -743,7 +743,7 @@ fn cmd_plugin_list(addr: &str) -> Result<()> {
         println!("No plugins installed.");
         return Ok(());
     }
-    println!("{:25} {:10} {}", "Name", "Version", "Source");
+    println!("{:25} {:10} Source", "Name", "Version");
     println!("{}", "-".repeat(80));
     for p in plugins {
         println!(

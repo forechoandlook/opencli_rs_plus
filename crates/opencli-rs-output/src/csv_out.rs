@@ -38,7 +38,7 @@ pub fn render_csv(data: &Value, columns: Option<&[String]>) -> String {
             if cols.is_empty() {
                 // Array of scalars
                 let mut wtr = csv::WriterBuilder::new().from_writer(vec![]);
-                wtr.write_record(&["value"]).ok();
+                wtr.write_record(["value"]).ok();
                 for item in arr {
                     wtr.write_record(&[value_to_field(item)]).ok();
                 }
@@ -61,10 +61,10 @@ pub fn render_csv(data: &Value, columns: Option<&[String]>) -> String {
         Value::Object(obj) => {
             let cols = resolve_columns(data, columns);
             let mut wtr = csv::WriterBuilder::new().from_writer(vec![]);
-            wtr.write_record(&["key", "value"]).ok();
+            wtr.write_record(["key", "value"]).ok();
             for key in &cols {
                 let v = obj.get(key).unwrap_or(&Value::Null);
-                wtr.write_record(&[key.as_str(), &value_to_field(v)]).ok();
+                wtr.write_record([key.as_str(), &value_to_field(v)]).ok();
             }
             wtr.flush().ok();
             String::from_utf8(wtr.into_inner().unwrap_or_default()).unwrap_or_default()

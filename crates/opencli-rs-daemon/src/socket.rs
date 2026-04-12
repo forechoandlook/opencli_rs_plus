@@ -147,7 +147,7 @@ async fn handle_connection(stream: tokio::net::TcpStream, state: &Arc<SocketStat
 
         if is_exec {
             // Parse and handle exec with streaming
-            let req: JsonRpcRequest = match serde_json::from_str(&line) {
+            let req: JsonRpcRequest = match serde_json::from_str(line) {
                 Ok(r) => r,
                 Err(e) => {
                     let resp = JsonRpcResponse::error(&format!("invalid JSON: {}", e), -32700);
@@ -179,7 +179,7 @@ async fn handle_connection(stream: tokio::net::TcpStream, state: &Arc<SocketStat
                 }
             }
         } else {
-            let response = process_request(&line, state).await;
+            let response = process_request(line, state).await;
             let resp_json = serde_json::to_string(&response)?;
             writer.write_all(resp_json.as_bytes()).await?;
             writer.write_all(b"\n").await?;

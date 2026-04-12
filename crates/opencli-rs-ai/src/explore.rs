@@ -188,7 +188,7 @@ pub async fn explore(
     };
 
     // Step 6.7: If goal is "search" and no search endpoints found, try discovering search
-    let is_search_goal = options.goal.as_deref().map_or(false, |g| g == "search");
+    let is_search_goal = options.goal.as_deref() == Some("search");
     if is_search_goal {
         let has_search = network.iter().any(|r| {
             SEARCH_PARAMS
@@ -453,7 +453,7 @@ async fn probe_initial_state(page: &dyn IPage, _url: &str, network: &mut Vec<Net
                 if body.len() > 100 {
                     debug!("Found __INITIAL_STATE__ data ({} bytes)", body.len());
                     network.push(NetworkRequest {
-                        url: format!("__INITIAL_STATE__"),
+                        url: "__INITIAL_STATE__".to_string(),
                         method: "SSR".to_string(),
                         status: Some(200),
                         headers: {
@@ -488,7 +488,7 @@ async fn re_fetch_missing_bodies(page: &dyn IPage, network: &mut [NetworkRequest
             || entry.url.contains("/x/")
             || entry.url.ends_with(".json");
         if entry.method == "GET"
-            && entry.status.map_or(true, |s| s == 200) // Performance API returns null status
+            && entry.status.is_none_or(|s| s == 200) // Performance API returns null status
             && inferred_json
             && entry.response_body.is_none()
         {
@@ -505,23 +505,20 @@ async fn re_fetch_missing_bodies(page: &dyn IPage, network: &mut [NetworkRequest
                 }})()"#,
                 url = url_json,
             );
-            match page.evaluate(&js).await {
-                Ok(val) => {
-                    if !val.is_null() {
-                        if let Ok(s) = serde_json::to_string(&val) {
-                            entry.response_body = Some(s);
-                            // Also populate status and content_type since Performance API doesn't provide them
-                            entry.status = Some(200);
-                            if entry.headers.is_empty() {
-                                entry.headers.insert(
-                                    "content-type".to_string(),
-                                    "application/json".to_string(),
-                                );
-                            }
+            if let Ok(val) = page.evaluate(&js).await {
+                if !val.is_null() {
+                    if let Ok(s) = serde_json::to_string(&val) {
+                        entry.response_body = Some(s);
+                        // Also populate status and content_type since Performance API doesn't provide them
+                        entry.status = Some(200);
+                        if entry.headers.is_empty() {
+                            entry.headers.insert(
+                                "content-type".to_string(),
+                                "application/json".to_string(),
+                            );
                         }
                     }
                 }
-                Err(_) => {}
             }
             fetched += 1;
         }
@@ -925,9 +922,7 @@ fn infer_capabilities_from_endpoints(
         if used_names.contains(&cap_name) {
             let suffix = ep
                 .pattern
-                .split('/')
-                .filter(|s| !s.is_empty() && !s.starts_with('{') && !s.contains('.'))
-                .last()
+                .split('/').rfind(|s| !s.is_empty() && !s.starts_with('{') && !s.contains('.'))
                 .map(|s| s.to_string());
             cap_name = if let Some(s) = suffix {
                 format!("{}_{}", cap_name, s)
@@ -993,7 +988,7 @@ fn infer_capabilities_from_endpoints(
             ep_strategy_str
         };
 
-        let site_display = site_name.unwrap_or_else(|| {
+        let site_display = site_name.unwrap_or({
             // Can't call detect_site_name here without allocating.
             // Use a fallback; the caller typically provides site_name.
             "site"

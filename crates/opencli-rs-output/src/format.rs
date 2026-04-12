@@ -4,7 +4,9 @@ use std::time::Duration;
 
 /// Supported output formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum OutputFormat {
+    #[default]
     Table,
     Json,
     Yaml,
@@ -12,11 +14,6 @@ pub enum OutputFormat {
     Markdown,
 }
 
-impl Default for OutputFormat {
-    fn default() -> Self {
-        Self::Table
-    }
-}
 
 impl fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

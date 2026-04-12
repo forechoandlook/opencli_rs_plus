@@ -195,7 +195,7 @@ impl BrowserBridge {
                 if elapsed >= 1 && !printed {
                     eprint!("Waiting for Chrome extension to connect");
                     printed = true;
-                } else if printed && elapsed % 3 == 0 {
+                } else if printed && elapsed.is_multiple_of(3) {
                     eprint!(".");
                 }
             }
@@ -231,10 +231,7 @@ impl BrowserBridge {
 /// Check if a port is in use by attempting a TCP connection.
 fn is_port_in_use(port: u16) -> bool {
     let addr = format!("127.0.0.1:{}", port);
-    match TcpStream::connect_timeout(&addr.parse().unwrap(), PORT_CHECK_TIMEOUT) {
-        Ok(_) => true,
-        Err(_) => false,
-    }
+    TcpStream::connect_timeout(&addr.parse().unwrap(), PORT_CHECK_TIMEOUT).is_ok()
 }
 
 /// Check if Chrome/Chromium is running as a process.

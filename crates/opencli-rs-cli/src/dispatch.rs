@@ -100,7 +100,7 @@ fn parse_description_from_summary(content: &str) -> String {
     content
         .lines()
         .find(|l| l.trim().starts_with("description:"))
-        .and_then(|l| l.splitn(2, ':').nth(1))
+        .and_then(|l| l.split_once(':').map(|x| x.1))
         .map(|s| s.trim().trim_matches('"').trim())
         .unwrap_or("")
         .to_string()

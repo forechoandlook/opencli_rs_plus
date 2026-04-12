@@ -38,7 +38,7 @@ struct Cache {
 
 /// Returns the mtime of the adapters directory, or 0 if it doesn't exist.
 fn dir_mtime() -> u64 {
-    fs::metadata(&adapters_dir())
+    fs::metadata(adapters_dir())
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
@@ -63,7 +63,7 @@ fn cache_valid() -> bool {
 
 /// Load commands from the cache file (fast path).
 fn load_from_cache(registry: &mut Registry) -> Result<usize, CliError> {
-    let cache_content = fs::read_to_string(&cache_path())?;
+    let cache_content = fs::read_to_string(cache_path())?;
     let cache: Cache = serde_json::from_str(&cache_content)?;
 
     let mut count = 0;
@@ -97,8 +97,8 @@ fn scan_and_cache(registry: &mut Registry) -> Result<usize, CliError> {
         dir_mtime: dir_mtime(),
         entries,
     };
-    let cache_content = serde_json::to_string(&cache).map_err(|e| CliError::Json(e))?;
-    fs::write(&cache_path(), cache_content)?;
+    let cache_content = serde_json::to_string(&cache).map_err(CliError::Json)?;
+    fs::write(cache_path(), cache_content)?;
 
     tracing::info!(count = count, dest = %cache_path().display(), "Scanned and cached adapters");
     Ok(count)
@@ -122,7 +122,7 @@ fn scan_dir_recursive(
             scan_dir_recursive(base, &path, entries, registry, count)?;
         } else if path
             .extension()
-            .map_or(false, |e| e == "yaml" || e == "yml")
+            .is_some_and(|e| e == "yaml" || e == "yml")
         {
             let rel = path
                 .strip_prefix(base)

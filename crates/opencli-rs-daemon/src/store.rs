@@ -173,20 +173,18 @@ impl JobStore {
                     error: row.get(9)?,
                     start_at: row
                         .get::<_, Option<String>>(10)?
-                        .map(|s| {
+                        .and_then(|s| {
                             DateTime::parse_from_rfc3339(&s)
                                 .map(|dt| dt.with_timezone(&Utc))
                                 .ok()
-                        })
-                        .flatten(),
+                        }),
                     end_at: row
                         .get::<_, Option<String>>(11)?
-                        .map(|s| {
+                        .and_then(|s| {
                             DateTime::parse_from_rfc3339(&s)
                                 .map(|dt| dt.with_timezone(&Utc))
                                 .ok()
-                        })
-                        .flatten(),
+                        }),
                     created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?)
                         .unwrap_or_default()
                         .with_timezone(&Utc),
@@ -236,20 +234,18 @@ impl JobStore {
                 error: row.get(9)?,
                 start_at: row
                     .get::<_, Option<String>>(10)?
-                    .map(|s| {
+                    .and_then(|s| {
                         DateTime::parse_from_rfc3339(&s)
                             .map(|dt| dt.with_timezone(&Utc))
                             .ok()
-                    })
-                    .flatten(),
+                    }),
                 end_at: row
                     .get::<_, Option<String>>(11)?
-                    .map(|s| {
+                    .and_then(|s| {
                         DateTime::parse_from_rfc3339(&s)
                             .map(|dt| dt.with_timezone(&Utc))
                             .ok()
-                    })
-                    .flatten(),
+                    }),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?)
                     .unwrap_or_default()
                     .with_timezone(&Utc),
@@ -295,20 +291,18 @@ impl JobStore {
                 error: row.get(9)?,
                 start_at: row
                     .get::<_, Option<String>>(10)?
-                    .map(|s| {
+                    .and_then(|s| {
                         DateTime::parse_from_rfc3339(&s)
                             .map(|dt| dt.with_timezone(&Utc))
                             .ok()
-                    })
-                    .flatten(),
+                    }),
                 end_at: row
                     .get::<_, Option<String>>(11)?
-                    .map(|s| {
+                    .and_then(|s| {
                         DateTime::parse_from_rfc3339(&s)
                             .map(|dt| dt.with_timezone(&Utc))
                             .ok()
-                    })
-                    .flatten(),
+                    }),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?)
                     .unwrap_or_default()
                     .with_timezone(&Utc),
