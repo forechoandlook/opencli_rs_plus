@@ -22,6 +22,51 @@ use tracing::{debug, error, info, warn};
 
 use crate::types::{DaemonCommand, DaemonResult};
 
+// ─── Extension log persistence ───────────────────────────────────────────────
+
+/// Write an extension log entry to ~/.opencli-rs/logs/extension-YYYYMMDD.jsonl.
+/// Each line is a JSON object: { ts, level, msg }.
+/// Failures are silently ignored — logging must never crash the daemon.
+fn write_extension_log(level: &str, msg: &str, ts: u64) {
+    use std::io::Write;
+    let Some(home) = dirs::home_dir() else { return };
+    let log_dir = home.join(".opencli-rs").join("logs");
+    if std::fs::create_dir_all(&log_dir).is_err() { return }
+
+    // One file per day: extension-20260410.jsonl
+    let filename = format_log_date();
+    let log_path = log_dir.join(format!("extension-{filename}.jsonl"));
+
+    let entry = serde_json::json!({ "ts": ts, "level": level, "msg": msg });
+    let line = entry.to_string() + "\n";
+
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
+fn format_log_date() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Compute YYYYMMDD in UTC without chrono dependency
+    // Algorithm: http://howardhinnant.github.io/date_algorithms.html  civil_from_days
+    let days = (secs / 86400) as i64;
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}{m:02}{d:02}")
+}
+
 /// Command response timeout. Set high to support long-running tasks (image/video generation).
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(1800); // 30 minutes
 /// WebSocket heartbeat interval.
@@ -268,18 +313,37 @@ async fn handle_extension_ws(state: Arc<DaemonState>, socket: WebSocket) {
         match msg {
             Ok(Message::Text(text)) => {
                 debug!(len = text.len(), "received message from extension");
-                match serde_json::from_str::<DaemonResult>(&text) {
-                    Ok(result) => {
-                        let id = result.id.clone();
-                        if let Some(tx) = state.pending_commands.write().await.remove(&id) {
-                            let _ = tx.send(result);
-                        } else {
-                            warn!(id = %id, "received result for unknown command");
+                // First check if this is a log message forwarded from the extension.
+                // Format: { type: "log", level: "info"|"warn"|"error", msg: "...", ts: <ms> }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if v.get("type").and_then(|t| t.as_str()) == Some("log") {
+                        let level = v.get("level").and_then(|l| l.as_str()).unwrap_or("info");
+                        let msg = v.get("msg").and_then(|m| m.as_str()).unwrap_or("");
+                        let ts = v.get("ts").and_then(|t| t.as_u64()).unwrap_or(0);
+                        match level {
+                            "warn"  => warn!(target: "extension", "{msg}"),
+                            "error" => error!(target: "extension", "{msg}"),
+                            _       => info!(target: "extension", "{msg}"),
+                        }
+                        write_extension_log(level, msg, ts);
+                        continue;
+                    }
+                    // Not a log message — try to parse as DaemonResult
+                    match serde_json::from_value::<DaemonResult>(v) {
+                        Ok(result) => {
+                            let id = result.id.clone();
+                            if let Some(tx) = state.pending_commands.write().await.remove(&id) {
+                                let _ = tx.send(result);
+                            } else {
+                                warn!(id = %id, "received result for unknown command");
+                            }
+                        }
+                        Err(e) => {
+                            warn!("failed to parse extension message: {e}");
                         }
                     }
-                    Err(e) => {
-                        warn!("failed to parse extension message: {e}");
-                    }
+                } else {
+                    warn!("extension sent non-JSON message");
                 }
             }
             Ok(Message::Pong(_)) => {

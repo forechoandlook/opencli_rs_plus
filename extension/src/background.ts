@@ -511,6 +511,11 @@ async function handleNavigate(cmd: Command, workspace: string): Promise<Result> 
   });
 
   const tab = await chrome.tabs.get(tabId);
+  if (timedOut) {
+    console.warn(`[navigate] TIMEOUT url=${targetUrl} tabId=${tabId} finalUrl=${tab.url ?? 'unknown'}`);
+  } else {
+    console.log(`[navigate] OK url=${targetUrl} tabId=${tabId} finalUrl=${tab.url ?? 'unknown'}`);
+  }
   return {
     id: cmd.id,
     ok: true,
@@ -639,16 +644,36 @@ async function handleBgFetch(cmd: Command): Promise<Result> {
   };
   if (cookieHeader) headers['Cookie'] = cookieHeader;
 
-  const response = await fetch(cmd.url, {
-    method: cmd.method ?? 'GET',
-    headers,
-    body: cmd.body,
-  });
+  const t0 = Date.now();
+  let response: Response;
+  try {
+    response = await fetch(cmd.url, {
+      method: cmd.method ?? 'GET',
+      headers,
+      body: cmd.body,
+    });
+  } catch (err) {
+    const elapsed = Date.now() - t0;
+    console.error(`[bg_fetch] NETWORK_ERROR url=${cmd.url} cookies=${cookies.length} elapsed=${elapsed}ms err=${String(err)}`);
+    return { id: cmd.id, ok: false, error: String(err) };
+  }
 
+  const elapsed = Date.now() - t0;
   const contentType = response.headers.get('content-type') ?? '';
   const body = contentType.includes('application/json')
     ? await response.json()
     : await response.text();
+
+  const bodySize = typeof body === 'string' ? body.length : JSON.stringify(body).length;
+
+  if (!response.ok) {
+    const preview = typeof body === 'string'
+      ? body.slice(0, 400)
+      : JSON.stringify(body).slice(0, 400);
+    console.warn(`[bg_fetch] FAILED url=${cmd.url} status=${response.status} contentType=${contentType} bodySize=${bodySize} cookies=${cookies.length} elapsed=${elapsed}ms preview=${preview}`);
+  } else {
+    console.log(`[bg_fetch] OK url=${cmd.url} status=${response.status} contentType=${contentType} bodySize=${bodySize} cookies=${cookies.length} elapsed=${elapsed}ms`);
+  }
 
   return { id: cmd.id, ok: response.ok, data: { status: response.status, body } };
 }

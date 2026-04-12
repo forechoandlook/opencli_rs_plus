@@ -155,7 +155,45 @@ PY
   fi
 
   if [[ "${status}" == "failed" && -z "${note}" ]]; then
-    note="$(tr '\n' ' ' < "${stderr_file}" | sed 's/[[:space:]]\+/ /g' | cut -c1-240)"
+    note="$(tr '\n' ' ' < "${stderr_file}" | sed 's/[[:space:]]\+/ /g')"
+  fi
+
+  # On failure, extract extension logs from the time window of this run and save alongside dumps.
+  if [[ "${status}" == "failed" ]]; then
+    python3 - "${dump_dir}" "${start_ms}" "${end_ms}" <<'PY'
+import sys, json, os, pathlib
+from datetime import datetime, timezone
+
+dump_dir = sys.argv[1]
+start_ms = int(sys.argv[2])
+end_ms   = int(sys.argv[3])
+
+log_dir = pathlib.Path.home() / ".opencli-rs" / "logs"
+today = datetime.now(timezone.utc).strftime("%Y%m%d")
+log_file = log_dir / f"extension-{today}.jsonl"
+
+entries = []
+if log_file.exists():
+    for line in log_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            ts = obj.get("ts", 0)
+            # include entries within the run window, plus 2s buffer on each side
+            if start_ms - 2000 <= ts <= end_ms + 2000:
+                entries.append(obj)
+        except Exception:
+            pass
+
+if entries:
+    out = pathlib.Path(dump_dir) / "extension-logs.jsonl"
+    with open(out, "w", encoding="utf-8") as f:
+        for e in entries:
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+    print(f"[regression] wrote {len(entries)} extension log entries to {out}", file=sys.stderr)
+PY
   fi
 
   local dump_count="0"
