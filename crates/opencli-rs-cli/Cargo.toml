@@ -2,6 +2,7 @@
 name = "opencli-rs"
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
 
 [lib]
 name = "opencli_rs_cli"

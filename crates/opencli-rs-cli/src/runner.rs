@@ -20,8 +20,18 @@ use crate::execution::execute_command;
 
 /// Main adapter-execution entry point. Assumes tracing is already initialized.
 pub async fn run() {
-    // ── Browser-daemon mode (spawned internally by BrowserBridge) ──────────
+    // ── Fast-path meta flags that should not trigger adapter discovery ─────
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!(
+            "opencli {} ({})",
+            env!("CARGO_PKG_VERSION"),
+            env!("OPENCLI_GIT_COMMIT")
+        );
+        return;
+    }
+
+    // ── Browser-daemon mode (spawned internally by BrowserBridge) ──────────
     if args.iter().any(|a| a == "--daemon") {
         let port: u16 = {
             let mut port = None;

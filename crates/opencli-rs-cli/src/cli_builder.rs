@@ -396,9 +396,21 @@ pub fn build_cli(registry: &Registry) -> Command {
                 ),
         )
         .subcommand(
+            Command::new("uninstall")
+                .about("Remove the current opencli binary from disk")
+                .display_order(ORD_TOOLS + 4)
+                .long_about(
+                    "Attempt to remove the currently running opencli binary from disk.\n\n\
+                     This is best-effort: it works on Unix-like systems where the running \
+                     executable can be unlinked, but not on Windows while the binary is in use.\n\n\
+                     If opencli was installed through a package manager or symlink, remove \
+                     that wrapper separately.",
+                ),
+        )
+        .subcommand(
             Command::new("feedback")
                 .about("Record feedback and optionally open a GitHub issue draft")
-                .display_order(ORD_TOOLS + 4)
+                .display_order(ORD_TOOLS + 5)
                 .arg(
                     Arg::new("title")
                         .required(true)
@@ -432,7 +444,7 @@ pub fn build_cli(registry: &Registry) -> Command {
         .subcommand(
             Command::new("summary")
                 .about("Browse adapter summaries")
-                .display_order(ORD_TOOLS + 5)
+                .display_order(ORD_TOOLS + 6)
                 .subcommand(
                     Command::new("show")
                         .about("Show the summary for a specific adapter")

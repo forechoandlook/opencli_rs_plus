@@ -4,7 +4,7 @@ use clap::ArgMatches;
 use opencli_rs_core::CliError;
 
 use crate::cli_builder::render_adapter_catalog;
-use crate::commands::{doctor, feedback, update};
+use crate::commands::{doctor, feedback, uninstall, update};
 use opencli_rs_core::Registry;
 
 pub fn print_error(err: &CliError) {
@@ -55,6 +55,13 @@ pub async fn dispatch_builtin(
             let open_issue = site_matches.get_flag("open");
             if let Err(err) = feedback::save_feedback(adapter, kind, title, body, open_issue) {
                 eprintln!("Feedback failed: {err}");
+                std::process::exit(1);
+            }
+            true
+        }
+        "uninstall" => {
+            if let Err(err) = uninstall::run_uninstall() {
+                eprintln!("Uninstall failed: {err}");
                 std::process::exit(1);
             }
             true
