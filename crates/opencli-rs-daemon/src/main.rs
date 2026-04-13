@@ -20,9 +20,7 @@ struct DaemonArgs {
 }
 
 // Subcommands that belong to the scheduler client
-const CLIENT_SUBCMDS: &[&str] = &[
-    "status", "stop", "restart", "job", "adapter", "plugin", "socket", "tools",
-];
+const CLIENT_SUBCMDS: &[&str] = &["status", "stop", "restart", "job", "adapter", "plugin", "tools"];
 
 #[tokio::main]
 async fn main() {

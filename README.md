@@ -4,7 +4,7 @@
 
 ## 特性
 
-- `daemon` 常驻模式，支持任务调度、adapter 管理、SQLite 持久化和 socket API
+- `daemon` 常驻模式，支持任务调度、adapter 管理和 SQLite 持久化
 - `direct` 直接执行模式，适合单次抓取和调试
 - YAML adapter 定义，便于新增站点和命令
 - 浏览器插件复用登录态，适合需要已登录页面的抓取场景
@@ -37,7 +37,6 @@ opencli doctor
 
 ```bash
 opencli --help
-opencli --help --adapters
 opencli <family> --help
 opencli --format json zhihu hot
 ```
@@ -85,11 +84,11 @@ opencli feedback "adapter summary inaccurate" --kind bad_description --open
 
 `opencli` 的常见运行方式分三类：
 
-- `daemon` 模式：`opencli daemon` 启动调度 daemon，负责任务、adapter、插件和 socket API
-- `client` 模式：`status` / `stop` / `restart` / `job` / `adapter` / `plugin` / `socket` / `tools` 等命令连接 daemon
+- `daemon` 模式：`opencli daemon` 启动调度 daemon，负责任务、adapter 和插件
+- `client` 模式：`status` / `stop` / `restart` / `job` / `adapter` / `plugin` / `tools` 等命令连接 daemon
 - `direct` 模式：其他 adapter 命令直接执行，不依赖 daemon
 
-帮助输出默认不会直接展开全部 adapter，避免过长；如果要看完整 adapter family，请显式使用 `--adapters`。
+帮助输出默认不会直接展开全部 adapter，避免过长；要看某个 adapter family，请直接使用 `opencli <family> --help`。
 
 ## 反馈
 

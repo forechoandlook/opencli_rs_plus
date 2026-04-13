@@ -26,6 +26,8 @@ version: "0.1"
 
 ## 常用命令
 
+`--fields` 选项适用于支持的 adapter，指定输出字段（逗号分隔，保持顺序）
+
 ```bash
 opencli --help
 opencli --help --adapters
@@ -57,9 +59,6 @@ opencli tools info ripgrep
 
 ```bash
 opencli status
-opencli socket daemon.status
-opencli socket adapter.list
-opencli socket adapter.search '{"query":"bilibili"}'
 opencli feedback "zhihu hot returns 403" --adapter "zhihu hot" --kind broken
 ```
 

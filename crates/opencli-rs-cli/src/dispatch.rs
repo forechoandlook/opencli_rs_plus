@@ -3,7 +3,6 @@
 use clap::ArgMatches;
 use opencli_rs_core::CliError;
 
-use crate::cli_builder::render_adapter_catalog;
 use crate::commands::{doctor, feedback, uninstall, update};
 use opencli_rs_core::Registry;
 
@@ -23,15 +22,11 @@ pub fn print_error(err: &CliError) {
 pub async fn dispatch_builtin(
     site_name: &str,
     site_matches: &ArgMatches,
-    registry: &Registry,
+    _registry: &Registry,
 ) -> bool {
     match site_name {
         "doctor" => {
             doctor::run_doctor().await;
-            true
-        }
-        "adapters" => {
-            println!("{}", render_adapter_catalog(registry));
             true
         }
         "update" => {

@@ -251,29 +251,7 @@ pub fn daemon_help_commands() -> Vec<Command> {
                         Arg::new("name").help("Plugin name; omit to update all installed plugins"),
                     ),
             ),
-        Command::new("socket")
-            .about("[daemon] Send a raw JSON-RPC command to the daemon socket (debug)")
-            .display_order(ORD_DAEMON + 7)
-            .arg(Arg::new("args").num_args(1..).trailing_var_arg(true)),
     ]
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Adapter catalog helper
-// ──────────────────────────────────────────────────────────────────────────────
-
-pub fn render_adapter_catalog(registry: &Registry) -> String {
-    let mut lines = Vec::new();
-    lines.push(String::from("Adapter families:"));
-    for site in registry.list_sites() {
-        let count = registry.list_commands(site).len();
-        lines.push(format!("  {site:<15} {count} command(s)"));
-    }
-    lines.push(String::new());
-    lines.push(String::from(
-        "Use `opencli <site> --help` to inspect commands for one adapter family.",
-    ));
-    lines.join("\n")
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -292,7 +270,6 @@ pub fn build_cli(registry: &Registry) -> Command {
              EXAMPLES:\n  \
                opencli zhihu hot\n  \
                opencli twitter search --query openai\n  \
-               opencli adapters\n  \
                opencli adapter search zhihu\n  \
                opencli job add zhihu/hot --interval 3600",
         )
@@ -364,11 +341,6 @@ pub fn build_cli(registry: &Registry) -> Command {
 
     // ── Local tools — no daemon, no browser (display_order 0+)
     app = app
-        .subcommand(
-            Command::new("adapters")
-                .about("List all installed adapter families and command counts")
-                .display_order(ORD_TOOLS),
-        )
         .subcommand(
             Command::new("tools")
                 .about("Browse the local CLI tool knowledge base")
