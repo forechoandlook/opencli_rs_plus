@@ -5,7 +5,6 @@
 |---|---|
 | `~/.opencli-rs/jobs.db` | 调度任务（status / retry / interval） |
 | `~/.opencli-rs/index.db` | FTS5 全文索引 + 使用统计 + 索引元数据（mtime） |
-| `~/.opencli-rs/issues.db` | Adapter 问题记录 |
 | `~/.opencli-rs/adapter_settings.json` | adapter 启用/禁用/隐藏状态 |
 | `~/.opencli-rs/plugins/` | 已安装插件目录 |
 | `~/.opencli-rs/plugins.lock.json` | 插件安装来源和时间记录 |

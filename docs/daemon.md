@@ -43,7 +43,6 @@ opencli daemon
     ├── AdapterManager  (adapter 加载/管理/搜索/禁用)
     ├── AdapterIndex    (FTS5 全文索引 + 使用统计，index.db)
     ├── PluginManager   (插件安装/卸载/更新，plugins.lock.json)
-    ├── IssueStore      (问题记录，issues.db)
     ├── Scheduler       (轮询 due jobs，并发执行)
     └── JobStore        (SQLite CRUD，指数退避重试，jobs.db)
          ↓ HTTP POST /command (需要浏览器时)
@@ -134,45 +133,6 @@ opencli job delete <id>
 # 手动触发 due jobs
 opencli job run
 ```
-
-### Issue 管理
-
-记录 adapter 存在的问题，支持后续导出和上报。
-
-```bash
-# 上报问题（kind: broken | bad_description | other）
-opencli socket issue.add '{"adapter":"bilibili feed","kind":"broken","title":"API v3 变更，返回 404","body":"2026-04 起接口地址改变"}'
-
-# 查看所有 open 问题
-opencli socket issue.list
-
-# 按 adapter 过滤
-opencli socket issue.list '{"adapter":"bilibili feed"}'
-
-# 查看已关闭的问题
-opencli socket issue.list '{"status":"closed"}'
-
-# 查看某条问题详情
-opencli socket issue.show '{"id":1}'
-
-# 关闭问题（已修复）
-opencli socket issue.close '{"id":1}'
-
-# 删除问题
-opencli socket issue.delete '{"id":1}'
-
-# 导出为 JSON
-opencli socket issue.export
-opencli socket issue.export '{"status":"open"}' > issues.json
-```
-
-**issue kind：**
-
-| kind | 含义 |
-|---|---|
-| `broken` | 工具损坏，API 变更、返回错误或错误结果 |
-| `bad_description` | summary / description 文本不准确 |
-| `other` | 其他问题 |
 
 ### 工具知识库
 

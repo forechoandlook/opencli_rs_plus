@@ -1,7 +1,6 @@
 pub mod adapter_manager;
 pub mod client;
 pub mod index;
-pub mod issues;
 pub mod plugin;
 pub mod scheduler;
 pub mod socket;
@@ -30,7 +29,6 @@ pub async fn run_daemon(addr: String, db_path: Option<PathBuf>, poll_interval: u
     let db_path = db_path.unwrap_or_else(default_db_path);
     let job_store = Arc::new(store::JobStore::new(db_path).map_err(|e| anyhow::anyhow!("{}", e))?);
     let adapter_manager = Arc::new(adapter_manager::AdapterManager::new().await?);
-    let issue_store = Arc::new(issues::IssueStore::new(issues::default_issues_db_path())?);
     let scheduler = Arc::new(scheduler::Scheduler::new(
         Arc::clone(&job_store),
         Arc::clone(&adapter_manager),
@@ -45,7 +43,6 @@ pub async fn run_daemon(addr: String, db_path: Option<PathBuf>, poll_interval: u
         adapter_manager,
         scheduler,
         job_store,
-        issue_store,
         plugin_manager,
     });
 
