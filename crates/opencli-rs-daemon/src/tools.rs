@@ -1,4 +1,4 @@
-//! Tools knowledge base: loaded from ~/.opencli-rs/tools/*.md
+//! Tools knowledge base: loaded from ./tools/*.md and ~/.opencli-rs/tools/*.md
 //!
 //! Each file is a Markdown document with YAML frontmatter:
 //!
@@ -85,21 +85,23 @@ impl Tool {
 
 // ── Loader ─────────────────────────────────────────────────────────────────
 
-fn tools_dir() -> PathBuf {
+fn home_tools_dir() -> PathBuf {
     dirs::home_dir()
         .map(|h| h.join(".opencli-rs").join("tools"))
         .unwrap_or_else(|| PathBuf::from(".opencli-rs/tools"))
 }
 
-/// Load all tools from ~/.opencli-rs/tools/*.md
-pub fn load_tools() -> Vec<Tool> {
-    let dir = tools_dir();
-    if !dir.exists() {
+fn current_tools_dir() -> Option<PathBuf> {
+    std::env::current_dir().ok().map(|cwd| cwd.join("tools"))
+}
+
+fn load_tools_from_dir(dir: &PathBuf) -> Vec<Tool> {
+    if !dir.exists() || !dir.is_dir() {
         return vec![];
     }
 
     let mut tools = Vec::new();
-    let entries = match std::fs::read_dir(&dir) {
+    let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return vec![],
     };
@@ -115,6 +117,22 @@ pub fn load_tools() -> Vec<Tool> {
             }
         }
     }
+
+    tools
+}
+
+/// Load all tools from ./tools/*.md and ~/.opencli-rs/tools/*.md
+pub fn load_tools() -> Vec<Tool> {
+    let mut tools = Vec::new();
+
+    if let Some(dir) = current_tools_dir() {
+        tools.extend(load_tools_from_dir(&dir));
+    }
+
+    tools.extend(load_tools_from_dir(&home_tools_dir()));
+
+    let mut seen = std::collections::HashSet::new();
+    tools.retain(|tool| seen.insert(tool.name.clone()));
 
     tools.sort_by(|a, b| a.name.cmp(&b.name));
     tools
