@@ -87,6 +87,13 @@ pub async fn run() {
     let matches = app.get_matches();
 
     let format_str = matches.get_one::<String>("format").unwrap().clone();
+    let fields = matches.get_one::<String>("fields").map(|s| {
+        s.split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>()
+    });
     let verbose = matches.get_flag("verbose");
     if verbose {
         tracing::info!("Verbose mode enabled");
@@ -126,6 +133,7 @@ pub async fn run() {
                 Ok(data) => {
                     let opts = RenderOptions {
                         format: output_format,
+                        fields: fields.clone(),
                         columns: if cmd.columns.is_empty() {
                             None
                         } else {

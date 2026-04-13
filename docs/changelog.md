@@ -13,6 +13,8 @@
 - **原生命令扩展**：新增 `opencli update` / `opencli update --check`，支持检查 GitHub Release 并原地更新当前二进制。
 - **反馈命令**：新增 `opencli feedback <title>`，默认写入 `~/.opencli-rs/feedback.jsonl`，加 `--open` 可打开预填好的 GitHub issue 页面。
 - **帮助输出收敛**：`opencli --help` 默认只显示内置命令和 daemon/client 命令.
+- **日志默认静默**：默认不打印 tracing 日志；通过 `OPENCLI_VERBOSE` 或 `RUST_LOG` 才开启输出，日志时间默认只显示到分钟，且可通过 `OPENCLI_LOG_TIME` 切换到秒、毫秒或关闭时间戳。
+- **全局字段裁剪**：新增 `--fields a,b,c`，可在所有输出格式上只返回对象/对象数组的指定顶层字段。
 
 0410-2
 - **CLI 结构重构**：`runner.rs` 拆分为三个模块：`cli_builder.rs`（Command 树构建）、`dispatch.rs`（内置命令分发）、`runner.rs`（薄路由层）。消除了原先 800 行大杂烩。

@@ -45,6 +45,7 @@ impl FromStr for OutputFormat {
 pub struct RenderOptions {
     pub format: OutputFormat,
     pub columns: Option<Vec<String>>,
+    pub fields: Option<Vec<String>>,
     pub title: Option<String>,
     pub elapsed: Option<Duration>,
     pub source: Option<String>,

@@ -305,6 +305,13 @@ pub fn build_cli(registry: &Registry) -> Command {
                 .help("Output format: csv | table | json | yaml | md"),
         )
         .arg(
+            Arg::new("fields")
+                .long("fields")
+                .global(true)
+                .value_delimiter(',')
+                .help("Return only these top-level fields (comma-separated)"),
+        )
+        .arg(
             Arg::new("verbose")
                 .long("verbose")
                 .short('v')

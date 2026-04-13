@@ -50,7 +50,9 @@ pipeline:
 
 ## 环境变量
 
-- OPENCLI_VERBOSE, 启用 verbose/debug 输出；默认情况下日志保持静默，不会打印 adapter 加载细节
+- OPENCLI_VERBOSE, 启用日志输出（默认 info）；默认情况下日志保持静默，不会打印 adapter 加载细节
+- OPENCLI_LOG_TIME, 日志时间格式：`minute`（默认，只到分钟）、`second`、`millisecond`/`ms`、`none`
+- `--fields a,b,c`, 全局字段裁剪，只返回对象/对象数组里的顶层字段
 - OPENCLI_DAEMON_PORT, 指定 daemon 端口 默认19825
 - OPENCLI_CDP_ENDPOINT, 指定 CDP 直连端点（绕过 Daemon）
 - OPENCLI_BROWSER_COMMAND_TIMEOUT, 命令超时（秒） 默认60

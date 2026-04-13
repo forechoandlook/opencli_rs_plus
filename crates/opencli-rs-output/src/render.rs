@@ -1,4 +1,5 @@
 use serde_json::Value;
+use serde_json::Map;
 
 use crate::csv_out::render_csv;
 use crate::format::{OutputFormat, RenderOptions};
@@ -6,6 +7,36 @@ use crate::json::render_json;
 use crate::markdown::render_markdown;
 use crate::table::render_table;
 use crate::yaml::render_yaml;
+
+fn resolve_fields<'a>(opts: &'a RenderOptions) -> Option<&'a [String]> {
+    opts.fields.as_deref().or(opts.columns.as_deref())
+}
+
+fn project_fields(data: &Value, fields: Option<&[String]>) -> Value {
+    let Some(fields) = fields else {
+        return data.clone();
+    };
+    if fields.is_empty() {
+        return data.clone();
+    }
+    match data {
+        Value::Array(arr) => Value::Array(
+            arr.iter()
+                .map(|item| project_fields(item, Some(fields)))
+                .collect(),
+        ),
+        Value::Object(obj) => {
+            let mut out = Map::new();
+            for field in fields {
+                if let Some(v) = obj.get(field) {
+                    out.insert(field.clone(), v.clone());
+                }
+            }
+            Value::Object(out)
+        }
+        _ => data.clone(),
+    }
+}
 
 /// Build a footer string from render options.
 fn build_footer(opts: &RenderOptions) -> Option<String> {
@@ -37,14 +68,16 @@ fn build_footer(opts: &RenderOptions) -> Option<String> {
 
 /// Render data according to the given options, returning the formatted string.
 pub fn render(data: &Value, opts: &RenderOptions) -> String {
-    let cols = opts.columns.as_deref();
+    let fields = resolve_fields(opts);
+    let data = project_fields(data, fields);
+    let cols = fields;
 
     let mut output = match opts.format {
-        OutputFormat::Table => render_table(data, cols),
-        OutputFormat::Json => render_json(data, cols),
-        OutputFormat::Yaml => render_yaml(data, cols),
-        OutputFormat::Csv => render_csv(data, cols),
-        OutputFormat::Markdown => render_markdown(data, cols),
+        OutputFormat::Table => render_table(&data, cols),
+        OutputFormat::Json => render_json(&data, cols),
+        OutputFormat::Yaml => render_yaml(&data, cols),
+        OutputFormat::Csv => render_csv(&data, cols),
+        OutputFormat::Markdown => render_markdown(&data, cols),
     };
 
     if let Some(title) = &opts.title {

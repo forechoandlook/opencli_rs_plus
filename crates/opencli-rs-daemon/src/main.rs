@@ -1,8 +1,12 @@
 use clap::Parser;
+use chrono::Local;
 use opencli_rs_daemon::{default_addr, run_client, run_daemon};
 use std::path::PathBuf;
 use tracing::Level;
-use tracing_subscriber::{EnvFilter, FmtSubscriber};
+use tracing_subscriber::{
+    fmt::time::FormatTime,
+    EnvFilter, FmtSubscriber,
+};
 
 /// Scheduler daemon subcommand args
 #[derive(Parser)]
@@ -22,17 +26,18 @@ const CLIENT_SUBCMDS: &[&str] = &[
 
 #[tokio::main]
 async fn main() {
-    // Init tracing once for the unified binary
+    // Init tracing once for the unified binary.
     FmtSubscriber::builder()
         .with_env_filter(EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| {
             if std::env::var("OPENCLI_VERBOSE").is_ok() {
-                EnvFilter::new("debug")
+                EnvFilter::new("info")
             } else {
-                EnvFilter::new("warn")
+                EnvFilter::new("off")
             }
         }))
-        .with_max_level(Level::DEBUG)
+        .with_max_level(Level::INFO)
         .with_target(false)
+        .with_timer(log_timer())
         .compact()
         .init();
 
@@ -77,6 +82,43 @@ async fn main() {
         // ── Adapter execution (default) ────────────────────────────────────
         _ => {
             opencli_rs_cli::runner::run().await;
+        }
+    }
+}
+
+fn log_timer() -> impl FormatTime {
+    match std::env::var("OPENCLI_LOG_TIME")
+        .ok()
+        .as_deref()
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("none") => LogTimer::None,
+        Some("second") => LogTimer::Second,
+        Some("millisecond") | Some("ms") => LogTimer::Millisecond,
+        Some("minute") | None => LogTimer::Minute,
+        Some(_) => LogTimer::Minute,
+    }
+}
+
+enum LogTimer {
+    None,
+    Minute,
+    Second,
+    Millisecond,
+}
+
+impl FormatTime for LogTimer {
+    fn format_time(&self, writer: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        match self {
+            LogTimer::None => Ok(()),
+            LogTimer::Minute => write!(writer, "{}", Local::now().format("%Y-%m-%d %H:%M")),
+            LogTimer::Second => write!(writer, "{}", Local::now().format("%Y-%m-%d %H:%M:%S")),
+            LogTimer::Millisecond => write!(
+                writer,
+                "{}",
+                Local::now().format("%Y-%m-%d %H:%M:%S%.3f")
+            ),
         }
     }
 }

@@ -26,8 +26,6 @@ pub async fn execute_command(
     cmd: &CliCommand,
     kwargs: HashMap<String, Value>,
 ) -> Result<Value, CliError> {
-    tracing::info!(site = %cmd.site, name = %cmd.name, "Executing command");
-
     let timeout_secs = command_timeout(cmd);
 
     let result = tokio::time::timeout(
