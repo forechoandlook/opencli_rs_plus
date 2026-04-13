@@ -3,3 +3,5 @@
 test-results*.md
 twitter-downloads/
 .DS_Store
+tmp
+docs/generated

@@ -299,7 +299,7 @@ jobs:
           TAG="__TAG__"
           REPO="__REPO__"
           BASE_URL="__BASE_URL__"
-          INSTALL_DIR="${OPENCLI_INSTALL_DIR:-/usr/local/bin}"
+          INSTALL_DIR="${OPENCLI_INSTALL_DIR:-$HOME/local/bin}"
           DATA_DIR="${OPENCLI_DATA_DIR:-$HOME/.opencli-rs}"
 
           OS="$(uname -s)"
