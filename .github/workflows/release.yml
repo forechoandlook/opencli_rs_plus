@@ -387,16 +387,10 @@ jobs:
         run: |
           set -euo pipefail
           git clone https://x-access-token:${GITHUB_TOKEN}@github.com/forechoandlook/public_tools.git _public_tools
-          mkdir -p _public_tools/tools
-          rm -rf _public_tools/tools/*
-          shopt -s nullglob
-          tool_files=(tools/*.md)
-          if [ ${#tool_files[@]} -eq 0 ]; then
-            echo "No tools/*.md files found; nothing to sync."
-            exit 0
-          fi
-          cp -r "${tool_files[@]}" _public_tools/tools/
-          cp README.md _public_tools/README.md
+          mkdir -p _public_tools/skills/opencli_plus
+          rm -rf _public_tools/skills/
+          cp -r skills/opencli_plus _public_tools/skills/
+          cp README.md _public_tools/opencli_plus.md
           cd _public_tools
           git config user.email "ci@github.com"
           git config user.name "GitHub Actions"
