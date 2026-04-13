@@ -56,22 +56,14 @@ pub async fn run_doctor() {
         print_check("Chrome extension connected", false);
     }
 
-    // 4. Check external CLIs
-    println!();
-    println!("{}", "External CLIs:".bold());
-    for name in &["gh", "docker", "kubectl"] {
-        let installed = is_binary_installed(name);
-        print_check(name, installed);
-    }
-
-    // 5. Check CDP endpoint
+    // 4. Check CDP endpoint
     let cdp = std::env::var("OPENCLI_CDP_ENDPOINT").ok();
     if let Some(endpoint) = cdp {
         println!();
         println!("CDP endpoint: {}", endpoint);
     }
 
-    // 6. Print adapter stats
+    // 5. Print adapter stats
     println!();
     println!("{}", "Adapter stats:".bold());
     // Will be filled in by main.rs passing registry info

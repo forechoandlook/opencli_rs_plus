@@ -115,7 +115,7 @@ opencli job run
 
 ### 工具知识库
 
-工具知识库索引 CLI 工具信息（名称、描述、安装命令等），用于帮助 agent 发现不熟悉的工具。
+工具知识库是唯一的 `opencli tools` 入口，用来索引 CLI 工具信息（名称、描述、安装命令等），所有工具都通过 `~/.opencli-rs/tools/*.md` 管理。
 
 **本地纯文件方案，不经过 daemon**，直接读取 `~/.opencli-rs/tools/*.md`，内存过滤。
 

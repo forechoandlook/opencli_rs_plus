@@ -8,7 +8,7 @@
 - `direct` 直接执行模式，适合单次抓取和调试
 - YAML adapter 定义，便于新增站点和命令
 - 浏览器插件复用登录态，适合需要已登录页面的抓取场景
-- 本地工具知识库 `opencli tools`
+- 本地工具知识库 `opencli tools`，唯一入口，所有工具都通过 `~/.opencli-rs/tools/*.md` 管理
 - 本地反馈记录 `opencli feedback`
 - 默认输出格式为 CSV，可通过 `--format` 切换为 `table` / `json` / `yaml` / `md`
 

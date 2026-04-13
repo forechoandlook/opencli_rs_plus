@@ -21,7 +21,6 @@ version: "0.1"
 - `direct` 模式：其他 adapter 命令直接执行，不依赖 daemon；daemon 未运行时也可用于调试单个 adapter。
 
 - `opencli --help` 默认只展示内置命令和 daemon/client 命令。
-- `opencli --help --adapters` 展开全部 adapter family。
 - `opencli <family> --help` 查看某个 family。
 
 ## 常用命令
@@ -35,6 +34,7 @@ opencli daemon
 opencli status
 opencli restart
 opencli adapter list
+opencli tool list
 opencli adapter search "zhihu"
 opencli plugin list
 opencli tools search curl
@@ -64,4 +64,4 @@ opencli feedback "zhihu hot returns 403" --adapter "zhihu hot" --kind broken
 
 ## 问题反馈
 
-`opencli feedback` 用于把用户遇到的问题、错误结果、文档不准确之处记录到本地，并可选打开预填好的 GitHub issue 页面。 参考
+`opencli feedback` 用于把用户遇到的问题、错误结果、文档不准确之处记录到本地，并可选打开预填好的 GitHub issue 页面。 参考 [反馈文档](./feedback.md) 获取详细用法和上报建议。

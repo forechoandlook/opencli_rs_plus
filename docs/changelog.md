@@ -4,7 +4,7 @@
 - **自卸载命令**：新增 `opencli uninstall`，在 Unix-like 系统上可直接删除当前二进制；Windows 下明确返回不支持提示，避免静默失败。
 - **External CLI 执行代理已移除**：opencli-rs-cli 不再依赖 opencli-rs-external，external CLI 透传功能已删除。
 - **`--version` 早退出**：顶层 `opencli --version` 现在在适配器发现之前直接返回，避免触发加载日志和 dev 输出，保证版本信息纯净输出。
-- **工具知识库**：本地纯文件方案，从 `~/.opencli-rs/tools/*.md`（YAML frontmatter + Markdown body）加载，内存过滤，无 SQLite、无 daemon 依赖。`opencli tools` 子命令直接本地执行，支持 search / list / info / summary。
+- **工具知识库**：唯一入口是 `opencli tools`。本地纯文件方案从 `~/.opencli-rs/tools/*.md`（YAML frontmatter + Markdown body）加载，内存过滤，无 SQLite、无 daemon 依赖，支持 search / list / info / summary。
 - **Desktop/Electron App 适配**：`strategy: ui` + `domain: localhost` 时走 CDP 直连模式（`crates/opencli-rs-browser/src/electron_apps.rs`），需目标 App 开启 `--remote-debugging-port`。内置端口映射：antigravity=9234, cursor=9226, codex=9222, chatwise=9228。用户可通过 `~/.opencli-rs/apps.yaml` 扩展。
 - **Daemon Socket API**：JSON-RPC over TCP（127.0.0.1:10008），支持 daemon.*、job.*、adapter.* 方法。tools.* 已移除（本地直接执行）。
 - **Scheduler 注意事项**：args 为 null 时正常处理；执行前自动注入 YAML 中定义的 default 参数；job ID 支持前缀匹配。
