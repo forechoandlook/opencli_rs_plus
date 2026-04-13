@@ -80,7 +80,7 @@ fn load_from_cache(registry: &mut Registry) -> Result<usize, CliError> {
             }
         }
     }
-    tracing::info!(count = count, "Loaded adapters from cache");
+    tracing::debug!(count = count, "Loaded adapters from cache");
     Ok(count)
 }
 
@@ -100,7 +100,7 @@ fn scan_and_cache(registry: &mut Registry) -> Result<usize, CliError> {
     let cache_content = serde_json::to_string(&cache).map_err(CliError::Json)?;
     fs::write(cache_path(), cache_content)?;
 
-    tracing::info!(count = count, dest = %cache_path().display(), "Scanned and cached adapters");
+    tracing::debug!(count = count, dest = %cache_path().display(), "Scanned and cached adapters");
     Ok(count)
 }
 

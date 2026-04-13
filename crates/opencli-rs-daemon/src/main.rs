@@ -31,7 +31,7 @@ async fn main() {
                 EnvFilter::new("warn")
             }
         }))
-        .with_max_level(Level::INFO)
+        .with_max_level(Level::DEBUG)
         .with_target(false)
         .compact()
         .init();

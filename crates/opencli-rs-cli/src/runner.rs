@@ -76,7 +76,7 @@ pub async fn run() {
     let local_adapters_dir = std::path::PathBuf::from("adapters");
     if local_adapters_dir.exists() && local_adapters_dir.is_dir() {
         match scan_dir_no_cache(&local_adapters_dir, &mut registry) {
-            Ok(n) if n > 0 => eprintln!("[dev] Loaded {} adapters from ./adapters/", n),
+            Ok(n) if n > 0 => tracing::debug!(count = n, "Loaded local dev adapters"),
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "Failed to load local dev adapters"),
         }

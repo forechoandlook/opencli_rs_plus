@@ -301,8 +301,8 @@ pub fn build_cli(registry: &Registry) -> Command {
                 .long("format")
                 .short('f')
                 .global(true)
-                .default_value("table")
-                .help("Output format: table | json | yaml | csv | md"),
+                .default_value("csv")
+                .help("Output format: csv | table | json | yaml | md"),
         )
         .arg(
             Arg::new("verbose")

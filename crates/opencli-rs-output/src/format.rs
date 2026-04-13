@@ -6,20 +6,20 @@ use std::time::Duration;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputFormat {
     #[default]
-    Table,
+    Csv,
     Json,
     Yaml,
-    Csv,
+    Table,
     Markdown,
 }
 
 impl fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Table => write!(f, "table"),
+            Self::Csv => write!(f, "csv"),
             Self::Json => write!(f, "json"),
             Self::Yaml => write!(f, "yaml"),
-            Self::Csv => write!(f, "csv"),
+            Self::Table => write!(f, "table"),
             Self::Markdown => write!(f, "markdown"),
         }
     }
@@ -30,10 +30,10 @@ impl FromStr for OutputFormat {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
+            "csv" => Ok(Self::Csv),
             "table" => Ok(Self::Table),
             "json" => Ok(Self::Json),
             "yaml" => Ok(Self::Yaml),
-            "csv" => Ok(Self::Csv),
             "md" | "markdown" => Ok(Self::Markdown),
             other => Err(format!("unknown output format: '{other}'")),
         }

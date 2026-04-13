@@ -10,6 +10,7 @@
 - 浏览器插件复用登录态，适合需要已登录页面的抓取场景
 - 本地工具知识库 `opencli tools`
 - 本地反馈记录 `opencli feedback`
+- 默认输出格式为 CSV，可通过 `--format` 切换为 `table` / `json` / `yaml` / `md`
 
 ## 安装
 
@@ -38,6 +39,7 @@ opencli doctor
 opencli --help
 opencli --help --adapters
 opencli <family> --help
+opencli --format json zhihu hot
 ```
 
 启动 daemon：
@@ -104,6 +106,8 @@ opencli feedback "adapter summary inaccurate" --kind bad_description --open
 - `--kind broken|bad_description|other`
 - `--open` 打开预填好的 GitHub issue 页面
 
+默认不会打印 adapter 加载过程；如需查看调试级别信息，可结合 `--verbose` 或 `RUST_LOG=debug` 使用。
+
 ## 开发
 
 新增或修改 adapter 时，推荐流程是：
@@ -149,4 +153,3 @@ opencli update --check
 - [docs/develop.md](docs/develop.md)
 - [docs/search.md](docs/search.md)
 - [docs/changelog.md](docs/changelog.md)
-
