@@ -388,8 +388,8 @@ jobs:
           set -euo pipefail
           git clone https://x-access-token:${GITHUB_TOKEN}@github.com/forechoandlook/public_tools.git _public_tools
           mkdir -p _public_tools/skills/opencli_plus
-          rm -rf _public_tools/skills/
-          cp -r skills/opencli_plus _public_tools/skills/
+          rm -rf _public_tools/skills/opencli_plus
+          cp -r skills/ _public_tools/skills/
           cp README.md _public_tools/opencli_plus.md
           cd _public_tools
           git config user.email "ci@github.com"
