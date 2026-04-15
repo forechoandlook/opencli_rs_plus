@@ -5,3 +5,4 @@ twitter-downloads/
 .DS_Store
 tmp
 docs/generated
+.playwright-cli

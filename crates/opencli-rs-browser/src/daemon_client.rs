@@ -13,12 +13,23 @@ pub struct DaemonClient {
 
 /// Retry delays for exponential backoff.
 const RETRY_DELAYS_MS: [u64; 4] = [200, 500, 1000, 2000];
+const DEFAULT_DAEMON_HTTP_TIMEOUT_SECS: u64 = 1800;
+
+fn daemon_http_timeout() -> Duration {
+    std::env::var("OPENCLI_BROWSER_COMMAND_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(|secs| secs.saturating_add(30))
+        .filter(|secs| *secs > 0)
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(DEFAULT_DAEMON_HTTP_TIMEOUT_SECS))
+}
 
 impl DaemonClient {
     /// Create a new client pointing at the given port on localhost.
     pub fn new(port: u16) -> Self {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
+            .timeout(daemon_http_timeout())
             .build()
             .expect("failed to build reqwest client");
         Self {

@@ -1,0 +1,36 @@
+site: qwen-coder
+name: menu
+description: List the available Qwen Coder functions and modes
+domain: coder.qwen.ai
+strategy: public
+browser: true
+
+columns: [rank, Category, Name, Value]
+
+pipeline:
+  - navigate: https://coder.qwen.ai/
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        const res = await fetch('/api/v2/configs/');
+        const json = await res.json();
+        const cfg = json?.data || {};
+        const rows = [];
+        const pushEntries = (category, obj) => {
+          for (const [name, value] of Object.entries(obj || {})) {
+            rows.push({ Category: category, Name: name, Value: Array.isArray(value) ? value.join(', ') : String(value) });
+          }
+        };
+
+        pushEntries('entry', cfg.function_entry || {});
+        pushEntries('feature', cfg.features?.feature_feature || {});
+        pushEntries('file', cfg.features?.feature_file || {});
+        return rows;
+      })()
+
+  - map:
+      rank: ${{ index + 1 }}
+      Category: ${{ item.Category }}
+      Name: ${{ item.Name }}
+      Value: ${{ item.Value }}
+

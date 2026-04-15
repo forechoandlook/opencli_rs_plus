@@ -1,0 +1,199 @@
+site: qwen
+name: deep-research
+description: Open Qwen Deep Research, submit a prompt, and report current-session result
+domain: chat.qwen.ai
+strategy: public
+browser: true
+timeoutSeconds: 180
+
+args:
+  prompt:
+    positional: true
+    type: string
+    required: true
+    description: Research prompt
+  timeout:
+    type: int
+    default: 60
+    description: Max seconds to wait for a session-state result
+
+columns: [Feature, Status, Detail, Placeholder, Modes, Inputs]
+
+pipeline:
+  - navigate: https://chat.qwen.ai/
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        const featureKey = 'deep_research';
+        const featureLabels = ['Deep Research', '深度研究', 'DeepResearch'];
+        const prompt = ${{ args.prompt | json }};
+        const timeout = Number(${{ args.timeout }}) || 60;
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        const cfgRes = await fetch('/api/v2/configs/');
+        const cfgJson = await cfgRes.json();
+        const cfg = cfgJson?.data || {};
+        const apiAvailable =
+          Object.prototype.hasOwnProperty.call(cfg.features?.feature_feature || {}, featureKey) ||
+          Object.prototype.hasOwnProperty.call(cfg.features?.feature_file || {}, featureKey);
+
+        const candidates = () => Array.from(document.querySelectorAll('[role="menuitem"], button, [role="button"], div, span'));
+        const findByText = (textList) =>
+          candidates().find((node) => {
+            const current = (node.textContent || '').replace(/\s+/g, ' ').trim();
+            return textList.some(text => current === text || current.includes(text));
+          });
+        const resolveItem = (textList) => findByText(textList)?.closest?.('[role="menuitem"], button, [role="button"]') || findByText(textList) || null;
+        
+        const isDisabled = (node) => {
+          if (!node) return false;
+          const own = node.getAttribute?.('aria-disabled') === 'true' || node.getAttribute?.('disabled') != null;
+          const cls = String(node.className || '');
+          return own || /disabled/i.test(cls) || !!node.closest?.('[aria-disabled="true"], .ant-dropdown-menu-item-disabled, .ant-menu-item-disabled');
+        };
+        const loginRequired = () => /log in|sign up|stay logged out|login or sign up|登录|注册/.test(document.body?.innerText || '');
+        const responseText = () => {
+          const texts = Array.from(document.querySelectorAll('main [class*="markdown"], main article, main [data-role], main pre, main code'))
+            .map((node) => (node.innerText || '').trim())
+            .filter((text) => text && text !== prompt && text.length > 24 && !/terms of service|privacy policy/i.test(text));
+          return texts[texts.length - 1] || '';
+        };
+
+        let item = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const spans = Array.from(document.querySelectorAll('span, div, button'));
+          item = spans.find(s => {
+            const text = (s.textContent || '').trim();
+            return featureLabels.some(l => text === l);
+          });
+
+          if (item && item.offsetParent !== null) {
+            item.click();
+            await sleep(1000);
+            break;
+          }
+
+          const trigger = document.querySelector('.mode-select-content') || 
+                          document.querySelector('.mode-select .ant-dropdown-trigger') || 
+                          document.querySelector('.mode-select') ||
+                          spans.find(s => s.textContent.includes('Thinking') || s.textContent.includes('Auto') || s.textContent.includes('Normal'));
+
+          if (trigger) {
+            trigger.click();
+            await sleep(1000);
+          }
+
+          const menuItems = Array.from(document.querySelectorAll('.ant-dropdown-menu-item, .mode-select-dropdown-item, [role="menuitem"], .ant-dropdown-menu span'));
+          item = menuItems.find(el => {
+            const text = (el.textContent || '').trim();
+            return featureLabels.some(label => text === label || text.includes(label));
+          });
+
+          if (!item) {
+            const moreBtn = menuItems.find(el => ['More', '更多', 'Tools', '工具'].some(l => (el.textContent || '').includes(l)));
+            if (moreBtn) {
+              moreBtn.click();
+              await sleep(1000);
+              const subItems = Array.from(document.querySelectorAll('.ant-dropdown-menu-item, .mode-select-dropdown-item'));
+              item = subItems.find(el => {
+                const text = (el.textContent || '').trim();
+                return featureLabels.some(label => text === label || text.includes(label));
+              });
+            }
+          }
+
+          if (item) {
+            const target = item.querySelector('.ant-dropdown-menu-title-content') || item;
+            target.click();
+            await sleep(1000);
+            break;
+          }
+
+          document.body.click();
+          await sleep(500);
+        }
+
+        if (!item) {
+          return [{
+            Feature: featureLabels[0],
+            Status: apiAvailable ? 'api_available_dom_unresolved' : 'missing',
+            Detail: 'Feature exists in public config, but the menu item was not resolved in this browser session.',
+            Placeholder: '',
+            Modes: Array.isArray(cfg.features?.feature_feature?.[featureKey]) ? cfg.features.feature_feature[featureKey].join(', ') : '',
+            Inputs: Array.isArray(cfg.features?.feature_file?.[featureKey]) ? cfg.features.feature_file[featureKey].join(', ') : '',
+          }];
+        }
+
+        if (isDisabled(item)) {
+          return [{
+            Feature: featureLabels[0],
+            Status: 'disabled',
+            Detail: 'Feature is disabled in the current session.',
+            Placeholder: '',
+            Modes: Array.isArray(cfg.features?.feature_feature?.[featureKey]) ? cfg.features.feature_feature[featureKey].join(', ') : '',
+            Inputs: Array.isArray(cfg.features?.feature_file?.[featureKey]) ? cfg.features.feature_file[featureKey].join(', ') : '',
+          }];
+        }
+
+        await sleep(1000);
+        const box = document.querySelector('textarea.message-input-textarea, textarea');
+        const placeholder = box?.getAttribute('placeholder') || '';
+        if (!box) {
+          return [{
+            Feature: featureLabels[0],
+            Status: 'input-missing',
+            Detail: 'Feature was selected but no textarea was found.',
+            Placeholder: placeholder,
+            Modes: Array.isArray(cfg.features?.feature_feature?.[featureKey]) ? cfg.features.feature_feature[featureKey].join(', ') : '',
+            Inputs: Array.isArray(cfg.features?.feature_file?.[featureKey]) ? cfg.features.feature_file[featureKey].join(', ') : '',
+          }];
+        }
+
+        box.focus();
+        box.value = prompt;
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        box.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(500);
+
+        const sendBtn = document.querySelector('button.send-button, .message-input-right-button-send button, .message-input-right-button-send .omni-button-content-btn, .message-input-right-button-send button span');
+        if (sendBtn && !sendBtn.disabled) {
+          sendBtn.click();
+        } else {
+          box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+        }
+
+        const start = Date.now();
+        while (Date.now() - start < timeout * 1000) {
+          await sleep(1500);
+          if (loginRequired()) {
+            return [{
+              Feature: featureLabels[0],
+              Status: 'login_required',
+              Detail: 'Prompt submission reached the login wall in the current session.',
+              Placeholder: placeholder,
+              Modes: Array.isArray(cfg.features?.feature_feature?.[featureKey]) ? cfg.features.feature_feature[featureKey].join(', ') : '',
+              Inputs: Array.isArray(cfg.features?.feature_file?.[featureKey]) ? cfg.features.feature_file[featureKey].join(', ') : '',
+            }];
+          }
+          const text = responseText();
+          if (text) {
+            return [{
+              Feature: featureLabels[0],
+              Status: 'completed',
+              Detail: text.slice(0, 500),
+              Placeholder: placeholder,
+              Modes: Array.isArray(cfg.features?.feature_feature?.[featureKey]) ? cfg.features.feature_feature[featureKey].join(', ') : '',
+              Inputs: Array.isArray(cfg.features?.feature_file?.[featureKey]) ? cfg.features.feature_file[featureKey].join(', ') : '',
+            }];
+          }
+        }
+
+        return [{
+          Feature: featureLabels[0],
+          Status: 'submitted',
+          Detail: 'Prompt was submitted but no terminal state was observed within timeout.',
+          Placeholder: placeholder,
+          Modes: Array.isArray(cfg.features?.feature_feature?.[featureKey]) ? cfg.features.feature_feature[featureKey].join(', ') : '',
+          Inputs: Array.isArray(cfg.features?.feature_file?.[featureKey]) ? cfg.features.feature_file[featureKey].join(', ') : '',
+        }];
+      })()

@@ -1,0 +1,145 @@
+site: qwen
+name: image
+description: Generate an image in Qwen Studio and save it to disk
+domain: chat.qwen.ai
+strategy: public
+browser: true
+timeoutSeconds: 180
+
+args:
+  prompt:
+    positional: true
+    type: string
+    required: true
+    description: Image description prompt
+  output:
+    type: string
+    default: ""
+    description: Output directory (default ~/Downloads)
+
+columns: [response, size]
+
+pipeline:
+  - evaluate: |
+      (async () => {
+        const prompt = ${{ args.prompt | json }};
+
+        const toDataUrl = (blob) => new Promise((resolve, reject) => {
+          try {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          } catch (err) {
+            reject(err);
+          }
+        });
+
+        const downloadImage = async (url) => {
+          if (!url) return null;
+          try {
+            const res = await fetch(url, { credentials: 'omit' });
+            if (!res.ok) return null;
+            const blob = await res.blob();
+            const dataUrl = await toDataUrl(blob);
+            return typeof dataUrl === 'string' && dataUrl !== 'data:,' ? dataUrl : null;
+          } catch {
+            return null;
+          }
+        };
+
+        const resultImages = () => Array.from(document.querySelectorAll(
+          'img.qwen-image, img.ant-image-img.qwen-image, img[src*="cdn.qwenlm.ai/output/"], .vision-item-container .vision-item-image'
+        )).filter(i => {
+          const src = i.src || '';
+          if (!src) return false;
+          if (/cdn\.qwenlm\.ai\/output\/.+\/image_gen\//.test(src)) return true;
+          if (/\/image_gen\//.test(src)) return true;
+          return false;
+        });
+        const initialResultSrcs = new Set(resultImages().map(i => (i.src || '').split('&x-oss-process=')[0]).filter(Boolean));
+
+        const detectLoginPrompt = () => {
+          const text = document.body?.innerText || '';
+          return /log in|sign up|stay logged out|登录|注册/.test(text);
+        };
+
+        const enterPrompt = () => {
+          const box = document.querySelector('textarea.message-input-textarea, textarea[placeholder*="Describe the image you want to generate"], textarea');
+          if (!box) return false;
+          box.focus();
+          box.value = '';
+          box.dispatchEvent(new Event('input', { bubbles: true }));
+          box.setSelectionRange(0, 0);
+          document.execCommand('selectAll');
+          document.execCommand('insertText', false, prompt);
+          box.value = prompt;
+          box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: prompt }));
+          box.dispatchEvent(new Event('change', { bubbles: true }));
+          if ((box.value || '') !== prompt) {
+            return false;
+          }
+          return true;
+        };
+
+        const submitPrompt = () => {
+          const sendBtn = document.querySelector('button.send-button') ||
+            Array.from(document.querySelectorAll('button')).find(b => /create image|generate|send|生成|创建/i.test((b.textContent || '').trim()));
+          if (sendBtn && !sendBtn.disabled) {
+            sendBtn.click();
+            return true;
+          }
+          const box = document.querySelector('textarea.message-input-textarea, textarea[placeholder*="Describe the image you want to generate"], textarea');
+          if (box) {
+            box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+            box.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+            return true;
+          }
+          return false;
+        };
+
+        // Open image generator from menu.
+        const createImageBtn = Array.from(document.querySelectorAll('button,[role="menuitem"],[role="button"]'))
+          .find(el => (el.textContent || '').includes('Create Image') || (el.textContent || '').includes('生成图像'));
+        if (createImageBtn) createImageBtn.click();
+
+        for (let i = 0; i < 10; i++) {
+          if (enterPrompt()) break;
+          await new Promise(r => setTimeout(r, 500));
+        }
+        const box = document.querySelector('textarea.message-input-textarea, textarea[placeholder*="Describe the image you want to generate"], textarea');
+        if (!box || (box.value || '') !== prompt) {
+          return [{ response: '[INPUT_NOT_APPLIED] Qwen image prompt was not written into the textarea.', filename: '' }];
+        }
+
+        if (detectLoginPrompt()) {
+          return [{ response: '[LOGIN_REQUIRED] Qwen image generation requires login in this session.', filename: '' }];
+        }
+
+        await new Promise(r => setTimeout(r, 300));
+        submitPrompt();
+
+        const start = Date.now();
+        while (Date.now() - start < 120000) {
+          await new Promise(r => setTimeout(r, 2000));
+          const data = resultImages().find(i => {
+            const src = (i.src || '').split('&x-oss-process=')[0];
+            if (!src || initialResultSrcs.has(src)) return false;
+            if ((i.naturalWidth || i.width || 0) < 300) return false;
+            return true;
+          });
+          const result = data ? await downloadImage(data.src) : null;
+          if (result) {
+            return [{ response: result, filename: 'qwen_' + Date.now() + '.png' }];
+          }
+          if (detectLoginPrompt()) {
+            return [{ response: '[LOGIN_REQUIRED] Qwen image generation requires login in this session.', filename: '' }];
+          }
+        }
+
+        return [{ response: '[TIMEOUT] Qwen image generation took longer than 120s', filename: '' }];
+      })()
+  - download:
+      type: base64
+      filename: ${{ data[0].filename }}
+      output: ${{ args.output }}

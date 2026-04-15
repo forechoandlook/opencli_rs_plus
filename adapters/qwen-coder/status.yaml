@@ -1,0 +1,50 @@
+site: qwen-coder
+name: status
+description: Check Qwen Coder public API and login state
+domain: coder.qwen.ai
+strategy: public
+browser: true
+
+columns: [Status, Login, Url, Title, Entry, Features]
+
+pipeline:
+  - navigate: https://coder.qwen.ai/
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        const safeJson = async (url, init) => {
+          try {
+            const res = await fetch(url, init);
+            if (res.status === 401) return { unauthorized: true };
+            const text = await res.text();
+            try { return JSON.parse(text); } catch { return { raw: text, status: res.status }; }
+          } catch (err) {
+            return { error: String(err) };
+          }
+        };
+
+        const config = await safeJson('/api/v2/configs/');
+        const auths = await safeJson('/api/v1/auths/');
+        const loginData = await safeJson('/api/v2/users/status', { method: 'POST' });
+        const isLoggedIn = auths && !auths.unauthorized;
+        const features = config?.data?.features || {};
+        const entry = config?.data?.function_entry || {};
+
+        return [{
+          Status: isLoggedIn ? 'Connected' : 'Login Required',
+          Login: isLoggedIn ? 'Yes' : 'No',
+          Url: location.href,
+          Title: document.title || 'Qwen Coder',
+          Entry: [
+            entry.community ? 'community' : '',
+            entry.coder ? 'coder' : '',
+            entry.mylibrary ? 'mylibrary' : '',
+          ].filter(Boolean).join(', ') || 'unknown',
+          Features: [
+            features.enable_project ? 'project' : '',
+            features.enable_anonymous ? 'anonymous' : '',
+            features.enable_payment ? 'payment' : '',
+            loginData?.data === true ? 'status-ok' : '',
+          ].filter(Boolean).join(', '),
+        }];
+      })()

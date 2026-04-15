@@ -1,0 +1,103 @@
+site: qwen
+name: slides
+description: Check or submit the Qwen Slides feature in the current session
+domain: chat.qwen.ai
+strategy: public
+browser: true
+timeoutSeconds: 120
+
+args:
+  prompt:
+    positional: true
+    type: string
+    required: false
+    description: Optional slide-generation prompt
+
+columns: [Feature, Status, Detail, Placeholder, Modes, Inputs]
+
+pipeline:
+  - navigate: https://chat.qwen.ai/
+  - wait: 2
+  - evaluate: |
+      (async () => {
+        const featureKey = 'slides';
+        const featureLabels = ['Slides', '演示文稿', 'PPT'];
+        const prompt = ${{ args.prompt | default("", true) | json }};
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        const cfgRes = await fetch('/api/v2/configs/');
+        const cfgJson = await cfgRes.json();
+        const cfg = cfgJson?.data || {};
+        const apiAvailable =
+          Object.prototype.hasOwnProperty.call(cfg.features?.feature_feature || {}, featureKey) ||
+          Object.prototype.hasOwnProperty.call(cfg.features?.feature_file || {}, featureKey);
+
+        const candidates = () => Array.from(document.querySelectorAll('[role="menuitem"], button, [role="button"], div, span'));
+        const findByText = (textList) =>
+          candidates().find((node) => {
+            const current = (node.textContent || '').replace(/\s+/g, ' ').trim();
+            return textList.some(text => current === text || current.includes(text));
+          });
+        const resolveItem = (textList) => findByText(textList)?.closest?.('[role="menuitem"], button, [role="button"]') || findByText(textList) || null;
+        
+        const isDisabled = (node) => {
+          if (!node) return false;
+          const own = node.getAttribute?.('aria-disabled') === 'true' || node.getAttribute?.('disabled') != null;
+          const cls = String(node.className || '');
+          return own || /disabled/i.test(cls) || !!node.closest?.('[aria-disabled="true"], .ant-dropdown-menu-item-disabled, .ant-menu-item-disabled');
+        };
+
+        let item = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const trigger = document.querySelector('.mode-select .ant-dropdown-trigger') || document.querySelector('.mode-select');
+          trigger?.click();
+          await sleep(500);
+          
+          item = resolveItem(featureLabels);
+          if (!item) {
+            const moreBtn = resolveItem(['More', '更多']);
+            if (moreBtn) {
+              moreBtn.click();
+              await sleep(500);
+              item = resolveItem(featureLabels);
+            }
+          }
+          if (item) break;
+          // If still not found, click body to close any stuck menu and try again
+          document.body.click();
+          await sleep(300);
+        }
+
+        if (!item) {
+          return [{
+            Feature: featureLabels[0],
+            Status: apiAvailable ? 'api_available_dom_unresolved' : 'missing',
+            Detail: apiAvailable ? 'Feature exists in public config, but the menu item was not resolved in this browser session.' : 'Feature entry not found in current Qwen menu.',
+            Placeholder: '',
+            Modes: Array.isArray(cfg.features?.feature_feature?.[featureKey]) ? cfg.features.feature_feature[featureKey].join(', ') : '',
+            Inputs: Array.isArray(cfg.features?.feature_file?.[featureKey]) ? cfg.features.feature_file[featureKey].join(', ') : '',
+          }];
+        }
+        if (isDisabled(item)) {
+          return [{
+            Feature: featureLabels[0],
+            Status: 'disabled',
+            Detail: 'Slides is disabled in the current session.',
+            Placeholder: '',
+            Modes: Array.isArray(cfg.features?.feature_feature?.[featureKey]) ? cfg.features.feature_feature[featureKey].join(', ') : '',
+            Inputs: Array.isArray(cfg.features?.feature_file?.[featureKey]) ? cfg.features.feature_file[featureKey].join(', ') : '',
+          }];
+        }
+
+        item.click();
+        await sleep(800);
+        const placeholder = document.querySelector('textarea.message-input-textarea, textarea')?.getAttribute('placeholder') || '';
+        return [{
+          Feature: featureLabels[0],
+          Status: prompt ? 'ready' : 'available',
+          Detail: prompt ? 'Slides accepted the prompt path setup, but full generation is not yet captured.' : 'Slides entry is enabled in the current session.',
+          Placeholder: placeholder,
+          Modes: Array.isArray(cfg.features?.feature_feature?.[featureKey]) ? cfg.features.feature_feature[featureKey].join(', ') : '',
+          Inputs: Array.isArray(cfg.features?.feature_file?.[featureKey]) ? cfg.features.feature_file[featureKey].join(', ') : '',
+        }];
+      })()
