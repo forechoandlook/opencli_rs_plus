@@ -11,10 +11,10 @@ args:
     positional: true
     type: string
     required: true
-    description: Artifact prompt
+    description: Artifacts generation prompt
   timeout:
     type: int
-    default: 30
+    default: 60
     description: Max seconds to wait for a session-state result
 
 columns: [Feature, Status, Detail, Placeholder, Modes, Inputs]
@@ -25,9 +25,9 @@ pipeline:
   - evaluate: |
       (async () => {
         const featureKey = 'artifacts';
-        const featureLabels = ['Artifacts', '构件'];
+        const featureLabels = ['Artifacts', '创作', '作品'];
         const prompt = ${{ args.prompt | json }};
-        const timeout = Number(${{ args.timeout }}) || 30;
+        const timeout = Number(${{ args.timeout }}) || 60;
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
         const cfgRes = await fetch('/api/v2/configs/');
@@ -53,10 +53,6 @@ pipeline:
         };
         const loginRequired = () => /log in|sign up|stay logged out|login or sign up|登录|注册/.test(document.body?.innerText || '');
         const responseText = () => {
-          const links = Array.from(document.querySelectorAll('a[href]'))
-            .map((node) => node.href)
-            .filter((href) => /^https?:/.test(href) && !href.includes('terms') && !href.includes('privacy'));
-          if (links.length) return links[links.length - 1];
           const texts = Array.from(document.querySelectorAll('main [class*="markdown"], main article, main [data-role], main pre, main code'))
             .map((node) => (node.innerText || '').trim())
             .filter((text) => text && text !== prompt && text.length > 24 && !/terms of service|privacy policy/i.test(text));
@@ -65,35 +61,69 @@ pipeline:
 
         let item = null;
         for (let attempt = 0; attempt < 5; attempt++) {
-          const trigger = document.querySelector('.mode-select .ant-dropdown-trigger') || document.querySelector('.mode-select');
-          trigger?.click();
-          await sleep(500);
-          
-          item = resolveItem(featureLabels);
+          const spans = Array.from(document.querySelectorAll('span, div, button'));
+          item = spans.find(s => {
+            const text = (s.textContent || '').trim();
+            return featureLabels.some(l => text === l);
+          });
+
+          if (item && item.offsetParent !== null) {
+            item.click();
+            await sleep(1000);
+            break;
+          }
+
+          const trigger = document.querySelector('.mode-select-content') || 
+                          document.querySelector('.mode-select .ant-dropdown-trigger') || 
+                          document.querySelector('.mode-select') ||
+                          spans.find(s => s.textContent.includes('Thinking') || s.textContent.includes('Auto') || s.textContent.includes('Normal'));
+
+          if (trigger) {
+            trigger.click();
+            await sleep(1000);
+          }
+
+          const menuItems = Array.from(document.querySelectorAll('.ant-dropdown-menu-item, .mode-select-dropdown-item, [role="menuitem"], .ant-dropdown-menu span'));
+          item = menuItems.find(el => {
+            const text = (el.textContent || '').trim();
+            return featureLabels.some(label => text === label || text.includes(label));
+          });
+
           if (!item) {
-            const moreBtn = resolveItem(['More', '更多']);
+            const moreBtn = menuItems.find(el => ['More', '更多', 'Tools', '工具'].some(l => (el.textContent || '').includes(l)));
             if (moreBtn) {
               moreBtn.click();
-              await sleep(500);
-              item = resolveItem(featureLabels);
+              await sleep(1000);
+              const subItems = Array.from(document.querySelectorAll('.ant-dropdown-menu-item, .mode-select-dropdown-item'));
+              item = subItems.find(el => {
+                const text = (el.textContent || '').trim();
+                return featureLabels.some(label => text === label || text.includes(label));
+              });
             }
           }
-          if (item) break;
-          // If still not found, click body to close any stuck menu and try again
+
+          if (item) {
+            const target = item.querySelector('.ant-dropdown-menu-title-content') || item;
+            target.click();
+            await sleep(1000);
+            break;
+          }
+
           document.body.click();
-          await sleep(300);
+          await sleep(500);
         }
 
         if (!item) {
           return [{
             Feature: featureLabels[0],
             Status: apiAvailable ? 'api_available_dom_unresolved' : 'missing',
-            Detail: apiAvailable ? 'Feature exists in public config, but the menu item was not resolved in this browser session.' : 'Feature entry not found in current Qwen menu.',
+            Detail: 'Feature exists in public config, but the menu item was not resolved in this browser session.',
             Placeholder: '',
             Modes: Array.isArray(cfg.features?.feature_feature?.[featureKey]) ? cfg.features.feature_feature[featureKey].join(', ') : '',
             Inputs: Array.isArray(cfg.features?.feature_file?.[featureKey]) ? cfg.features.feature_file[featureKey].join(', ') : '',
           }];
         }
+
         if (isDisabled(item)) {
           return [{
             Feature: featureLabels[0],
@@ -105,8 +135,7 @@ pipeline:
           }];
         }
 
-        item.click();
-        await sleep(800);
+        await sleep(1000);
         const box = document.querySelector('textarea.message-input-textarea, textarea');
         const placeholder = box?.getAttribute('placeholder') || '';
         if (!box) {
@@ -121,14 +150,29 @@ pipeline:
         }
 
         box.focus();
-        box.value = prompt;
+        box.value = '';
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        // Use execCommand to simulate real user typing which better triggers framework states
+        document.execCommand('insertText', false, prompt);
         box.dispatchEvent(new Event('input', { bubbles: true }));
         box.dispatchEvent(new Event('change', { bubbles: true }));
-        await sleep(300);
+        await sleep(500);
 
-        const sendBtn = document.querySelector('button.send-button, .message-input-right-button-send button, .message-input-right-button-send .omni-button-content-btn');
-        if (sendBtn && !sendBtn.disabled) sendBtn.click();
-        else box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+        // Try to find the send button or research-specific button
+        const sendBtn = document.querySelector('button.send-button, .message-input-right-button-send button, .message-input-right-button-send .omni-button-content-btn') ||
+                       Array.from(document.querySelectorAll('button')).find(b => 
+                         /Research|Search|Send|研究|搜索|发送/i.test(b.textContent || '') && !isDisabled(b)
+                       );
+
+        if (sendBtn && !isDisabled(sendBtn)) {
+          sendBtn.click();
+        } else {
+          // Fallback to Enter key events if no button is clickable
+          const eventOptions = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+          box.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
+          box.dispatchEvent(new KeyboardEvent('keypress', eventOptions));
+          box.dispatchEvent(new KeyboardEvent('keyup', eventOptions));
+        }
 
         const start = Date.now();
         while (Date.now() - start < timeout * 1000) {

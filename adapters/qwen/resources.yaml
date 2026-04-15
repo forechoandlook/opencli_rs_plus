@@ -1,51 +1,46 @@
 site: qwen
 name: resources
-description: List downloadable Qwen Studio sample resources from public config
+description: List downloadable Qwen resources and files
 domain: chat.qwen.ai
 strategy: public
 browser: true
 
-args:
-  category:
-    type: string
-    default: all
-    description: Resource category (all, image, video, webdev, artifacts)
-  output:
-    type: string
-    default: ./downloads/qwen
-    description: Output directory for downloaded media
-
-columns: [Category, Title, Type, Url]
+columns: [FileID, Name, Type, Size, Status]
 
 pipeline:
   - navigate: https://chat.qwen.ai/
   - wait: 2
   - evaluate: |
       (async () => {
-        const category = String(${{ args.category | json }} || 'all').toLowerCase();
-        const res = await fetch('/api/v2/configs/?code=query-suggestion');
-        const json = await res.json();
-        const root = json?.data || {};
-        const localeData = root['en-US'] || root['zh-CN'] || Object.values(root).find(v => v && typeof v === 'object') || {};
-        const items = [];
-        const push = (cat, type, item) => {
-          const url = item?.src || item?.image || item?.darkSrc || '';
-          const title = item?.title || item?.description || '';
-          if (!url || (!title && !item?.description)) return;
-          items.push({ type, url });
-        };
-
-        const allow = (cat) => category === 'all' || category === cat;
-        if (allow('image')) (localeData.image || []).forEach(item => push('image', 'image', item));
-        if (allow('video')) (localeData.video || []).forEach(item => push('video', 'video', item));
-        if (allow('webdev')) (localeData.webdev || []).forEach(item => push('webdev', 'image', item));
-        if (allow('artifacts')) (localeData.artifacts || []).forEach(item => push('artifacts', 'image', item));
-
-        return { media: items };
+        try {
+          const filesRes = await fetch('/api/v2/files/');
+          const filesJson = await filesRes.json();
+          const files = filesJson?.data?.list || [];
+          
+          if (files.length === 0) {
+            return [{
+              FileID: 'N/A',
+              Name: 'No files found',
+              Type: 'N/A',
+              Size: '0',
+              Status: 'empty'
+            }];
+          }
+          
+          return files.map(file => ({
+            FileID: file.id,
+            Name: file.name,
+            Type: file.content_type || 'unknown',
+            Size: String(file.size || '0'),
+            Status: file.status || 'unknown'
+          }));
+        } catch (e) {
+          return [{
+            FileID: 'error',
+            Name: 'API Error',
+            Type: 'N/A',
+            Size: '0',
+            Status: e.message
+          }];
+        }
       })()
-
-  - download:
-      items: media
-      type: media-batch
-      output: "${{ args.output }}"
-      username: qwen

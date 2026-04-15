@@ -25,7 +25,7 @@ pipeline:
   - evaluate: |
       (async () => {
         const featureKey = 'deep_research';
-        const featureLabels = ['Deep Research', '深度研究', 'DeepResearch'];
+        const featureLabels = ['Deep Research', '深入研究', 'DeepResearch'];
         const prompt = ${{ args.prompt | json }};
         const timeout = Number(${{ args.timeout }}) || 60;
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -150,16 +150,28 @@ pipeline:
         }
 
         box.focus();
-        box.value = prompt;
+        box.value = '';
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        // Use execCommand to simulate real user typing which better triggers framework states
+        document.execCommand('insertText', false, prompt);
         box.dispatchEvent(new Event('input', { bubbles: true }));
         box.dispatchEvent(new Event('change', { bubbles: true }));
         await sleep(500);
 
-        const sendBtn = document.querySelector('button.send-button, .message-input-right-button-send button, .message-input-right-button-send .omni-button-content-btn, .message-input-right-button-send button span');
-        if (sendBtn && !sendBtn.disabled) {
+        // Try to find the send button or research-specific button
+        const sendBtn = document.querySelector('button.send-button, .message-input-right-button-send button, .message-input-right-button-send .omni-button-content-btn') ||
+                       Array.from(document.querySelectorAll('button')).find(b => 
+                         /Research|Search|Send|研究|搜索|发送/i.test(b.textContent || '') && !isDisabled(b)
+                       );
+
+        if (sendBtn && !isDisabled(sendBtn)) {
           sendBtn.click();
         } else {
-          box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+          // Fallback to Enter key events if no button is clickable
+          const eventOptions = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+          box.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
+          box.dispatchEvent(new KeyboardEvent('keypress', eventOptions));
+          box.dispatchEvent(new KeyboardEvent('keyup', eventOptions));
         }
 
         const start = Date.now();
