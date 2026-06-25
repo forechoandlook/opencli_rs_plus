@@ -230,7 +230,7 @@ async fn handle_exec_streaming(
     };
 
     // Execute the command
-    match opencli_rs_cli::execute_command(&cmd, kwargs).await {
+    match opencli_rs_engine::execute_command(&cmd, kwargs).await {
         Ok(result) => {
             // Record successful usage for hotspot tracking
             let full_name = format!("{} {}", site, cmd_name);

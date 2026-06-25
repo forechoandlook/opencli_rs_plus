@@ -1,0 +1,28 @@
+site: zhihu
+name: my_collections
+description: 列出当前登陆用户的收藏夹
+domain: www.zhihu.com
+browser: true
+timeoutSeconds: 30
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: "Number of collections to fetch"
+
+pipeline:
+  - bg_fetch:
+      url: "https://www.zhihu.com/api/v4/people/self/collections?limit=${{ args.limit }}&offset=0"
+      cookie_url: "https://www.zhihu.com"
+
+  - select: body.data
+
+  - map:
+      id: ${{ item.id }}
+      title: ${{ item.title }}
+      items: ${{ item.item_count || 0 }}
+      followers: ${{ item.follower_count || 0 }}
+      url: ${{ item.url }}
+
+columns: [id, title, items, followers]

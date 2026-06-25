@@ -1,0 +1,35 @@
+site: pypi
+name: info
+description: 查看 PyPI 包详情
+domain: pypi.org
+strategy: public
+browser: false
+
+args:
+  package:
+    type: str
+    required: true
+    positional: true
+    description: "Package name"
+
+pipeline:
+  - fetch:
+      url: "https://pypi.org/pypi/${{ args.package }}/json"
+
+  - select: info
+
+  - evaluate: |
+      (() => {
+        const d = ${{ data }};
+        return [{
+          name: d.name,
+          version: d.version,
+          summary: d.summary || '',
+          license: d.license || '',
+          author: d.author || d.author_email || '',
+          homepage: (d.project_urls && d.project_urls.Homepage) || d.home_page || '',
+          requires_python: d.requires_python || ''
+        }];
+      })()
+
+columns: [name, version, summary, license, requires_python]

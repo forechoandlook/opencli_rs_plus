@@ -1221,10 +1221,10 @@ dependencies = [
  "clap_complete",
  "colored",
  "dirs",
- "opencli-rs-ai",
  "opencli-rs-browser",
  "opencli-rs-core",
  "opencli-rs-discovery",
+ "opencli-rs-engine",
  "opencli-rs-output",
  "opencli-rs-pipeline",
  "reqwest",
@@ -1236,22 +1236,6 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "webbrowser",
-]
-
-[[package]]
-name = "opencli-rs-ai"
-version = "0.0.3"
-dependencies = [
- "async-trait",
- "opencli-rs-browser",
- "opencli-rs-core",
- "opencli-rs-pipeline",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
 ]
 
 [[package]]
@@ -1298,6 +1282,7 @@ dependencies = [
  "opencli-rs-browser",
  "opencli-rs-core",
  "opencli-rs-discovery",
+ "opencli-rs-engine",
  "opencli-rs-pipeline",
  "rusqlite",
  "serde",
@@ -1326,14 +1311,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "opencli-rs-external"
+name = "opencli-rs-engine"
 version = "0.0.3"
 dependencies = [
+ "opencli-rs-browser",
  "opencli-rs-core",
- "serde",
+ "opencli-rs-pipeline",
  "serde_json",
- "serde_yaml",
- "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]

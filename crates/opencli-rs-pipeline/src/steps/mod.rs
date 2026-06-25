@@ -1,5 +1,6 @@
 pub mod browser;
 pub mod download;
+pub mod dump;
 pub mod fetch;
 pub mod intercept;
 pub mod tap;

@@ -1,0 +1,40 @@
+site: qwen
+name: export
+description: Export Qwen chat conversation to JSONL via API
+domain: chat.qwen.ai
+strategy: public
+browser: true
+persistent: true
+timeoutSeconds: 60
+
+args:
+  chat_id:
+    positional: true
+    type: string
+    required: true
+    description: Chat ID - e.g. a3618277-182e-4864-9d95-5f77398bda4d
+
+columns: [role, content, id, timestamp]
+
+pipeline:
+  - navigate: https://chat.qwen.ai/c/${{ args.chat_id }}
+  - wait: 1
+
+  - evaluate: |
+      (async () => {
+        const res = await fetch(`/api/v2/chats/${{ args.chat_id }}`);
+        const data = await res.json();
+        const messages = data.data?.chat?.messages || [];
+        return messages.map(msg => ({
+          role: msg.role || '',
+          content: msg.content_list?.[-1]?.content || msg.content || '',
+          id: msg.id || '',
+          timestamp: msg.timestamp || 0
+        }));
+      })()
+
+  - map:
+      role: ${{ item.role }}
+      content: ${{ item.content }}
+      id: ${{ item.id }}
+      timestamp: ${{ item.timestamp }}

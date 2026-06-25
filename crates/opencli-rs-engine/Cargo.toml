@@ -1,13 +1,16 @@
 [package]
-name = "opencli-rs-external"
+name = "opencli-rs-engine"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+name = "opencli_rs_engine"
+path = "src/lib.rs"
+
 [dependencies]
 opencli-rs-core = { path = "../opencli-rs-core" }
-serde = { workspace = true }
+opencli-rs-browser = { path = "../opencli-rs-browser" }
+opencli-rs-pipeline = { path = "../opencli-rs-pipeline" }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

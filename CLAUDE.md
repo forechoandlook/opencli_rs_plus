@@ -3,7 +3,7 @@
 ## Agents
 
 - 使用中文，当有问题解决不了的时候及时停下反思.
-- 开发新的adapters的时候 加载 playwright cli skills 尽可能使用api的方式，需要先通过playwright调试，最后固化为adapters 开发测试通过 `cargo run --` 实现, 参考 docs/develop.md
+- 开发新的adapters的时候 加载 playwright cli skills （使用--extension）尽可能使用api的方式，需要先通过playwright调试，最后固化为adapters 开发测试通过 `cargo run --` 实现, 参考 docs/develop.md
 - 功能修改等需要记录到 docs/changelog.md 中
 - 保持项目简洁，并将获取cli这项任务完成到极致.
 

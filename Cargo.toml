@@ -6,8 +6,7 @@ members = [
     "crates/opencli-rs-browser",
     "crates/opencli-rs-output",
     "crates/opencli-rs-discovery",
-    "crates/opencli-rs-external",
-    "crates/opencli-rs-ai",
+    "crates/opencli-rs-engine",
     "crates/opencli-rs-cli",
     "crates/opencli-rs-daemon",
 ]

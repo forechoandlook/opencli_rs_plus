@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use async_trait::async_trait;
 use opencli_rs_core::{CliError, IPage};
@@ -287,17 +286,6 @@ fn compare_values(a: Option<&Value>, b: Option<&Value>) -> std::cmp::Ordering {
 
 pub struct DumpStep;
 
-/// Resolve template variables in a path string.
-/// Supports: {ts} (unix timestamp), {ts_ms} (milliseconds), {step} (step index).
-fn resolve_dump_path(path_tpl: &str) -> String {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    path_tpl
-        .replace("{ts}", &now.as_secs().to_string())
-        .replace("{ts_ms}", &now.as_millis().to_string())
-}
-
 /// Dump the current pipeline data to a file.
 /// Does NOT modify the pipeline data — only writes to disk.
 /// Parameters:
@@ -320,7 +308,7 @@ impl StepHandler for DumpStep {
             .as_str()
             .ok_or_else(|| CliError::pipeline("dump: params must be a path string"))?;
 
-        let resolved_path = resolve_dump_path(path_tpl);
+        let resolved_path = crate::steps::dump::resolve_dump_path(path_tpl, 0);
         let path = Path::new(&resolved_path);
 
         // Create parent directories if needed

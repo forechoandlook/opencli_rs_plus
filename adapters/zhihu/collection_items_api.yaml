@@ -27,19 +27,10 @@ pipeline:
 
   - select: body.data
 
-  - evaluate: |
-      (() => {
-        const items = Array.isArray(${{ data }}) ? ${{ data }} : [];
-        if (items.length === 0 && ${{ args.offset }} === 0) {
-          throw new Error(`No items found in collection ${{ args.collection_id }}`);
-        }
-        return items;
-      })()
-
   - map:
       rank: ${{ index + 1 }}
       type: ${{ item.content.type }}
-      title: ${{ item.content.title || item.content.name || item.content.question.title || item.content.content[0].title || '' }}
+      title: ${{ item.content.title || item.content.name || item.content.question.title || '' }}
       author: ${{ item.content.author.name || '' }}
       url: ${{ item.content.url }}
       excerpt: ${{ item.content.excerpt || '' }}

@@ -1,15 +1,13 @@
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use async_trait::async_trait;
-use opencli_rs_core::{CliError, IPage, ScreenshotOptions, SnapshotOptions};
+use opencli_rs_core::{CliError, IPage};
 use serde_json::Value;
-use tracing::info;
 
 use crate::step_registry::{StepHandler, StepRegistry};
+use crate::steps::dump::{dump_api_response, dump_value_to_file, resolve_dump_path};
 use crate::template::{render_template_str, TemplateContext};
 
 // ---------------------------------------------------------------------------
@@ -44,81 +42,6 @@ fn render_str_param(
         .as_str()
         .map(|s| s.to_string())
         .ok_or_else(|| CliError::pipeline("rendered template is not a string"))
-}
-
-/// Resolve template variables in a path string.
-/// Supports: {ts} (unix timestamp), {ts_ms} (milliseconds), {step} (step index).
-fn resolve_dump_path(path_tpl: &str, step_index: usize) -> String {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    path_tpl
-        .replace("{ts}", &now.as_secs().to_string())
-        .replace("{ts_ms}", &now.as_millis().to_string())
-        .replace("{step}", &step_index.to_string())
-}
-
-/// Dump a JSON value to a file. Creates parent directories if needed.
-/// - Arrays/Objects → pretty-printed JSON
-/// - Primitives (string, number, bool, null) → raw value written as-is
-/// Silently skips on errors (just logs a warning).
-fn dump_value_to_file(value: &Value, path: &Path) {
-    let content = match value {
-        Value::Object(_) | Value::Array(_) => {
-            serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_string())
-        }
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Null => String::new(),
-    };
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            let _ = fs::create_dir_all(parent);
-        }
-    }
-    match fs::write(path, &content) {
-        Ok(_) => info!(
-            path = path.to_string_lossy().as_ref(),
-            "Dumped raw data to file"
-        ),
-        Err(e) => tracing::warn!(path = %path.display(), err = %e, "Failed to dump raw data"),
-    }
-}
-
-fn api_dump_enabled() -> bool {
-    matches!(
-        std::env::var("OPENCLI_API_DUMP"),
-        Ok(v) if matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON")
-    )
-}
-
-fn sanitize_dump_part(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    while out.contains("__") {
-        out = out.replace("__", "_");
-    }
-    out.trim_matches('_').chars().take(80).collect()
-}
-
-fn dump_api_response(step: &str, url: &str, value: &Value) {
-    if !api_dump_enabled() {
-        return;
-    }
-    let base_dir =
-        std::env::var("OPENCLI_API_DUMP_DIR").unwrap_or_else(|_| "./data/api-dumps".to_string());
-    let step_part = sanitize_dump_part(step);
-    let url_part = sanitize_dump_part(url);
-    let path = format!("{base_dir}/{step_part}_{url_part}_{{ts_ms}}.json");
-    let resolved_path = resolve_dump_path(&path, 0);
-    dump_value_to_file(value, Path::new(&resolved_path));
 }
 
 // ---------------------------------------------------------------------------
@@ -181,98 +104,6 @@ impl StepHandler for NavigateStep {
             tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
         }
 
-        Ok(data.clone())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ClickStep
-// ---------------------------------------------------------------------------
-
-pub struct ClickStep;
-
-#[async_trait]
-impl StepHandler for ClickStep {
-    fn name(&self) -> &'static str {
-        "click"
-    }
-
-    fn is_browser_step(&self) -> bool {
-        true
-    }
-
-    async fn execute(
-        &self,
-        page: Option<Arc<dyn IPage>>,
-        params: &Value,
-        data: &Value,
-        args: &HashMap<String, Value>,
-    ) -> Result<Value, CliError> {
-        let pg = require_page(&page)?;
-        let selector = render_str_param(params, data, args)?;
-        pg.click(&selector).await?;
-        Ok(data.clone())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// TypeStep
-// ---------------------------------------------------------------------------
-
-pub struct TypeStep;
-
-#[async_trait]
-impl StepHandler for TypeStep {
-    fn name(&self) -> &'static str {
-        "type"
-    }
-
-    fn is_browser_step(&self) -> bool {
-        true
-    }
-
-    async fn execute(
-        &self,
-        page: Option<Arc<dyn IPage>>,
-        params: &Value,
-        data: &Value,
-        args: &HashMap<String, Value>,
-    ) -> Result<Value, CliError> {
-        let pg = require_page(&page)?;
-        let ctx = default_ctx(data, args);
-
-        let (selector, text) = match params {
-            Value::Object(obj) => {
-                let sel_raw = obj
-                    .get("selector")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| CliError::pipeline("type: missing 'selector' field"))?;
-                let text_raw = obj
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| CliError::pipeline("type: missing 'text' field"))?;
-
-                let sel = render_template_str(sel_raw, &ctx)?;
-                let txt = render_template_str(text_raw, &ctx)?;
-                (
-                    sel.as_str()
-                        .ok_or_else(|| {
-                            CliError::pipeline("type: rendered selector is not a string")
-                        })?
-                        .to_string(),
-                    txt.as_str()
-                        .ok_or_else(|| CliError::pipeline("type: rendered text is not a string"))?
-                        .to_string(),
-                )
-            }
-            _ => {
-                return Err(CliError::pipeline(
-                    "type: params must be an object with 'selector' and 'text'",
-                ))
-            }
-        };
-
-        pg.type_text(&selector, &text).await?;
         Ok(data.clone())
     }
 }
@@ -354,42 +185,6 @@ impl StepHandler for WaitStep {
             }
         }
 
-        Ok(data.clone())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// PressStep
-// ---------------------------------------------------------------------------
-
-pub struct PressStep;
-
-#[async_trait]
-impl StepHandler for PressStep {
-    fn name(&self) -> &'static str {
-        "press"
-    }
-
-    fn is_browser_step(&self) -> bool {
-        true
-    }
-
-    async fn execute(
-        &self,
-        page: Option<Arc<dyn IPage>>,
-        params: &Value,
-        data: &Value,
-        args: &HashMap<String, Value>,
-    ) -> Result<Value, CliError> {
-        let pg = require_page(&page)?;
-        let key = render_str_param(params, data, args)?;
-        // Use evaluate to dispatch keyboard events since IPage has no press_key method
-        let js = format!(
-            r#"document.dispatchEvent(new KeyboardEvent('keydown', {{ key: {key}, bubbles: true }}));
-               document.dispatchEvent(new KeyboardEvent('keyup', {{ key: {key}, bubbles: true }}));"#,
-            key = serde_json::to_string(&key).unwrap_or_default()
-        );
-        pg.evaluate(&js).await?;
         Ok(data.clone())
     }
 }
@@ -479,112 +274,6 @@ impl StepHandler for EvaluateStep {
         }
 
         Ok(result)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SnapshotStep
-// ---------------------------------------------------------------------------
-
-pub struct SnapshotStep;
-
-#[async_trait]
-impl StepHandler for SnapshotStep {
-    fn name(&self) -> &'static str {
-        "snapshot"
-    }
-
-    fn is_browser_step(&self) -> bool {
-        true
-    }
-
-    async fn execute(
-        &self,
-        page: Option<Arc<dyn IPage>>,
-        params: &Value,
-        data: &Value,
-        _args: &HashMap<String, Value>,
-    ) -> Result<Value, CliError> {
-        let pg = require_page(&page)?;
-
-        let opts = match params {
-            Value::Object(obj) => {
-                let selector = obj
-                    .get("selector")
-                    .and_then(|v| v.as_str())
-                    .map(String::from);
-                let include_hidden = obj
-                    .get("include_hidden")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                Some(SnapshotOptions {
-                    selector,
-                    include_hidden,
-                })
-            }
-            Value::Null => None,
-            _ => None,
-        };
-
-        let result = pg.snapshot(opts).await?;
-        if result.is_null() {
-            Ok(data.clone())
-        } else {
-            Ok(result)
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ScreenshotStep
-// ---------------------------------------------------------------------------
-
-pub struct ScreenshotStep;
-
-#[async_trait]
-impl StepHandler for ScreenshotStep {
-    fn name(&self) -> &'static str {
-        "screenshot"
-    }
-
-    fn is_browser_step(&self) -> bool {
-        true
-    }
-
-    async fn execute(
-        &self,
-        page: Option<Arc<dyn IPage>>,
-        params: &Value,
-        _data: &Value,
-        _args: &HashMap<String, Value>,
-    ) -> Result<Value, CliError> {
-        let pg = require_page(&page)?;
-
-        let opts = match params {
-            Value::Object(obj) => {
-                let full_page = obj
-                    .get("full_page")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let selector = obj
-                    .get("selector")
-                    .and_then(|v| v.as_str())
-                    .map(String::from);
-                let path = obj.get("path").and_then(|v| v.as_str()).map(String::from);
-                Some(ScreenshotOptions {
-                    path,
-                    full_page,
-                    selector,
-                })
-            }
-            Value::Null => None,
-            _ => None,
-        };
-
-        let bytes = pg.screenshot(opts).await?;
-        use base64::Engine;
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        Ok(Value::String(b64))
     }
 }
 
@@ -797,13 +486,8 @@ impl StepHandler for BgFetchStep {
 
 pub fn register_browser_steps(registry: &mut StepRegistry) {
     registry.register(Arc::new(NavigateStep));
-    registry.register(Arc::new(ClickStep));
-    registry.register(Arc::new(TypeStep));
     registry.register(Arc::new(WaitStep));
-    registry.register(Arc::new(PressStep));
     registry.register(Arc::new(EvaluateStep));
-    registry.register(Arc::new(SnapshotStep));
-    registry.register(Arc::new(ScreenshotStep));
     registry.register(Arc::new(ScrollStep));
     registry.register(Arc::new(CollectStep));
     registry.register(Arc::new(BgFetchStep));
@@ -893,11 +577,14 @@ mod tests {
         }
         async fn screenshot(
             &self,
-            _options: Option<ScreenshotOptions>,
+            _options: Option<opencli_rs_core::ScreenshotOptions>,
         ) -> Result<Vec<u8>, CliError> {
             Ok(vec![0x89, 0x50, 0x4E, 0x47]) // PNG magic bytes
         }
-        async fn snapshot(&self, _options: Option<SnapshotOptions>) -> Result<Value, CliError> {
+        async fn snapshot(
+            &self,
+            _options: Option<opencli_rs_core::SnapshotOptions>,
+        ) -> Result<Value, CliError> {
             Ok(json!({"tree": "snapshot"}))
         }
         async fn auto_scroll(
@@ -935,13 +622,9 @@ mod tests {
         let mut registry = StepRegistry::new();
         register_browser_steps(&mut registry);
         assert!(registry.get("navigate").is_some());
-        assert!(registry.get("click").is_some());
-        assert!(registry.get("type").is_some());
         assert!(registry.get("wait").is_some());
-        assert!(registry.get("press").is_some());
         assert!(registry.get("evaluate").is_some());
-        assert!(registry.get("snapshot").is_some());
-        assert!(registry.get("screenshot").is_some());
+        assert!(registry.get("scroll").is_some());
     }
 
     #[tokio::test]
@@ -997,13 +680,9 @@ mod tests {
     #[tokio::test]
     async fn test_all_browser_steps_are_browser_steps() {
         assert!(NavigateStep.is_browser_step());
-        assert!(ClickStep.is_browser_step());
-        assert!(TypeStep.is_browser_step());
         assert!(WaitStep.is_browser_step());
-        assert!(PressStep.is_browser_step());
         assert!(EvaluateStep.is_browser_step());
-        assert!(SnapshotStep.is_browser_step());
-        assert!(ScreenshotStep.is_browser_step());
+        assert!(ScrollStep.is_browser_step());
     }
 
     #[tokio::test]
@@ -1015,16 +694,5 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, json!("data"));
-    }
-
-    #[tokio::test]
-    async fn test_snapshot_step() {
-        let mock = Arc::new(MockPage::new(json!(null)));
-        let step = SnapshotStep;
-        let result = step
-            .execute(Some(mock), &json!(null), &json!(null), &empty_args())
-            .await
-            .unwrap();
-        assert_eq!(result, json!({"tree": "snapshot"}));
     }
 }

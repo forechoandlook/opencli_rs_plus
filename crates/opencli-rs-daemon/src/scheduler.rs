@@ -3,7 +3,7 @@
 use crate::adapter_manager::AdapterManager;
 use crate::store::{Job, JobStore};
 use anyhow::Result;
-use opencli_rs_cli::execute_command;
+use opencli_rs_engine::execute_command;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -1,0 +1,36 @@
+site: crates
+name: search
+description: 搜索 crates.io 上的 Rust 包
+domain: crates.io
+strategy: public
+browser: false
+
+args:
+  query:
+    type: str
+    required: true
+    positional: true
+    description: "Search keywords"
+  limit:
+    type: int
+    default: 20
+    description: "Number of results"
+
+pipeline:
+  - fetch:
+      url: "https://crates.io/api/v1/crates?q=${{ args.query }}&per_page=${{ args.limit }}"
+      headers:
+        User-Agent: "opencli-rs (https://github.com/opencli)"
+
+  - select: crates
+
+  - map:
+      name: ${{ item.name }}
+      version: ${{ item.max_stable_version || item.newest_version }}
+      downloads: ${{ item.downloads }}
+      description: ${{ item.description || '' }}
+      updated: ${{ item.updated_at || '' }}
+
+  - limit: ${{ args.limit }}
+
+columns: [name, version, downloads, description]

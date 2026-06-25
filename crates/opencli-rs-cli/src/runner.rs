@@ -16,7 +16,7 @@ use std::str::FromStr;
 use crate::args::coerce_and_validate_args;
 use crate::cli_builder::build_cli;
 use crate::dispatch::{dispatch_builtin, print_error};
-use crate::execution::execute_command;
+use opencli_rs_engine::execute_command;
 
 /// Main adapter-execution entry point. Assumes tracing is already initialized.
 pub async fn run() {
