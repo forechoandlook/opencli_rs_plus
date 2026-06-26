@@ -382,35 +382,19 @@ fn yaml_file_mtime(site: &str, name: &str) -> i64 {
     0
 }
 
-/// Read summary text and return (content, mtime). mtime is 0 if no file found.
-fn read_summary_with_mtime(site: &str, name: &str) -> (String, i64) {
+/// Read adapter-level summary text (from `meta.yaml`) and return (content, mtime).
+/// The per-tool description is already indexed separately; this adds the
+/// adapter-level meta (name/description) as extra searchable context.
+/// mtime is 0 if no file found.
+fn read_summary_with_mtime(site: &str, _name: &str) -> (String, i64) {
     let candidates = [
-        PathBuf::from("adapters").join(site).join("summary.md"),
-        PathBuf::from("adapters")
-            .join(site)
-            .join(format!("{}.md", name)),
-        PathBuf::from("summaries").join(format!("{}-{}.md", site, name)),
-        PathBuf::from("summaries").join(format!("{}.md", site)),
+        PathBuf::from("adapters").join(site).join("meta.yaml"),
         dirs::home_dir()
             .map(|h| {
                 h.join(".opencli-rs")
                     .join("adapters")
                     .join(site)
-                    .join("summary.md")
-            })
-            .unwrap_or_default(),
-        dirs::home_dir()
-            .map(|h| {
-                h.join(".opencli-rs")
-                    .join("summaries")
-                    .join(format!("{}-{}.md", site, name))
-            })
-            .unwrap_or_default(),
-        dirs::home_dir()
-            .map(|h| {
-                h.join(".opencli-rs")
-                    .join("summaries")
-                    .join(format!("{}.md", site))
+                    .join("meta.yaml")
             })
             .unwrap_or_default(),
     ];

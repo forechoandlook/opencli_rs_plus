@@ -16,7 +16,7 @@
 ```
 score = 0.7 × BM25(query, adapter) + 0.3 × log(1 + usage_count)
 ```
-- BM25 对 `full_name`、`site`、`name`、`description`、`domain`、`summary` 做全文匹配
+- BM25 对 `full_name`、`site`、`name`、`description`、`domain`、`summary`（取自 `meta.yaml`）做全文匹配
 - `usage_count` 每次 `exec` 成功后自动累计，热点 adapter 在同等匹配度下优先排列
 - `disabled` 的 adapter 在 FTS 检索后、返回前被过滤掉
 
@@ -27,11 +27,11 @@ daemon 启动、`adapter.reload`、`adapter.sync` 时触发增量同步：
 | 情况 | 处理 |
 |---|---|
 | 新增 adapter | INSERT into FTS，写入 meta |
-| yaml 或 summary.md mtime 变化 | 删除旧行，重新 INSERT |
+| yaml 或 meta.yaml mtime 变化 | 删除旧行，重新 INSERT |
 | adapter 已删除 | 从 FTS 和 meta 中删除 |
 | 无变化 | 跳过 |
 
-`adapter_index_meta` 表记录每个 adapter 的 yaml mtime + summary mtime，是增量判断的依据。
+`adapter_index_meta` 表记录每个 adapter 的 yaml mtime + meta.yaml mtime，是增量判断的依据。
 
 **Socket API：**
 

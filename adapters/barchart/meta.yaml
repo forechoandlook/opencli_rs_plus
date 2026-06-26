@@ -1,0 +1,3 @@
+name: barchart
+description: Barchart 股票行情和期权数据，包含 Greeks、期权链、资金流向
+version: 1.0.0

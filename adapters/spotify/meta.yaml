@@ -1,0 +1,3 @@
+name: spotify
+description: Search Spotify tracks (requires a valid Spotify Bearer token)
+version: 1.0.0

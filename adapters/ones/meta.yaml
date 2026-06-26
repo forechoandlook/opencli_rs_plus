@@ -1,0 +1,3 @@
+name: ones
+description: ONES Project — list work items (requires ONES_BASE_URL env var and browser login)
+version: 1.0.0

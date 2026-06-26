@@ -1,0 +1,3 @@
+name: codex
+description: OpenAI Codex 桌面应用，支持对话、代码提取、Diff 审查、DOM快照、模型切换
+version: 1.0.0

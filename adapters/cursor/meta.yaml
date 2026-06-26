@@ -1,0 +1,3 @@
+name: cursor
+description: Cursor AI 编辑器对话，支持 Composer、聊天历史、模型切换、代码提取、导出
+version: 1.0.0

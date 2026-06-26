@@ -1,5 +1,12 @@
 # 2026-06-26
 
+## 合并 summaries 到 adapters（summary 自动派生）
+- **删除独立 `summaries/` 目录**：summary 不再单独维护，改为运行时从 adapters 动态生成。
+- **每个 adapter 新增 `meta.yaml`**（`name`/`description`/`version`），承载 adapter 级整体描述；工具列表由各 tool yaml 的 `name`+`description` 自动拼出。已为全部 79 个 adapter 批量生成（55 个沿用旧 summary 描述，24 个无 summary 的从工具描述派生，可后续手工润色）。
+- `summary list` / `summary show` 改为读取 `meta.yaml` + 扫描 tool yaml 实时生成，输出格式与旧 summary 完全一致。
+- FTS 索引的 `summary` 列改取 `adapters/<site>/meta.yaml`（替代旧 `summaries/<site>.md`），增量 sync 依据 `meta.yaml` mtime。
+- adapter discovery 扫描时跳过 `meta.yaml`，不再误当作工具解析。
+
 ## 代码精简与解耦
 - **删除孤儿 crate `opencli-rs-external`**：CLAUDE.md 已声明「不再做执行代理」，且全工程零引用，从 workspace 移除。
 - **删除未接线的 `opencli-rs-ai` crate**：仅在 `cli/Cargo.toml` 声明依赖、无任何 `use`，一并移除（如需 AI 能力后续以 feature flag 重新引入）。
