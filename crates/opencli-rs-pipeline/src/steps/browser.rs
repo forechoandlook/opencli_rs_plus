@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use opencli_rs_core::{CliError, IPage};
+use opencli_rs_core::{CliError, GotoOptions, IPage};
 use serde_json::Value;
 
 use crate::step_registry::{StepHandler, StepRegistry};
@@ -70,14 +70,14 @@ impl StepHandler for NavigateStep {
         let pg = require_page(&page)?;
         let ctx = default_ctx(data, args);
 
-        let (url, settle_ms) = match params {
+        let (url, settle_ms, wait_until, reuse_current) = match params {
             // navigate: "https://example.com"
             Value::String(s) => {
                 let rendered = render_template_str(s, &ctx)?;
                 let url = rendered.as_str().unwrap_or("").to_string();
-                (url, None)
+                (url, None, None, false)
             }
-            // navigate: { url: "...", settleMs: 2000 }
+            // navigate: { url: "...", waitUntil: commit, reuseCurrent: true }
             Value::Object(obj) => {
                 let url_val = obj
                     .get("url")
@@ -88,7 +88,17 @@ impl StepHandler for NavigateStep {
                 let rendered = render_template_str(url_str, &ctx)?;
                 let url = rendered.as_str().unwrap_or("").to_string();
                 let settle = obj.get("settleMs").and_then(|v| v.as_u64());
-                (url, settle)
+                let wait_until = obj
+                    .get("waitUntil")
+                    .or_else(|| obj.get("wait_until"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                let reuse_current = obj
+                    .get("reuseCurrent")
+                    .or_else(|| obj.get("reuse_current"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                (url, settle, wait_until, reuse_current)
             }
             _ => {
                 return Err(CliError::pipeline(
@@ -97,7 +107,19 @@ impl StepHandler for NavigateStep {
             }
         };
 
-        pg.goto(&url, None).await?;
+        let current_url = if reuse_current {
+            pg.url().await.unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let already_at_target = reuse_current && same_document_url(&current_url, &url);
+        if !already_at_target {
+            let options = wait_until.map(|wait_until| GotoOptions {
+                wait_until: Some(wait_until),
+                timeout_ms: None,
+            });
+            pg.goto(&url, options).await?;
+        }
 
         // Wait for page to settle if specified
         if let Some(ms) = settle_ms {
@@ -105,6 +127,16 @@ impl StepHandler for NavigateStep {
         }
 
         Ok(data.clone())
+    }
+}
+
+fn same_document_url(current_url: &str, target_url: &str) -> bool {
+    match (
+        reqwest::Url::parse(current_url),
+        reqwest::Url::parse(target_url),
+    ) {
+        (Ok(current), Ok(target)) => current == target,
+        _ => current_url == target_url,
     }
 }
 
@@ -411,9 +443,8 @@ impl StepHandler for CollectStep {
 // ---------------------------------------------------------------------------
 // BgFetchStep — run a fetch in the extension service worker
 // ---------------------------------------------------------------------------
-// Extension opens a background tab to establish CDP connection, then runs fetch
-// with cookies injected. No visible window (extension creates background tab in
-// user's existing Chrome window or minimized fallback window).
+// The extension service worker fetches with browser-managed credentials. No
+// visible user tab is used; browser automation stays in a minimized window.
 
 struct BgFetchStep;
 
@@ -429,6 +460,60 @@ fn render_str(
         },
         None => Ok(None),
     }
+}
+
+async fn same_origin_fetch(
+    page: Arc<dyn IPage>,
+    context_url: &str,
+    url: &str,
+    method: Option<&str>,
+    headers: Option<HashMap<String, String>>,
+    body: Option<&str>,
+) -> Result<Value, CliError> {
+    // Fetch needs a first-party document, not a particular route. Reusing an
+    // already-open route on the same origin retains cookies and avoids an
+    // unnecessary navigation on every command invocation.
+    let current_url = page.url().await.unwrap_or_default();
+    let current_origin = reqwest::Url::parse(&current_url)
+        .ok()
+        .map(|url| url.origin());
+    let context_origin = reqwest::Url::parse(context_url)
+        .ok()
+        .map(|url| url.origin());
+    if current_origin != context_origin {
+        page.goto(
+            context_url,
+            Some(GotoOptions {
+                // API requests do not need images, tracking scripts, or other
+                // subresources to finish loading before running fetch.
+                wait_until: Some("commit".to_string()),
+                timeout_ms: None,
+            }),
+        )
+        .await?;
+    }
+
+    let init = serde_json::json!({
+        "method": method.unwrap_or("GET"),
+        "headers": headers.unwrap_or_default(),
+        "body": body,
+        "credentials": "include",
+    });
+    let url_json = serde_json::to_string(url).unwrap_or_else(|_| "\"\"".to_string());
+    let init_json = serde_json::to_string(&init).unwrap_or_else(|_| "{}".to_string());
+    let js = format!(
+        r#"(async () => {{
+  const response = await fetch({url_json}, {init_json});
+  const text = await response.text();
+  if (!response.ok) throw new Error(`HTTP ${{response.status}}: ${{text.slice(0, 400)}}`);
+  let body = text;
+  if ((response.headers.get('content-type') || '').includes('application/json')) {{
+    try {{ body = JSON.parse(text); }} catch {{}}
+  }}
+  return {{ status: response.status, body }};
+}})()"#,
+    );
+    page.evaluate(&js).await
 }
 
 #[async_trait]
@@ -467,15 +552,51 @@ impl StepHandler for BgFetchStep {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let result = page
-            .bg_fetch(
+        let same_origin = params
+            .get("same_origin")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let context_url = cookie_url.as_deref().unwrap_or(&url);
+
+        let result = if same_origin {
+            same_origin_fetch(
+                page.clone(),
+                context_url,
                 &url,
-                cookie_url.as_deref(),
                 method.as_deref(),
                 request_headers,
                 body.as_deref(),
             )
-            .await?;
+            .await?
+        } else {
+            match page
+                .bg_fetch(
+                    &url,
+                    cookie_url.as_deref(),
+                    method.as_deref(),
+                    request_headers.clone(),
+                    body.as_deref(),
+                )
+                .await
+            {
+                Ok(result) => result,
+                Err(_) => {
+                    // Some sites reject a Chrome extension service worker as a
+                    // cross-origin caller even with host permissions. Retry from
+                    // the same-origin page in OpenCLI's own minimized window so
+                    // the browser can attach its normal first-party cookies.
+                    same_origin_fetch(
+                        page.clone(),
+                        context_url,
+                        &url,
+                        method.as_deref(),
+                        request_headers,
+                        body.as_deref(),
+                    )
+                    .await?
+                }
+            }
+        };
 
         dump_api_response("bg_fetch", &url, &result);
 
@@ -510,14 +631,27 @@ mod tests {
     // Mock IPage for testing
     struct MockPage {
         goto_url: std::sync::Mutex<Option<String>>,
+        goto_options: std::sync::Mutex<Option<opencli_rs_core::GotoOptions>>,
+        evaluate_script: std::sync::Mutex<Option<String>>,
         evaluate_result: Value,
+        current_url: String,
     }
 
     impl MockPage {
         fn new(evaluate_result: Value) -> Self {
             Self {
                 goto_url: std::sync::Mutex::new(None),
+                goto_options: std::sync::Mutex::new(None),
+                evaluate_script: std::sync::Mutex::new(None),
                 evaluate_result,
+                current_url: "https://example.com".to_string(),
+            }
+        }
+
+        fn at_url(evaluate_result: Value, current_url: &str) -> Self {
+            Self {
+                current_url: current_url.to_string(),
+                ..Self::new(evaluate_result)
             }
         }
     }
@@ -527,13 +661,14 @@ mod tests {
         async fn goto(
             &self,
             url: &str,
-            _options: Option<opencli_rs_core::GotoOptions>,
+            options: Option<opencli_rs_core::GotoOptions>,
         ) -> Result<(), CliError> {
             *self.goto_url.lock().unwrap() = Some(url.to_string());
+            *self.goto_options.lock().unwrap() = options;
             Ok(())
         }
         async fn url(&self) -> Result<String, CliError> {
-            Ok("https://example.com".to_string())
+            Ok(self.current_url.clone())
         }
         async fn title(&self) -> Result<String, CliError> {
             Ok("Mock".to_string())
@@ -541,7 +676,8 @@ mod tests {
         async fn content(&self) -> Result<String, CliError> {
             Ok("<html></html>".to_string())
         }
-        async fn evaluate(&self, _expression: &str) -> Result<Value, CliError> {
+        async fn evaluate(&self, expression: &str) -> Result<Value, CliError> {
+            *self.evaluate_script.lock().unwrap() = Some(expression.to_string());
             Ok(self.evaluate_result.clone())
         }
         async fn wait_for_selector(
@@ -648,6 +784,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn navigate_step_reuses_the_exact_cached_route_with_commit_wait() {
+        let mock = Arc::new(MockPage::at_url(
+            json!(null),
+            "https://www.xiaohongshu.com/explore",
+        ));
+        let step = NavigateStep;
+        step.execute(
+            Some(mock.clone()),
+            &json!({
+                "url": "https://www.xiaohongshu.com/explore",
+                "waitUntil": "commit",
+                "reuseCurrent": true,
+            }),
+            &json!(null),
+            &empty_args(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(*mock.goto_url.lock().unwrap(), None);
+    }
+
+    #[tokio::test]
     async fn test_evaluate_step() {
         let mock = Arc::new(MockPage::new(json!({"items": [1, 2, 3]})));
         let step = EvaluateStep;
@@ -694,5 +853,65 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, json!("data"));
+    }
+
+    #[tokio::test]
+    async fn bg_fetch_falls_back_to_a_same_origin_page_request() {
+        let mock = Arc::new(MockPage::new(json!({
+            "status": 200,
+            "body": { "data": ["ok"] },
+        })));
+        let step = BgFetchStep;
+        let result = step
+            .execute(
+                Some(mock.clone()),
+                &json!({
+                    "url": "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=1",
+                    "cookie_url": "https://www.zhihu.com",
+                }),
+                &json!(null),
+                &empty_args(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["body"]["data"][0], "ok");
+        assert_eq!(
+            *mock.goto_url.lock().unwrap(),
+            Some("https://www.zhihu.com".to_string())
+        );
+        assert_eq!(
+            mock.goto_options
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|options| options.wait_until.as_deref()),
+            Some("commit")
+        );
+        let script = mock.evaluate_script.lock().unwrap().clone().unwrap();
+        assert!(script.contains("credentials\":\"include"));
+        assert!(script.contains("https://www.zhihu.com/api/v3/feed"));
+    }
+
+    #[tokio::test]
+    async fn same_origin_fetch_reuses_any_route_on_the_same_origin() {
+        let mock = Arc::new(MockPage::at_url(
+            json!({ "status": 200, "body": { "data": ["ok"] } }),
+            "https://www.zhihu.com/question/123",
+        ));
+
+        let result = same_origin_fetch(
+            mock.clone(),
+            "https://www.zhihu.com",
+            "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=1",
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["body"]["data"][0], "ok");
+        assert_eq!(*mock.goto_url.lock().unwrap(), None);
     }
 }

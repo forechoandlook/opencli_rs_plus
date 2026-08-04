@@ -31,6 +31,14 @@ opencli --version
 opencli doctor
 ```
 
+本地开发构建并安装 release 二进制：
+
+```bash
+./scripts/build-release.sh
+```
+
+脚本会运行 `cargo build --release --bin opencli`，然后覆盖安装到 `~/.local/bin/opencli`。
+
 ## 快速开始
 
 查看帮助：

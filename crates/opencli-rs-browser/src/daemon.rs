@@ -11,9 +11,10 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use opencli_rs_core::CliError;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -81,8 +82,34 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(1800);
 /// Allow large extension command payloads such as bg_fetch API responses.
 const COMMAND_BODY_LIMIT: usize = 32 * 1024 * 1024;
+/// Keep a concise local task history for the popup, without persisting results.
+const TASK_HISTORY_LIMIT: usize = 30;
+const TASK_TEXT_LIMIT: usize = 1_500;
 
 type PendingMap = HashMap<String, oneshot::Sender<DaemonResult>>;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserTask {
+    pub id: String,
+    pub workspace: String,
+    pub status: String,
+    pub started_at_ms: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at_ms: Option<u128>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TaskUpdate {
+    id: Option<String>,
+    workspace: Option<String>,
+    status: String,
+    result: Option<Value>,
+    error: Option<String>,
+}
 
 /// Shared state for the daemon server.
 pub struct DaemonState {
@@ -90,6 +117,7 @@ pub struct DaemonState {
     pub pending_commands: RwLock<PendingMap>,
     pub extension_connected: RwLock<bool>,
     pub last_activity: RwLock<Instant>,
+    pub tasks: RwLock<VecDeque<BrowserTask>>,
 }
 
 impl DaemonState {
@@ -99,6 +127,7 @@ impl DaemonState {
             pending_commands: RwLock::new(HashMap::new()),
             extension_connected: RwLock::new(false),
             last_activity: RwLock::new(Instant::now()),
+            tasks: RwLock::new(VecDeque::new()),
         }
     }
 
@@ -122,6 +151,12 @@ impl Daemon {
         let app = Router::new()
             .route("/health", get(health_handler))
             .route("/status", get(status_handler))
+            .route(
+                "/tasks",
+                get(tasks_handler)
+                    .post(tasks_handler)
+                    .options(tasks_handler),
+            )
             .route("/command", post(command_handler))
             .route("/ext", get(ws_handler))
             .layer(DefaultBodyLimit::max(COMMAND_BODY_LIMIT))
@@ -197,6 +232,235 @@ async fn status_handler(State(state): State<Arc<DaemonState>>) -> impl IntoRespo
         "extensionConnected": ext,
         "pending": pending,
     }))
+}
+
+/// Return the latest browser-backed adapter tasks for the extension popup.
+/// This endpoint deliberately serves only daemon-memory previews; complete
+/// adapter data is never written to a task-history file.
+async fn tasks_handler(
+    State(state): State<Arc<DaemonState>>,
+    headers: HeaderMap,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    // Chrome sends an OPTIONS preflight before the popup can attach its
+    // X-OpenCLI header. Only extension origins receive CORS permission; normal
+    // web pages cannot read this local task/result endpoint.
+    if request.method() == axum::http::Method::OPTIONS {
+        return task_cors_response(&headers, StatusCode::NO_CONTENT.into_response());
+    }
+
+    // Popup GETs are authenticated by their Chrome extension Origin. Keeping
+    // them header-free avoids an unnecessary CORS OPTIONS preflight. Internal
+    // daemon clients keep using X-OpenCLI, because they have no Origin header.
+    if !headers.contains_key("x-opencli") && !is_extension_origin(&headers) {
+        return task_cors_response(
+            &headers,
+            (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Missing X-OpenCLI header" })),
+            )
+                .into_response(),
+        );
+    }
+
+    if request.method() == axum::http::Method::GET {
+        let tasks = state.tasks.read().await;
+        let count = tasks.len();
+        let tasks: Vec<BrowserTask> = tasks.iter().cloned().collect();
+        return task_cors_response(
+            &headers,
+            Json(json!({ "tasks": tasks, "count": count })).into_response(),
+        );
+    }
+
+    let body = match axum::body::to_bytes(request.into_body(), COMMAND_BODY_LIMIT).await {
+        Ok(body) => body,
+        Err(_) => {
+            return task_cors_response(
+                &headers,
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": "Invalid task request body" })),
+                )
+                    .into_response(),
+            )
+        }
+    };
+    let update: TaskUpdate = match serde_json::from_slice(&body) {
+        Ok(update) => update,
+        Err(err) => {
+            return task_cors_response(
+                &headers,
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": format!("Invalid task request: {err}") })),
+                )
+                    .into_response(),
+            )
+        }
+    };
+
+    let now = unix_time_ms();
+    let mut tasks = state.tasks.write().await;
+    if update.status == "running" {
+        let workspace = update
+            .workspace
+            .unwrap_or_else(|| "adapter:unknown".to_string());
+        let task = BrowserTask {
+            id: uuid::Uuid::new_v4().to_string(),
+            workspace,
+            status: "running".to_string(),
+            started_at_ms: now,
+            finished_at_ms: None,
+            result_preview: None,
+            error: None,
+        };
+        tasks.push_front(task.clone());
+        while tasks.len() > TASK_HISTORY_LIMIT {
+            tasks.pop_back();
+        }
+        return task_cors_response(&headers, Json(json!({ "task": task })).into_response());
+    }
+
+    let Some(id) = update.id else {
+        return task_cors_response(
+            &headers,
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Task id is required when finishing a task" })),
+            )
+                .into_response(),
+        );
+    };
+    let Some(task) = tasks.iter_mut().find(|task| task.id == id) else {
+        return task_cors_response(
+            &headers,
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Task not found" })),
+            )
+                .into_response(),
+        );
+    };
+    task.status = update.status;
+    task.finished_at_ms = Some(now);
+    task.result_preview = update.result.as_ref().map(task_preview);
+    task.error = update.error.as_deref().map(limit_task_text);
+    task_cors_response(
+        &headers,
+        Json(json!({ "task": task.clone() })).into_response(),
+    )
+}
+
+fn task_cors_response(
+    headers: &HeaderMap,
+    mut response: axum::response::Response,
+) -> axum::response::Response {
+    let Some(origin) = headers.get(axum::http::header::ORIGIN) else {
+        return response;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return response;
+    };
+    if !origin.starts_with("chrome-extension://") {
+        return response;
+    }
+
+    let response_headers = response.headers_mut();
+    if let Ok(origin_value) = axum::http::HeaderValue::from_str(origin) {
+        response_headers.insert(
+            axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            origin_value,
+        );
+    }
+    response_headers.insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_METHODS,
+        axum::http::HeaderValue::from_static("GET, POST, OPTIONS"),
+    );
+    response_headers.insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_HEADERS,
+        axum::http::HeaderValue::from_static("X-OpenCLI, Content-Type"),
+    );
+    response_headers.insert(
+        axum::http::header::VARY,
+        axum::http::HeaderValue::from_static("Origin"),
+    );
+    response
+}
+
+fn is_extension_origin(headers: &HeaderMap) -> bool {
+    headers
+        .get(axum::http::header::ORIGIN)
+        .and_then(|origin| origin.to_str().ok())
+        .is_some_and(|origin| origin.starts_with("chrome-extension://"))
+}
+
+fn unix_time_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
+fn task_preview(value: &Value) -> String {
+    let sanitized = redact_task_value(value);
+    limit_task_text(
+        &serde_json::to_string_pretty(&sanitized).unwrap_or_else(|_| "<unavailable>".to_string()),
+    )
+}
+
+fn redact_task_value(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, value)| {
+                    let lower = key.to_ascii_lowercase();
+                    let sensitive = ["token", "secret", "password", "authorization", "cookie"]
+                        .iter()
+                        .any(|needle| lower.contains(needle));
+                    (
+                        key.clone(),
+                        if sensitive {
+                            Value::String("[redacted]".to_string())
+                        } else {
+                            redact_task_value(value)
+                        },
+                    )
+                })
+                .collect(),
+        ),
+        Value::Array(values) => Value::Array(values.iter().map(redact_task_value).collect()),
+        Value::String(text) => Value::String(limit_task_text(&redact_url_query_tokens(text))),
+        _ => value.clone(),
+    }
+}
+
+fn redact_url_query_tokens(text: &str) -> String {
+    let mut redacted = text.to_string();
+    for key in ["xsec_token", "access_token"] {
+        let needle = format!("{key}=");
+        let mut start = 0;
+        while let Some(offset) = redacted[start..].find(&needle) {
+            let value_start = start + offset + needle.len();
+            let value_end = redacted[value_start..]
+                .find('&')
+                .map(|offset| value_start + offset)
+                .unwrap_or(redacted.len());
+            redacted.replace_range(value_start..value_end, "[redacted]");
+            start = value_start + "[redacted]".len();
+        }
+    }
+    redacted
+}
+
+fn limit_task_text(text: &str) -> String {
+    let mut chars = text.chars();
+    let preview: String = chars.by_ref().take(TASK_TEXT_LIMIT).collect();
+    if chars.next().is_some() {
+        format!("{preview}…")
+    } else {
+        preview
+    }
 }
 
 /// POST /command — accept a command from the CLI and forward to the extension.
@@ -406,5 +670,105 @@ mod tests {
         state.touch().await;
         let after = *state.last_activity.read().await;
         assert!(after > before);
+    }
+
+    #[test]
+    fn task_preview_redacts_sensitive_fields_and_limits_text() {
+        let result = json!({
+            "title": "A public result",
+            "accessToken": "do-not-display",
+            "nested": { "cookie": "do-not-display" },
+        });
+
+        let preview = task_preview(&result);
+        assert!(preview.contains("A public result"));
+        assert!(preview.contains("[redacted]"));
+        assert!(!preview.contains("do-not-display"));
+        assert!(!task_preview(&json!({
+            "url": "https://www.xiaohongshu.com/explore/id?xsec_token=signed-value&xsec_source=pc_feed"
+        }))
+        .contains("signed-value"));
+        assert_eq!(
+            limit_task_text(&"x".repeat(TASK_TEXT_LIMIT + 1))
+                .chars()
+                .count(),
+            TASK_TEXT_LIMIT + 1
+        );
+    }
+
+    #[tokio::test]
+    async fn task_endpoint_reports_a_sanitized_completed_task() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let daemon = Daemon::start(port).await.unwrap();
+        let client = crate::daemon_client::DaemonClient::new(port);
+        let task = client.start_task("adapter:xiaohongshu:feed").await.unwrap();
+        client
+            .finish_task(
+                &task.id,
+                "done",
+                Some(&json!({ "title": "visible", "accessToken": "hidden" })),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let tasks: Value = reqwest::Client::new()
+            .get(format!("http://127.0.0.1:{port}/tasks"))
+            .header("X-OpenCLI", "1")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(tasks["count"], 1);
+        assert_eq!(tasks["tasks"][0]["status"], "done");
+        assert!(tasks["tasks"][0]["result_preview"]
+            .as_str()
+            .unwrap()
+            .contains("[redacted]"));
+        assert!(!tasks["tasks"][0]["result_preview"]
+            .as_str()
+            .unwrap()
+            .contains("hidden"));
+
+        let preflight = reqwest::Client::new()
+            .request(
+                reqwest::Method::OPTIONS,
+                format!("http://127.0.0.1:{port}/tasks"),
+            )
+            .header("Origin", "chrome-extension://test-extension")
+            .header("Access-Control-Request-Method", "GET")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(preflight.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            preflight
+                .headers()
+                .get("access-control-allow-origin")
+                .unwrap(),
+            "chrome-extension://test-extension"
+        );
+
+        let popup_read = reqwest::Client::new()
+            .get(format!("http://127.0.0.1:{port}/tasks"))
+            .header("Origin", "chrome-extension://test-extension")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(popup_read.status(), StatusCode::OK);
+        assert_eq!(
+            popup_read
+                .headers()
+                .get("access-control-allow-origin")
+                .unwrap(),
+            "chrome-extension://test-extension"
+        );
+
+        daemon.shutdown().await.unwrap();
     }
 }

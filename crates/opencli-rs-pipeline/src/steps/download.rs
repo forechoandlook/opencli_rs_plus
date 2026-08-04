@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use opencli_rs_core::{CliError, IPage};
 use serde_json::Value;
+use tokio::io::AsyncWriteExt;
 use tracing::{debug, info};
 
 use crate::step_registry::{StepHandler, StepRegistry};
@@ -594,20 +595,40 @@ async fn execute_media_batch_download(
         })
         .unwrap_or_else(|| "media".to_string());
 
+    let save_metadata = params
+        .get("saveMetadata")
+        .or_else(|| params.get("save_metadata"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let metadata_filename = params
+        .get("metadataFilename")
+        .or_else(|| params.get("metadata_filename"))
+        .and_then(Value::as_str)
+        .map(|s| {
+            render_template_str(s, ctx)
+                .ok()
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_else(|| s.to_string())
+        })
+        .unwrap_or_else(|| "note.md".to_string());
+
     let items = data
         .get("items")
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
 
-    if items.is_empty() {
-        // Data might be the error array itself
+    if items.is_empty() && !save_metadata {
+        // Data might already be an upstream error/status array — surface it as-is.
         if data.is_array() {
             return Ok(data.clone());
         }
-        return Ok(
-            serde_json::json!([{ "index": 0, "type": "-", "status": "failed", "size": "No media items" }]),
-        );
+        // No media resolved: fail the step instead of silently succeeding with
+        // zero downloads, so daemon jobs land in `failed` (with retry/backoff)
+        // rather than `done` with an empty result — see docs/debug.md.
+        return Err(CliError::pipeline(
+            "download: no media items to download (upstream step produced an empty items list)",
+        ));
     }
 
     let _ = std::fs::create_dir_all(&output_dir);
@@ -617,6 +638,13 @@ async fn execute_media_batch_download(
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .unwrap_or_default();
+
+    let referer = params.get("referer").and_then(Value::as_str).map(|s| {
+        render_template_str(s, ctx)
+            .ok()
+            .and_then(|v| v.as_str().map(String::from))
+            .unwrap_or_else(|| s.to_string())
+    });
 
     let mut results = Vec::new();
 
@@ -633,57 +661,38 @@ async fn execute_media_batch_download(
 
         let idx = i + 1;
 
-        if media_type == "image" {
-            // Direct image download
-            let ext = if url.contains("format=png") {
-                "png"
-            } else if url.contains("format=webp") {
-                "webp"
-            } else {
-                "jpg"
-            };
-            let filename = format!("{}_{:03}.{}", prefix, idx, ext);
-            let filepath = format!("{}/{}", output_dir, filename);
-
-            match client.get(url).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    if let Ok(bytes) = resp.bytes().await {
-                        if std::fs::write(&filepath, &bytes).is_ok() {
-                            let size = format_size(bytes.len());
-                            results.push(serde_json::json!({
-                                "index": idx, "type": "image", "status": "ok", "size": size
-                            }));
-                            continue;
-                        }
-                    }
-                }
-                _ => {}
+        if media_type == "image" || media_type == "video" {
+            if !is_direct_http_url(url) {
+                results.push(serde_json::json!({
+                    "index": idx,
+                    "type": media_type,
+                    "status": unsupported_media_status(url, item.get("reason").and_then(Value::as_str)),
+                    "size": "-"
+                }));
+                continue;
             }
-            results.push(serde_json::json!({
-                "index": idx, "type": "image", "status": "failed", "size": "-"
-            }));
-        } else if media_type == "video" {
-            // Direct video download
-            let filename = format!("{}_{:03}.mp4", prefix, idx);
-            let filepath = format!("{}/{}", output_dir, filename);
 
-            match client.get(url).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    if let Ok(bytes) = resp.bytes().await {
-                        if std::fs::write(&filepath, &bytes).is_ok() {
-                            let size = format_size(bytes.len());
-                            results.push(serde_json::json!({
-                                "index": idx, "type": "video", "status": "ok", "size": size
-                            }));
-                            continue;
-                        }
-                    }
+            match download_direct_media(
+                &client,
+                url,
+                &output_dir,
+                &prefix,
+                idx,
+                media_type,
+                referer.as_deref(),
+            )
+            .await
+            {
+                Ok((filename, size)) => results.push(serde_json::json!({
+                    "index": idx, "type": media_type, "status": "ok", "size": size, "path": filename
+                })),
+                Err(error) => {
+                    debug!(%error, media_type, "Direct media download failed");
+                    results.push(serde_json::json!({
+                        "index": idx, "type": media_type, "status": "failed", "size": "-"
+                    }));
                 }
-                _ => {}
             }
-            results.push(serde_json::json!({
-                "index": idx, "type": "video", "status": "failed", "size": "-"
-            }));
         } else if media_type == "video-tweet" {
             // Use yt-dlp for tweet videos
             let filename = format!("{}_{:03}.mp4", prefix, idx);
@@ -722,6 +731,17 @@ async fn execute_media_batch_download(
         }
     }
 
+    if save_metadata {
+        match write_media_metadata(&output_dir, &metadata_filename, data, &results) {
+            Ok(filename) => results.push(serde_json::json!({
+                "index": 0, "type": "metadata", "status": "ok", "size": "saved", "path": filename
+            })),
+            Err(error) => results.push(serde_json::json!({
+                "index": 0, "type": "metadata", "status": format!("failed: {}", error), "size": "-"
+            })),
+        }
+    }
+
     if results.is_empty() {
         return Ok(
             serde_json::json!([{ "index": 0, "type": "-", "status": "no media", "size": "-" }]),
@@ -730,6 +750,179 @@ async fn execute_media_batch_download(
 
     info!(count = results.len(), dir = %output_dir, "Media batch download complete");
     Ok(Value::Array(results))
+}
+
+fn is_direct_http_url(url: &str) -> bool {
+    matches!(reqwest::Url::parse(url), Ok(parsed) if matches!(parsed.scheme(), "http" | "https"))
+}
+
+fn unsupported_media_status(url: &str, reason: Option<&str>) -> String {
+    if let Some(reason) = reason.filter(|reason| !reason.trim().is_empty()) {
+        return format!("unsupported: {}", reason);
+    }
+    if url.starts_with("blob:") {
+        "unsupported: browser blob/MSE stream".to_string()
+    } else if url.contains(".m3u8") {
+        "unsupported: HLS stream".to_string()
+    } else {
+        "unsupported: non-HTTP media URL".to_string()
+    }
+}
+
+async fn download_direct_media(
+    client: &reqwest::Client,
+    url: &str,
+    output_dir: &str,
+    prefix: &str,
+    index: usize,
+    media_type: &str,
+    referer: Option<&str>,
+) -> Result<(String, String), String> {
+    let mut request = client.get(url);
+    if let Some(referer) = referer {
+        request = request.header(reqwest::header::REFERER, referer);
+    }
+    let mut response = request.send().await.map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+
+    let extension = media_extension(
+        url,
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        media_type,
+    );
+    let filename = format!("{}_{:03}.{}", prefix, index, extension);
+    let path = std::path::Path::new(output_dir).join(&filename);
+    let partial_path = path.with_extension(format!("{}.part", extension));
+    let mut file = tokio::fs::File::create(&partial_path)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut byte_count = 0usize;
+
+    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+        file.write_all(&chunk)
+            .await
+            .map_err(|error| error.to_string())?;
+        byte_count += chunk.len();
+    }
+    file.flush().await.map_err(|error| error.to_string())?;
+    drop(file);
+    tokio::fs::rename(&partial_path, &path)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok((filename, format_size(byte_count)))
+}
+
+fn media_extension(url: &str, content_type: Option<&str>, media_type: &str) -> &'static str {
+    let content_type = content_type.unwrap_or("").to_ascii_lowercase();
+    if content_type.contains("webp") || url.to_ascii_lowercase().contains("webp") {
+        "webp"
+    } else if content_type.contains("png") || url.to_ascii_lowercase().contains("png") {
+        "png"
+    } else if content_type.contains("avif") || url.to_ascii_lowercase().contains("avif") {
+        "avif"
+    } else if content_type.contains("gif") || url.to_ascii_lowercase().contains("gif") {
+        "gif"
+    } else if content_type.contains("jpeg")
+        || content_type.contains("jpg")
+        || url.to_ascii_lowercase().contains("jpg")
+        || url.to_ascii_lowercase().contains("jpeg")
+    {
+        "jpg"
+    } else if content_type.contains("webm") {
+        "webm"
+    } else if media_type == "video" {
+        "mp4"
+    } else {
+        "jpg"
+    }
+}
+
+fn write_media_metadata(
+    output_dir: &str,
+    requested_filename: &str,
+    data: &Value,
+    results: &[Value],
+) -> Result<String, String> {
+    let filename = std::path::Path::new(requested_filename)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("note.md");
+    let path = std::path::Path::new(output_dir).join(filename);
+    let title = data
+        .get("title")
+        .and_then(Value::as_str)
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or("untitled");
+    let author = data
+        .get("author")
+        .and_then(Value::as_str)
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or("unknown");
+    let content = data
+        .get("content")
+        .or_else(|| data.get("desc"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let source = data
+        .get("sourceUrl")
+        .or_else(|| data.get("source_url"))
+        .and_then(Value::as_str)
+        .map(redact_source_url)
+        .unwrap_or_default();
+    let note_type = data
+        .get("noteType")
+        .or_else(|| data.get("note_type"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    let mut markdown = format!("# {}\n\n- 作者：{}\n", title, author);
+    if !note_type.is_empty() {
+        markdown.push_str(&format!("- 类型：{}\n", note_type));
+    }
+    if !source.is_empty() {
+        markdown.push_str(&format!("- 来源：{}\n", source));
+    }
+    markdown.push_str("\n## 正文\n\n");
+    markdown.push_str(content.trim());
+    markdown.push_str("\n\n## 媒体\n\n");
+    for result in results {
+        let media_type = result
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("media");
+        let status = result
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let path = result.get("path").and_then(Value::as_str);
+        if let Some(path) = path {
+            markdown.push_str(&format!("- {}：`{}`（{}）\n", media_type, path, status));
+        } else {
+            markdown.push_str(&format!("- {}：{}\n", media_type, status));
+        }
+    }
+    std::fs::write(&path, markdown).map_err(|error| error.to_string())?;
+    Ok(filename.to_string())
+}
+
+fn redact_source_url(source: &str) -> String {
+    let Ok(mut parsed) = reqwest::Url::parse(source) else {
+        return source.to_string();
+    };
+    let safe_query: Vec<(String, String)> = parsed
+        .query_pairs()
+        .filter(|(key, _)| !matches!(key.as_ref(), "xsec_token" | "token" | "signature" | "sign"))
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    parsed.query_pairs_mut().clear().extend_pairs(safe_query);
+    parsed.to_string()
 }
 
 fn format_size(bytes: usize) -> String {
@@ -1010,5 +1203,60 @@ mod tests {
             .unwrap();
         assert_eq!(result["download_status"], "pending");
         assert!(result.get("download_url").is_none());
+    }
+
+    #[test]
+    fn media_batch_rejects_browser_blob_urls_without_requesting_them() {
+        assert!(!is_direct_http_url(
+            "blob:https://www.xiaohongshu.com/stream-id"
+        ));
+        assert_eq!(
+            unsupported_media_status("blob:https://www.xiaohongshu.com/stream-id", None),
+            "unsupported: browser blob/MSE stream"
+        );
+    }
+
+    #[test]
+    fn media_batch_uses_content_type_or_url_for_extension() {
+        assert_eq!(
+            media_extension("https://cdn.example/image", Some("image/webp"), "image"),
+            "webp"
+        );
+        assert_eq!(
+            media_extension("https://cdn.example/video.mp4", None, "video"),
+            "mp4"
+        );
+    }
+
+    #[test]
+    fn metadata_redacts_xsec_token_and_lists_media() {
+        let unique = format!(
+            "opencli-download-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let output_dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&output_dir).unwrap();
+        let data = json!({
+            "title": "Example note",
+            "author": "author",
+            "content": "正文内容",
+            "noteType": "normal",
+            "sourceUrl": "https://www.xiaohongshu.com/explore/abc?xsec_token=secret&xsec_source=pc_feed"
+        });
+        let results = vec![json!({
+            "type": "image", "status": "ok", "path": "abc_001.webp"
+        })];
+
+        let filename =
+            write_media_metadata(output_dir.to_str().unwrap(), "note.md", &data, &results).unwrap();
+        let markdown = std::fs::read_to_string(output_dir.join(&filename)).unwrap();
+        assert!(markdown.contains("正文内容"));
+        assert!(markdown.contains("`abc_001.webp`"));
+        assert!(markdown.contains("xsec_source=pc_feed"));
+        assert!(!markdown.contains("xsec_token"));
+        std::fs::remove_dir_all(output_dir).unwrap();
     }
 }

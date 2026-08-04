@@ -14,18 +14,44 @@ args:
 columns: [title, author, likes, type, url]
 
 pipeline:
-  - navigate: https://www.xiaohongshu.com/explore
+  - navigate:
+      url: https://www.xiaohongshu.com/explore
+      waitUntil: commit
+      reuseCurrent: true
+      retry: false
   - tap:
       store: feed
       action: fetchFeeds
       capture: homefeed
       select: data.items
+      framework: pinia
+      storeTimeout: 3
+      cacheTtl: 60
       timeout: 8
-  - map:
-      id: ${{ item.id }}
-      title: ${{ item.note_card.display_title }}
-      type: ${{ item.note_card.type }}
-      author: ${{ item.note_card.user.nickname }}
-      likes: ${{ item.note_card.interact_info.liked_count }}
-      url: https://www.xiaohongshu.com/explore/${{ item.id }}
+      retry: false
+  - evaluate: |
+      (() => {
+        const items = Array.isArray(${{ data | json }}) ? ${{ data | json }} : [];
+        return items.map((item) => {
+          const note = item?.noteCard || item?.note_card || {};
+          const user = note.user || {};
+          const interact = note.interactInfo || note.interact_info || {};
+          const id = String(item?.id || item?.noteId || item?.note_id || '').trim();
+          const xsecToken = String(item?.xsecToken || item?.xsec_token || '').trim();
+          const baseUrl = `https://www.xiaohongshu.com/explore/${encodeURIComponent(id)}`;
+          // xsecToken is issued by Xiaohongshu for this feed item. Preserve it
+          // verbatim; do not try to synthesize or reuse a token for another note.
+          const url = xsecToken
+            ? `${baseUrl}?xsec_token=${encodeURIComponent(xsecToken)}&xsec_source=pc_feed`
+            : baseUrl;
+          return {
+            id,
+            title: String(note.displayTitle || note.display_title || '').trim(),
+            type: String(note.type || '').trim(),
+            author: String(user.nickname || '').trim(),
+            likes: String(interact.likedCount || interact.liked_count || 0),
+            url,
+          };
+        }).filter((item) => item.id);
+      })()
   - limit: ${{ args.limit | default(20) }}

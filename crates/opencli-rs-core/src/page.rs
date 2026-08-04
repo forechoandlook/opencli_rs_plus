@@ -187,8 +187,8 @@ pub trait IPage: Send + Sync {
     async fn get_network_requests(&self) -> Result<Vec<NetworkRequest>, CliError>;
 
     /// Fetch a URL from the browser extension's background service worker context.
-    /// Cookies for `cookie_url` (defaults to `url`) are automatically injected.
-    /// No tab or window is opened — completely silent.
+    /// This may fail when a site rejects extension-origin CORS; callers should
+    /// retry through the same-origin automation page when necessary.
     async fn bg_fetch(
         &self,
         url: &str,

@@ -35,6 +35,20 @@ impl BrowserBridge {
 
     /// Connect to the daemon, starting it if necessary, and return a page.
     pub async fn connect(&mut self) -> Result<Arc<dyn IPage>, CliError> {
+        self.connect_with_workspace("default").await
+    }
+
+    /// Connect using an isolated automation workspace.
+    ///
+    /// A workspace owns only the background tabs created by OpenCLI. Keeping
+    /// browser commands in a per-adapter workspace prevents a command from
+    /// ever resolving to the user's currently visible tab, while allowing a
+    /// short-lived site tab to be reused between invocations.
+    pub async fn connect_with_workspace(
+        &mut self,
+        workspace: impl Into<String>,
+    ) -> Result<Arc<dyn IPage>, CliError> {
+        let workspace = workspace.into();
         // Step 1: Check Chrome is running
         if !is_chrome_running() {
             return Err(CliError::BrowserConnect {
@@ -52,7 +66,7 @@ impl BrowserBridge {
             debug!(port, "found active daemon with extension connected");
             self.port = Some(port);
             let client = Arc::new(DaemonClient::new(port));
-            let page = DaemonPage::new(client, "default");
+            let page = DaemonPage::new(client, workspace);
             return Ok(Arc::new(page));
         }
 
@@ -66,7 +80,7 @@ impl BrowserBridge {
             .poll_extension(&client, EXTENSION_INITIAL_WAIT, false)
             .await
         {
-            let page = DaemonPage::new(client, "default");
+            let page = DaemonPage::new(client, workspace);
             return Ok(Arc::new(page));
         }
 
@@ -80,7 +94,7 @@ impl BrowserBridge {
             .poll_extension(&client, EXTENSION_REMAINING_WAIT, true)
             .await
         {
-            let page = DaemonPage::new(client, "default");
+            let page = DaemonPage::new(client, workspace);
             return Ok(Arc::new(page));
         }
 

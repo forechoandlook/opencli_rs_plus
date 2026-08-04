@@ -83,7 +83,7 @@ pipeline:
         const seen = new Set();
         const unique = media.filter(m => { if (seen.has(m.url)) return false; seen.add(m.url); return true; }).slice(0, limit);
 
-        if (!unique.length) return [{ index: 0, type: '-', status: 'failed', size: 'No media found' }];
+        if (!unique.length) throw new Error('未找到可下载的媒体：可能账号无媒体推文、tweet-url 无效、或未登录');
 
         return {
           items: unique,

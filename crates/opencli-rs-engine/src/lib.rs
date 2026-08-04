@@ -1,4 +1,4 @@
-use opencli_rs_browser::{get_app_port, probe_cdp, BrowserBridge, CdpPage};
+use opencli_rs_browser::{get_app_port, probe_cdp, BrowserBridge, CdpPage, DaemonClient};
 use opencli_rs_core::{CliCommand, CliError, IPage, Strategy};
 use opencli_rs_pipeline::{execute_pipeline, steps::register_all_steps, StepRegistry};
 use serde_json::Value;
@@ -20,6 +20,21 @@ fn command_timeout(cmd: &CliCommand) -> u64 {
         .and_then(|s| s.parse().ok())
         .or(cmd.timeout_seconds)
         .unwrap_or(60)
+}
+
+/// Keep browser pages by their configured origin rather than command name.
+/// Different commands for the same site therefore reuse one authenticated,
+/// minimized page, while the task panel still records the exact command.
+fn browser_workspace(domain: Option<&str>, site: &str) -> String {
+    let domain = domain.unwrap_or(site);
+    format!(
+        "origin:{}",
+        domain.trim().trim_end_matches('/').to_ascii_lowercase()
+    )
+}
+
+fn task_workspace(site: &str, name: &str) -> String {
+    format!("adapter:{site}:{name}")
 }
 
 pub async fn execute_command(
@@ -60,6 +75,7 @@ async fn execute_command_inner(
                 .as_deref()
                 .is_some_and(|d| d == "localhost" || d.starts_with("localhost:"));
 
+        let mut popup_task = None;
         let page: Arc<dyn IPage> = if is_electron {
             let port = get_app_port(&cmd.site).ok_or_else(|| {
                 CliError::browser_connect(format!(
@@ -73,7 +89,20 @@ async fn execute_command_inner(
         } else {
             // Standard browser session via Chrome extension
             let mut bridge = BrowserBridge::new(daemon_port());
-            bridge.connect().await?
+            // Page workspaces are keyed by origin. This reuses the cached,
+            // authenticated page across commands for the same website without
+            // ever targeting a user-owned tab.
+            let page_workspace = browser_workspace(cmd.domain.as_deref(), &cmd.site);
+            let page = bridge.connect_with_workspace(&page_workspace).await?;
+            // The task panel is supplementary observability. Do not turn a
+            // reporting failure into an adapter failure.
+            let task_workspace = task_workspace(&cmd.site, &cmd.name);
+            popup_task = DaemonClient::new(daemon_port())
+                .start_task(&task_workspace)
+                .await
+                .ok()
+                .map(|task| (DaemonClient::new(daemon_port()), task.id));
+            page
         };
 
         // Pre-navigate only for Cookie/Header strategies.
@@ -105,12 +134,51 @@ async fn execute_command_inner(
             )))
         };
 
-        // Close the automation tab/window after command completes
-        let _ = page.close().await;
+        if let Some((client, task_id)) = popup_task {
+            match &result {
+                Ok(data) => {
+                    let _ = client.finish_task(&task_id, "done", Some(data), None).await;
+                }
+                Err(err) => {
+                    let _ = client
+                        .finish_task(&task_id, "failed", None, Some(&err.to_string()))
+                        .await;
+                }
+            }
+        }
+
+        // Extension-backed pages are left for the extension's short idle
+        // cleanup window. This makes subsequent commands reuse a background
+        // tab and its warm cache, without touching the user's visible tab.
+        // Electron/CDP targets retain their existing close behaviour.
+        if is_electron {
+            let _ = page.close().await;
+        }
 
         result
     } else {
         run_command(cmd, None, &kwargs, &registry).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_workspace_groups_commands_by_configured_origin() {
+        assert_eq!(
+            browser_workspace(Some("www.zhihu.com"), "zhihu"),
+            browser_workspace(Some("www.zhihu.com"), "zhihu")
+        );
+        assert_eq!(
+            browser_workspace(Some("www.zhihu.com/"), "zhihu"),
+            "origin:www.zhihu.com"
+        );
+        assert_ne!(
+            task_workspace("zhihu", "hot"),
+            task_workspace("zhihu", "search")
+        );
     }
 }
 

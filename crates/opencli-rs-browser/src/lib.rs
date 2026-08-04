@@ -11,7 +11,7 @@ pub mod types;
 pub use bridge::BrowserBridge;
 pub use cdp::CdpPage;
 pub use daemon::Daemon;
-pub use daemon_client::DaemonClient;
+pub use daemon_client::{BrowserTask, DaemonClient};
 pub use electron_apps::{get_app_port, probe_cdp};
 pub use page::DaemonPage;
 pub use types::{DaemonCommand, DaemonResult};

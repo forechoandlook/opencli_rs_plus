@@ -1,0 +1,59 @@
+site: xiaohongshu
+name: hot
+description: "读取小红书首页已加载的热推 Feed（被动读取，不主动刷新）"
+domain: www.xiaohongshu.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: "Maximum items from the already-loaded home feed"
+
+columns: [rank, title, author, likes, type, url]
+
+pipeline:
+  - navigate:
+      url: https://www.xiaohongshu.com/explore
+      waitUntil: commit
+      reuseCurrent: true
+      retry: false
+  - evaluate:
+      js: |
+        (async () => {
+          const getFeeds = () => {
+            const feeds = window.__INITIAL_STATE__?.feed?.feeds;
+            if (Array.isArray(feeds?._value)) return feeds._value;
+            return Array.isArray(feeds) ? feeds : [];
+          };
+          // Hydration wait only. Do not call the Pinia fetchFeeds action or an
+          // API endpoint; if the browser did not load the page feed by itself,
+          // return a clear error instead of forcing a refresh.
+          let feeds = getFeeds();
+          for (let attempt = 0; feeds.length === 0 && attempt < 8; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 250));
+            feeds = getFeeds();
+          }
+          if (feeds.length === 0) {
+            throw new Error('首页热推未被动加载；为避免风控，OpenCLI 不会主动刷新 Feed');
+          }
+          return feeds.map((item, index) => {
+            const note = item?.noteCard || item?.note_card || {};
+            const user = note?.user || {};
+            const interact = note?.interactInfo || note?.interact_info || {};
+            const id = String(item?.id || item?.noteId || item?.note_id || '').trim();
+            const xsecToken = String(item?.xsecToken || item?.xsec_token || '').trim();
+            const baseUrl = `https://www.xiaohongshu.com/explore/${encodeURIComponent(id)}`;
+            return {
+              rank: index + 1,
+              title: String(note?.displayTitle || note?.display_title || '').trim(),
+              author: String(user?.nickname || '').trim(),
+              likes: String(interact?.likedCount || interact?.liked_count || 0),
+              type: String(note?.type || '').trim(),
+              url: xsecToken ? `${baseUrl}?xsec_token=${encodeURIComponent(xsecToken)}&xsec_source=pc_feed` : baseUrl,
+            };
+          }).filter(item => item.url && !item.url.endsWith('/explore/'));
+        })()
+      retry: false
+  - limit: ${{ args.limit | default(20) }}

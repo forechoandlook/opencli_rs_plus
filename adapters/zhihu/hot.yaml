@@ -14,6 +14,7 @@ pipeline:
   - bg_fetch:
       url: "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=50"
       cookie_url: "https://www.zhihu.com"
+      same_origin: true
 
   - select: body.data
 

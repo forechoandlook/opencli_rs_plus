@@ -20,6 +20,8 @@ export interface Command {
   workspace?: string;
   /** URL to navigate to (navigate action) */
   url?: string;
+  /** Navigation readiness; commit returns as soon as the target URL is active. */
+  wait_until?: 'commit' | 'load';
   /** Sub-operation for tabs: list, new, close, select */
   op?: 'list' | 'new' | 'close' | 'select';
   /** Tab index for tabs select/close */

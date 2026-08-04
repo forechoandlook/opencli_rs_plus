@@ -1,0 +1,94 @@
+site: xiaohongshu
+name: comments
+description: "读取小红书笔记当前首屏评论（被动读取，不翻页）"
+domain: www.xiaohongshu.com
+strategy: cookie
+browser: true
+
+args:
+  note-id:
+    positional: true
+    type: string
+    required: true
+    description: "Full Xiaohongshu explore URL from feed (preserves xsec_token)"
+  limit:
+    type: int
+    default: 10
+    description: "Maximum comments from the page's already-loaded first screen"
+
+columns: [author, content, likes, replies, time, ip]
+
+pipeline:
+  - evaluate: |
+      (() => {
+        const raw = String(${{ args['note-id'] | json }} || '').trim();
+        let noteId = raw.replace(/[?#].*$/, '').replace(/\/+$/, '').split('/').pop() || '';
+        let xsecToken = '';
+        let xsecSource = '';
+        try {
+          const parsed = new URL(raw);
+          if (!/(^|\.)xiaohongshu\.com$/i.test(parsed.hostname)) {
+            throw new Error('URL host must be xiaohongshu.com');
+          }
+          const match = parsed.pathname.match(/^\/explore\/([^/?#]+)$/);
+          if (!match) throw new Error('URL must be a Xiaohongshu /explore/<note-id> link');
+          noteId = match[1];
+          xsecToken = parsed.searchParams.get('xsec_token') || '';
+          xsecSource = parsed.searchParams.get('xsec_source') || '';
+        } catch (error) {
+          if (/^https?:\/\//i.test(raw)) throw error;
+        }
+        if (!noteId) throw new Error('Missing Xiaohongshu note ID');
+        const detailUrl = new URL('https://www.xiaohongshu.com/explore/' + encodeURIComponent(noteId));
+        if (xsecToken) {
+          detailUrl.searchParams.set('xsec_token', xsecToken);
+          detailUrl.searchParams.set('xsec_source', xsecSource || 'pc_feed');
+        }
+        return { noteId, detailUrl: detailUrl.toString() };
+      })()
+  - navigate:
+      url: ${{ data.detailUrl }}
+      reuseCurrent: true
+      retry: false
+  - evaluate:
+      js: |
+        (async () => {
+          if (location.pathname === '/404' || document.title.includes('无法浏览') || document.title.includes('不见了')) {
+            throw new Error('该笔记需要 feed 输出的完整签名链接，或已不可浏览；不会尝试补发评论请求');
+          }
+          const getComments = () => {
+            const noteMap = window.__INITIAL_STATE__?.note?.noteDetailMap || {};
+            const entry = Object.values(noteMap).find(item => item?.comments && item?.note);
+            return entry?.comments;
+          };
+          // Wait only for the document's initial state hydration. This never
+          // invokes a comments API, clicks "more", scrolls, or paginates.
+          let comments = getComments();
+          for (let attempt = 0; !comments?.firstRequestFinish && attempt < 8; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 250));
+            comments = getComments();
+          }
+          if (!Array.isArray(comments?.list)) {
+            throw new Error('首屏评论未随页面被动加载；为避免风控，OpenCLI 不会主动请求或翻页评论');
+          }
+          const formatTime = value => {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric) || numeric <= 0) return '';
+            const ms = numeric < 1e12 ? numeric * 1000 : numeric;
+            return new Date(ms).toISOString().replace('.000Z', 'Z');
+          };
+          return comments.list.map(comment => {
+            const user = comment?.userInfo || comment?.user || {};
+            return {
+              id: String(comment?.id || ''),
+              author: String(user?.nickname || user?.nickName || '').trim(),
+              content: String(comment?.content || '').trim(),
+              likes: Number(comment?.likeCount || 0),
+              replies: Number(comment?.subCommentCount || 0),
+              time: formatTime(comment?.createTime),
+              ip: String(comment?.ipLocation || '').trim(),
+            };
+          }).filter(comment => comment.id && comment.content);
+        })()
+      retry: false
+  - limit: ${{ args.limit | default(10) }}

@@ -91,6 +91,16 @@ impl StepHandler for TapStep {
             .or_else(|| obj.get("wait"))
             .and_then(|v| v.as_f64())
             .unwrap_or(5.0);
+        let store_timeout_secs = obj
+            .get("storeTimeout")
+            .or_else(|| obj.get("store_timeout"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let cache_ttl_secs = obj
+            .get("cacheTtl")
+            .or_else(|| obj.get("cache_ttl"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
 
         // Extract select path (optional)
         let select_path = obj.get("select").and_then(|v| v.as_str());
@@ -116,6 +126,11 @@ impl StepHandler for TapStep {
         let store_name_json = serde_json::to_string(&store_name).unwrap_or("\"\"".to_string());
         let action_name_json = serde_json::to_string(&action_name).unwrap_or("\"\"".to_string());
         let capture_json = serde_json::to_string(&capture_pattern).unwrap_or("\"\"".to_string());
+        let cache_key_json = serde_json::to_string(&format!(
+            "{}:{}:{}",
+            store_name, action_name, capture_pattern
+        ))
+        .unwrap_or("\"\"".to_string());
 
         // Build the action call
         let action_call = if action_args == Value::Array(vec![]) {
@@ -138,6 +153,13 @@ impl StepHandler for TapStep {
   let captureResolve;
   const capturePromise = new Promise(r => {{ captureResolve = r; }});
   const capturePattern = {capture_json};
+  const cacheKey = {cache_key_json};
+  const cacheTtlMs = {cache_ttl_ms};
+  const tapCache = window.__opencliTapCache ?? (window.__opencliTapCache = {{}});
+  const cached = tapCache[cacheKey];
+  if (cacheTtlMs > 0 && cached && Date.now() - cached.createdAt < cacheTtlMs) {{
+    return cached.body{select_chain} ?? cached.body;
+  }}
 
   const origFetch = window.fetch;
   window.fetch = async function(...fetchArgs) {{
@@ -170,26 +192,34 @@ impl StepHandler for TapStep {
   }};
 
   try {{
-    // ── 2. Find store ──
-    let store = null;
+    // ── 2. Find store, allowing the app a short hydration window ──
     const storeName = {store_name_json};
     const fw = {framework};
-
-    const app = document.querySelector('#app');
-    if (!fw || fw === 'pinia') {{
-      try {{
-        const pinia = app?.__vue_app__?.config?.globalProperties?.$pinia;
-        if (pinia?._s) store = pinia._s.get(storeName);
-      }} catch {{}}
-    }}
-    if (!store && (!fw || fw === 'vuex')) {{
-      try {{
-        const vuexStore = app?.__vue_app__?.config?.globalProperties?.$store
-          ?? app?.__vue__?.$store;
-        if (vuexStore) {{
-          store = {{ [{action_name_json}]: (...a) => vuexStore.dispatch(storeName + '/' + {action_name_json}, ...a) }};
-        }}
-      }} catch {{}}
+    const findStore = () => {{
+      let store = null;
+      const app = document.querySelector('#app');
+      if (!fw || fw === 'pinia') {{
+        try {{
+          const pinia = app?.__vue_app__?.config?.globalProperties?.$pinia;
+          if (pinia?._s) store = pinia._s.get(storeName);
+        }} catch {{}}
+      }}
+      if (!store && (!fw || fw === 'vuex')) {{
+        try {{
+          const vuexStore = app?.__vue_app__?.config?.globalProperties?.$store
+            ?? app?.__vue__?.$store;
+          if (vuexStore) {{
+            store = {{ [{action_name_json}]: (...a) => vuexStore.dispatch(storeName + '/' + {action_name_json}, ...a) }};
+          }}
+        }} catch {{}}
+      }}
+      return store;
+    }};
+    let store = findStore();
+    const storeDeadline = Date.now() + {store_timeout_ms};
+    while ((!store || typeof store[{action_name_json}] !== 'function') && Date.now() < storeDeadline) {{
+      await new Promise(resolve => setTimeout(resolve, 50));
+      store = findStore();
     }}
 
     if (!store) return {{ error: 'Store not found: ' + storeName, hint: 'Page may not be fully loaded or store name may be incorrect' }};
@@ -214,9 +244,12 @@ impl StepHandler for TapStep {
   }}
 
   if (!captured) return {{ error: 'No matching response captured for pattern: ' + capturePattern }};
+  if (cacheTtlMs > 0) tapCache[cacheKey] = {{ createdAt: Date.now(), body: captured }};
   return captured{select_chain} ?? captured;
 }})()"#,
             timeout_ms = (timeout_secs * 1000.0) as u64,
+            store_timeout_ms = (store_timeout_secs * 1000.0) as u64,
+            cache_ttl_ms = (cache_ttl_secs * 1000.0) as u64,
         );
 
         let result = pg.evaluate(&js).await?;

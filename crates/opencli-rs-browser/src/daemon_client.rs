@@ -1,9 +1,17 @@
 use opencli_rs_core::CliError;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 use tracing::{debug, warn};
 
 use crate::types::{DaemonCommand, DaemonResult};
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BrowserTask {
+    pub id: String,
+    pub workspace: String,
+    pub status: String,
+}
 
 /// HTTP client that communicates with the Daemon server.
 pub struct DaemonClient {
@@ -111,6 +119,71 @@ impl DaemonClient {
             RETRY_DELAYS_MS.len(),
             last_err.unwrap_or_else(|| "unknown error".into())
         )))
+    }
+
+    /// Create an in-memory task record for the extension popup. Failure to
+    /// report telemetry must never prevent the adapter itself from running.
+    pub async fn start_task(&self, workspace: &str) -> Result<BrowserTask, CliError> {
+        let value = self
+            .client
+            .post(format!("{}/tasks", self.base_url))
+            .header("X-OpenCLI", "1")
+            .json(&serde_json::json!({
+                "workspace": workspace,
+                "status": "running",
+            }))
+            .send()
+            .await
+            .map_err(|e| CliError::browser_connect(format!("Failed to start browser task: {e}")))?;
+
+        let status = value.status();
+        let body: Value = value
+            .json()
+            .await
+            .map_err(|e| CliError::browser_connect(format!("Failed to parse browser task: {e}")))?;
+        if !status.is_success() {
+            return Err(CliError::browser_connect(format!(
+                "Failed to start browser task: HTTP {status}"
+            )));
+        }
+
+        serde_json::from_value(body.get("task").cloned().unwrap_or(Value::Null))
+            .map_err(|e| CliError::browser_connect(format!("Invalid browser task response: {e}")))
+    }
+
+    /// Mark a popup task as complete. Result data remains in daemon memory
+    /// only and is sanitized there before the popup can read it.
+    pub async fn finish_task(
+        &self,
+        task_id: &str,
+        status: &str,
+        result: Option<&Value>,
+        error: Option<&str>,
+    ) -> Result<(), CliError> {
+        let response = self
+            .client
+            .post(format!("{}/tasks", self.base_url))
+            .header("X-OpenCLI", "1")
+            .json(&serde_json::json!({
+                "id": task_id,
+                "status": status,
+                "result": result,
+                "error": error,
+            }))
+            .send()
+            .await
+            .map_err(|e| {
+                CliError::browser_connect(format!("Failed to finish browser task: {e}"))
+            })?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(CliError::browser_connect(format!(
+                "Failed to finish browser task: HTTP {}",
+                response.status()
+            )))
+        }
     }
 
     /// Check if something is listening on the daemon port.

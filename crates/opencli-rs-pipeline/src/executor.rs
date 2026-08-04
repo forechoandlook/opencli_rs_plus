@@ -42,9 +42,22 @@ pub async fn execute_pipeline(
         })?;
 
         let is_browser = handler.is_browser_step();
+        // A browser action can have side effects (or trigger a platform's
+        // anti-abuse controls). Adapters may opt out of automatic retries for
+        // a particular step with `retry: false`.
+        let retry_enabled = params
+            .as_object()
+            .and_then(|params| params.get("retry"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true);
+        let max_attempts = if is_browser && retry_enabled {
+            MAX_BROWSER_ATTEMPTS
+        } else {
+            1
+        };
         let mut last_error: Option<CliError> = None;
 
-        for attempt in 0..if is_browser { MAX_BROWSER_ATTEMPTS } else { 1 } {
+        for attempt in 0..max_attempts {
             match handler.execute(page.clone(), params, &data, args).await {
                 Ok(result) => {
                     data = result;
@@ -52,7 +65,7 @@ pub async fn execute_pipeline(
                     break;
                 }
                 Err(e) => {
-                    if is_browser && attempt + 1 < MAX_BROWSER_ATTEMPTS {
+                    if is_browser && retry_enabled && attempt + 1 < max_attempts {
                         warn!(
                             step = step_name,
                             attempt = attempt + 1,
@@ -248,5 +261,18 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("transient browser error"));
+    }
+
+    #[tokio::test]
+    async fn browser_step_can_disable_automatic_retries() {
+        let mut registry = StepRegistry::new();
+        let handler = Arc::new(FlakyBrowserStep::new(3));
+        registry.register(handler.clone());
+
+        let pipeline = vec![json!({"flaky_browser": {"retry": false}})];
+        assert!(execute_pipeline(None, &pipeline, &empty_args(), &registry)
+            .await
+            .is_err());
+        assert_eq!(handler.fail_count.load(Ordering::SeqCst), 1);
     }
 }

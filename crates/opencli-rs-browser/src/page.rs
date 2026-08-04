@@ -50,8 +50,11 @@ impl DaemonPage {
 
 #[async_trait]
 impl IPage for DaemonPage {
-    async fn goto(&self, url: &str, _options: Option<GotoOptions>) -> Result<(), CliError> {
-        let cmd = self.cmd("navigate").await.with_url(url);
+    async fn goto(&self, url: &str, options: Option<GotoOptions>) -> Result<(), CliError> {
+        let mut cmd = self.cmd("navigate").await.with_url(url);
+        if let Some(wait_until) = options.and_then(|options| options.wait_until) {
+            cmd = cmd.with_wait_until(wait_until);
+        }
         let result = self.send(cmd).await?;
         // Pin subsequent commands to the tab that was actually navigated.
         // The extension returns { tabId, url, title, timedOut } from handleNavigate.

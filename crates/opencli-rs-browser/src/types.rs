@@ -10,6 +10,10 @@ pub struct DaemonCommand {
     pub code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Navigation readiness: "commit" resolves after the target URL commits;
+    /// the default waits for the page load event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -37,6 +41,7 @@ impl DaemonCommand {
             action: action.into(),
             code: None,
             url: None,
+            wait_until: None,
             workspace: None,
             tab_id: None,
             format: None,
@@ -54,6 +59,11 @@ impl DaemonCommand {
 
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = Some(url.into());
+        self
+    }
+
+    pub fn with_wait_until(mut self, wait_until: impl Into<String>) -> Self {
+        self.wait_until = Some(wait_until.into());
         self
     }
 
