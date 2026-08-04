@@ -1,6 +1,6 @@
 site: steam
-name: top-sellers
-description: Steam top selling games
+name: new-releases
+description: Steam 最新发售游戏
 domain: store.steampowered.com
 strategy: public
 browser: false
@@ -8,23 +8,24 @@ browser: false
 args:
   limit:
     type: int
-    default: 10
-    description: Number of games
+    default: 20
+    description: "Number of games"
 
 pipeline:
   - fetch:
       url: https://store.steampowered.com/api/featuredcategories/
 
-  - select: top_sellers.items
+  - select: new_releases.items
 
   - map:
       rank: ${{ index + 1 }}
+      id: ${{ item.id }}
       name: ${{ item.name }}
       price: ${{ item.final_price }}
       original_price: ${{ item.original_price || item.final_price }}
-      discount: ${{ item.discount_percent }}
+      discount: ${{ item.discount_percent || 0 }}
       url: https://store.steampowered.com/app/${{ item.id }}
 
   - limit: ${{ args.limit }}
 
-columns: [rank, name, price, original_price, discount, url]
+columns: [rank, id, name, price, original_price, discount, url]

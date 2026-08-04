@@ -1,0 +1,73 @@
+site: unity-assets
+name: hot
+description: 获取 Unity Asset Store 全站畅销资源榜
+domain: assetstore.unity.com
+strategy: cookie
+browser: true
+timeoutSeconds: 45
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: "Maximum number of featured assets"
+  currency:
+    type: str
+    default: CNY
+    description: "ISO 4217 currency code used for displayed prices"
+
+pipeline:
+  - navigate:
+      url: https://assetstore.unity.com/?orderBy=1&rows=96
+      retry: false
+
+  - wait: 3
+
+  - evaluate: |
+      (async () => {
+        const limit = ${{ args.limit | json }};
+        const currency = ${{ args.currency | json }};
+        const ids = [];
+        for (const link of document.querySelectorAll('a[href*="/packages/"]')) {
+          const path = new URL(link.href).pathname;
+          const match = path.match(/\/packages\/package\/(\d+)(?:\/|$)|-(\d+)(?:\/|$)/);
+          const id = match?.[1] || match?.[2];
+          if (id && !ids.includes(id)) ids.push(id);
+          if (ids.length >= limit) break;
+        }
+        if (!ids.length) throw new Error('Unity Asset Store best-seller page did not expose asset IDs');
+        const assets = await fetch(`/api/assets/get-multiple-assets?ids=${ids.join(',')}&currency=${encodeURIComponent(currency)}`, {
+          credentials: 'include',
+        }).then(async response => {
+          if (!response.ok) throw new Error(`Unity asset detail request failed: HTTP ${response.status}`);
+          return response.json();
+        });
+        const byId = new Map(assets.map(asset => [String(asset.id), asset]));
+        return ids.map((id, index) => {
+          const asset = byId.get(id);
+          if (!asset) return null;
+          const price = asset.price || {};
+          const rating = asset.rating || {};
+          return {
+            rank: index + 1,
+            id: asset.id,
+            name: asset.name || '',
+            summary: asset.summary || '',
+            category: asset.category?.name || asset.category?.slug || asset.category || '',
+            current_price: price.currentPrice || '',
+            original_price: price.originalPrice || '',
+            discount_percent: price.discountPercent || 0,
+            currency: price.currency || currency,
+            rating: Number.isFinite(Number(rating.average ?? rating.rating)) ? Number(rating.average ?? rating.rating) : 0,
+            ratings: rating.count || rating.counts || 0,
+            publisher: asset.publisher?.name || '',
+            latest_release_date: asset.latestReleaseDate || '',
+            thumbnail: asset.thumbnail || '',
+            url: `https://assetstore.unity.com/packages/package/${asset.id}`,
+          };
+        }).filter(Boolean);
+      })()
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, id, name, category, current_price, original_price, discount_percent, currency, rating, ratings, publisher]

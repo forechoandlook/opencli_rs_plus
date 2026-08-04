@@ -1,0 +1,52 @@
+site: freesound
+name: search
+description: 搜索 Freesound 音效；商用前必须复核单条许可证
+domain: freesound.org
+strategy: public
+browser: true
+timeoutSeconds: 45
+
+args:
+  query:
+    type: str
+    required: true
+    positional: true
+    description: "Sound-effect keywords"
+  limit:
+    type: int
+    default: 20
+    description: "Maximum number of sounds"
+
+pipeline:
+  - navigate:
+      url: "https://freesound.org/search/?q=${{ args.query | urlencode }}"
+      retry: false
+
+  - wait: 2
+
+  - evaluate: |
+      (() => {
+        const limit = ${{ args.limit | json }};
+        const items = [];
+        for (const link of document.querySelectorAll('a[href]')) {
+          if (!/\/sounds\/\d+\/?$/.test(new URL(link.href).pathname)) continue;
+          const title = link.textContent.trim().replace(/\s+/g, ' ');
+          if (!title || items.some(item => item.url === link.href)) continue;
+          const card = link.closest('.row') || link.parentElement?.parentElement;
+          items.push({
+            rank: items.length + 1,
+            title,
+            summary: card?.textContent?.trim().replace(/\s+/g, ' ').slice(0, 240) || '',
+            license: 'review detail page; exclude CC-BY-NC for commercial use',
+            commercial_safe: false,
+            url: link.href,
+          });
+          if (items.length >= limit) break;
+        }
+        if (!items.length) throw new Error('Freesound returned no sound links');
+        return items;
+      })()
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, title, license, commercial_safe, url]

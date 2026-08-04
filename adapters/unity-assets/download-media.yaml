@@ -1,0 +1,114 @@
+site: unity-assets
+name: download-media
+description: 下载 Unity Asset Store 资源页公开截图与视频缩略图，并保存元数据
+domain: assetstore.unity.com
+strategy: cookie
+browser: true
+timeoutSeconds: 90
+
+args:
+  id:
+    type: str
+    required: true
+    positional: true
+    description: "Unity Asset Store numeric asset ID"
+  output:
+    type: str
+    default: "./unity-assets-media"
+    description: "Output directory"
+  limit:
+    type: int
+    default: 30
+    description: "Maximum number of public images to download"
+  currency:
+    type: str
+    default: CNY
+    description: "ISO 4217 currency code used for metadata"
+
+pipeline:
+  - navigate:
+      url: https://assetstore.unity.com/
+      retry: false
+
+  - wait: 2
+
+  - evaluate: |
+      (async () => {
+        const id = ${{ args.id | json }}.trim();
+        const output = ${{ args.output | json }};
+        const limit = ${{ args.limit | json }};
+        const currency = ${{ args.currency | json }};
+        if (!/^\d+$/.test(id)) throw new Error('id must be a Unity Asset Store numeric asset ID');
+        const assets = await fetch(`/api/assets/get-multiple-assets?ids=${encodeURIComponent(id)}&currency=${encodeURIComponent(currency)}`, {
+          credentials: 'include',
+        }).then(async response => {
+          if (!response.ok) throw new Error(`Unity asset detail request failed: HTTP ${response.status}`);
+          return response.json();
+        });
+        const asset = assets[0];
+        if (!asset) throw new Error(`Unity Asset Store asset not found: ${id}`);
+        const isPublicHttpUrl = value => {
+          try {
+            const url = new URL(value);
+            return url.protocol === 'https:' || url.protocol === 'http:';
+          } catch {
+            return false;
+          }
+        };
+        const items = [];
+        const seen = new Set();
+        const addImage = (url, source) => {
+          if (!isPublicHttpUrl(url) || seen.has(url) || items.length >= limit) return;
+          seen.add(url);
+          items.push({ type: 'image', url, source });
+        };
+        const videos = [];
+        for (const media of Array.isArray(asset.media) ? asset.media : []) {
+          const type = String(media.type || '').toUpperCase();
+          if (type === 'SCREENSHOT' || type === 'IMAGE') {
+            addImage(media.url || media.thumbnailUrl || '', type.toLowerCase());
+          } else {
+            // Preserve third-party video references in metadata, but only
+            // download their publicly supplied thumbnail. Do not extract or
+            // bypass embedded-player, blob, or HLS streams.
+            if (isPublicHttpUrl(media.url || '')) videos.push({ type: type || 'VIDEO', url: media.url });
+            addImage(media.thumbnailUrl || '', `${type || 'video'} thumbnail`);
+          }
+        }
+        if (!items.length && isPublicHttpUrl(asset.thumbnail || '')) addImage(asset.thumbnail, 'asset thumbnail');
+        if (!items.length) throw new Error('Unity Asset Store did not provide any public image URLs for this asset');
+        const price = asset.price || {};
+        const rating = asset.rating || {};
+        return {
+          id: asset.id,
+          title: asset.name || '',
+          summary: asset.summary || '',
+          description: asset.description || '',
+          category: asset.category?.name || asset.category?.slug || asset.category || '',
+          tags: asset.tags || [],
+          publisher: asset.publisher?.name || '',
+          currentPrice: price.currentPrice || '',
+          originalPrice: price.originalPrice || '',
+          discountPercent: price.discountPercent || 0,
+          currency: price.currency || currency,
+          rating: rating.average || 0,
+          ratings: rating.count || 0,
+          originalUnityVersion: asset.originalUnityVersion || '',
+          latestReleaseDate: asset.latestReleaseDate || '',
+          sourceUrl: `https://assetstore.unity.com/packages/package/${asset.id}`,
+          videos,
+          items,
+          output,
+          username: `asset-${asset.id}`,
+        };
+      })()
+
+  - download:
+      type: media-batch
+      output: "${{ data.output }}"
+      username: "${{ data.username }}"
+      referer: "https://assetstore.unity.com/"
+      saveMetadata: true
+      metadataFilename: asset.md
+
+columns: [index, type, status, size]

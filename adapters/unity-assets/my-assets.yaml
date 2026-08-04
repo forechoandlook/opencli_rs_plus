@@ -1,0 +1,68 @@
+site: unity-assets
+name: my-assets
+description: 列出当前 Unity ID 已拥有的 Asset Store 资源
+domain: assetstore.unity.com
+strategy: cookie
+browser: true
+timeoutSeconds: 45
+
+args:
+  limit:
+    type: int
+    default: 50
+    description: "Maximum number of owned assets"
+  currency:
+    type: str
+    default: CNY
+    description: "ISO 4217 currency code used for displayed prices"
+
+pipeline:
+  - navigate:
+      url: https://assetstore.unity.com/my-assets
+      retry: false
+
+  - wait: 2
+
+  - evaluate: |
+      (async () => {
+        const limit = ${{ args.limit | json }};
+        const currency = ${{ args.currency | json }};
+        const payload = await fetch('/api/users/entitlements', { credentials: 'include' })
+          .then(async response => {
+            if (!response.ok) throw new Error(`Unity entitlement request failed: HTTP ${response.status}`);
+            return response.json();
+          });
+        const entitlements = Array.isArray(payload.entitlements) ? payload.entitlements : [];
+        const ids = [...new Set(entitlements.map(item => String(item.productId || '')).filter(id => /^\d+$/.test(id)))].slice(0, limit);
+        if (!ids.length) return [];
+        const assets = await fetch(`/api/assets/get-multiple-assets?ids=${ids.join(',')}&currency=${encodeURIComponent(currency)}`, {
+          credentials: 'include',
+        }).then(async response => {
+          if (!response.ok) throw new Error(`Unity asset detail request failed: HTTP ${response.status}`);
+          return response.json();
+        });
+        const byId = new Map(assets.map(asset => [String(asset.id), asset]));
+        return ids.map((id, index) => {
+          const asset = byId.get(id);
+          if (!asset) return null;
+          const price = asset.price || {};
+          const rating = asset.rating || {};
+          return {
+            rank: index + 1,
+            id: asset.id,
+            name: asset.name || '',
+            category: asset.category?.name || asset.category?.slug || asset.category || '',
+            current_price: price.currentPrice || '',
+            currency: price.currency || currency,
+            rating: Number.isFinite(Number(rating.average ?? rating.rating)) ? Number(rating.average ?? rating.rating) : 0,
+            ratings: rating.count || rating.counts || 0,
+            publisher: asset.publisher?.name || '',
+            entitlement_type: entitlements.find(item => String(item.productId) === id)?.type || '',
+            url: `https://assetstore.unity.com/packages/package/${asset.id}`,
+          };
+        }).filter(Boolean);
+      })()
+
+  - limit: ${{ args.limit }}
+
+columns: [rank, id, name, category, current_price, currency, rating, ratings, publisher, entitlement_type]

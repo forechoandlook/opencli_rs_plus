@@ -1,3 +1,27 @@
+# 2026-08-05
+
+## 主流游戏素材源接入
+
+- 新增 `opengameart search`、`kenney category`、`itchio assets`、`ambientcg popular` 与 `freesound search`，分别覆盖开放游戏素材、CC0 资源包、独立创作者市场、PBR 材质和音效发现。
+- Kenney 与 ambientCG 的输出明确标记为 `CC0`/`commercial_safe: true`。OpenGameArt、itch.io 和 Freesound 的许可证逐条不同，输出强制标记为需复核，不会把免费或公开页面误标为可直接商用。
+- Unity Asset Store 的网页 adapter 保持浏览、榜单和价格发现边界。官方将已购或免费获取的 Asset Store 包交付给同一 Unity ID 下的 Package Manager，因此不伪造或绕过其下载交付流程。
+
+## Unity Asset Store adapter
+
+- 新增 `unity-assets hot`、`unity-assets search` 与 `unity-assets info`。`hot` 读取首页已经展示的推荐资源 ID 后经站内详情接口补全数据；`search` 使用站点原生搜索路由及其专用结果容器，再用资源详情接口补全数据，不会从页面底层推荐卡片猜测结果；`info` 用资源数字 ID 获取详情。
+- 三个命令都仅执行读取请求，不会购买、添加收藏或修改账户。价格按 `--currency` 传入币种（默认 `CNY`）；`search` 支持 `--min_price` 与 `--max_price`，按同一显示币种筛选，避免把首页内容误报为搜索结果。
+- `hot` 现改为全站畅销排序；新增 `top <free|paid|new>`、`category-hot <category>`、`category-new <category>` 和 `sale`。支持的分类为 `sdk`、`3d`、`2d`、`audio`、`tools`、`vfx`、`templates`、`add-ons`，可分别用于技术方案、玩法模板与美术音频素材的灵感收集。
+- Unity 资源现在明确输出 `current_price`、`original_price`、`discount_percent`、`currency` 与评分数量，便于优先筛选免费、高折扣和高口碑素材。
+- 新增 `unity-assets download-media <id>`：下载资源页公开截图与外部视频缩略图，并生成 `asset.md` 元数据。视频只保留页面提供的外部链接和缩略图；不下载资源包本体，不提取 `blob:`/HLS 或受保护视频流。
+- 统一榜单、搜索与详情的分类和评分输出：分类对象改为名称/slug，评分始终为数值（包含 `0` 分资源）。
+- 榜单在站点自动注入语言路径或将筛选条件改写为 hash 路由时，不再因 URL 字面值变化误报失败；仍要求实际解析到资源 ID 才会成功。
+- 新增 `unity-assets my-assets`，通过当前 Unity ID 的授权列表读取已拥有资源，再补齐公开详情和价格字段；不下载或导入资源包。
+
+## Steam 灵感与市场榜单
+
+- 补充 `steam new-releases`、`steam coming-soon` 和 `steam specials`；既有 `steam top-sellers` 同步补充原价字段。四个 Steam 榜单可分别观察已验证的商业需求、新近出现的玩法、即将入场的题材和价格带。
+- Steam 的 `price`/`original_price` 保持平台 API 返回的最小货币单位，以避免在缺少明确币种上下文时擅自换算。
+
 # 2026-08-04
 
 ## 浏览器扩展当前页面操作
