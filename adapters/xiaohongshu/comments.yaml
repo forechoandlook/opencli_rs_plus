@@ -5,6 +5,14 @@ domain: www.xiaohongshu.com
 strategy: cookie
 browser: true
 
+context:
+  title: "导出当前笔记首屏评论"
+  paths: ["/explore/*"]
+  activeTab:
+    usePipeline: true
+  args:
+    note-id: current_url
+
 args:
   note-id:
     positional: true
@@ -56,10 +64,47 @@ pipeline:
           if (location.pathname === '/404' || document.title.includes('无法浏览') || document.title.includes('不见了')) {
             throw new Error('该笔记需要 feed 输出的完整签名链接，或已不可浏览；不会尝试补发评论请求');
           }
+          const cleanText = value => String(value || '').replace(/\s+/g, ' ').trim();
+          const formatTime = value => {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric) || numeric <= 0) return '';
+            const ms = numeric < 1e12 ? numeric * 1000 : numeric;
+            return new Date(ms).toISOString().replace('.000Z', 'Z');
+          };
+          const normalizeComment = comment => {
+            const user = comment?.userInfo || comment?.user || {};
+            return {
+              id: String(comment?.id || comment?.commentId || ''),
+              author: cleanText(user?.nickname || user?.nickName || ''),
+              content: cleanText(comment?.content || comment?.text || ''),
+              likes: Number(comment?.likeCount || comment?.likedCount || 0),
+              replies: Number(comment?.subCommentCount || comment?.replyCount || 0),
+              time: formatTime(comment?.createTime || comment?.time),
+              ip: cleanText(comment?.ipLocation || ''),
+            };
+          };
           const getComments = () => {
             const noteMap = window.__INITIAL_STATE__?.note?.noteDetailMap || {};
             const entry = Object.values(noteMap).find(item => item?.comments && item?.note);
             return entry?.comments;
+          };
+          const readDomComments = () => {
+            const selectors = [
+              '#noteContainer .comment-item',
+              '#noteContainer [class*="comment-item"]',
+              '#noteContainer [class*="CommentItem"]',
+              '.comments-container .comment-item',
+              '.comment-list .comment-item',
+            ];
+            const nodes = [...new Set(selectors.flatMap(selector => [...document.querySelectorAll(selector)]))];
+            return nodes.map((node, index) => {
+              const text = cleanText(node.textContent || '');
+              const lines = String(node.innerText || '').split('\n').map(cleanText).filter(Boolean);
+              const author = cleanText(node.querySelector('.author .name, .author-name, .nick-name, [class*="author"] [class*="name"], [class*="user"] [class*="name"]')?.textContent || lines[0] || '');
+              const content = cleanText(node.querySelector('.comment-content, .content, [class*="comment-content"], [class*="content"]')?.textContent || lines.filter(line => line !== author && !/^(赞|回复|评论|IP属地)/.test(line)).join(' ') || text);
+              const likes = cleanText(node.querySelector('.like-count, .count, [class*="like"] [class*="count"]')?.textContent || '0');
+              return { id: `dom-${index}`, author, content, likes: Number(likes.replace(/[^\d.]/g, '')) || 0, replies: 0, time: '', ip: '' };
+            }).filter(comment => comment.content);
           };
           // Wait only for the document's initial state hydration. This never
           // invokes a comments API, clicks "more", scrolls, or paginates.
@@ -68,27 +113,14 @@ pipeline:
             await new Promise(resolve => setTimeout(resolve, 250));
             comments = getComments();
           }
-          if (!Array.isArray(comments?.list)) {
-            throw new Error('首屏评论未随页面被动加载；为避免风控，OpenCLI 不会主动请求或翻页评论');
-          }
-          const formatTime = value => {
-            const numeric = Number(value);
-            if (!Number.isFinite(numeric) || numeric <= 0) return '';
-            const ms = numeric < 1e12 ? numeric * 1000 : numeric;
-            return new Date(ms).toISOString().replace('.000Z', 'Z');
-          };
-          return comments.list.map(comment => {
-            const user = comment?.userInfo || comment?.user || {};
-            return {
-              id: String(comment?.id || ''),
-              author: String(user?.nickname || user?.nickName || '').trim(),
-              content: String(comment?.content || '').trim(),
-              likes: Number(comment?.likeCount || 0),
-              replies: Number(comment?.subCommentCount || 0),
-              time: formatTime(comment?.createTime),
-              ip: String(comment?.ipLocation || '').trim(),
-            };
-          }).filter(comment => comment.id && comment.content);
+          const stateComments = Array.isArray(comments?.list)
+            ? comments.list.map(normalizeComment).filter(comment => comment.content)
+            : [];
+          if (stateComments.length) return stateComments;
+
+          const domComments = readDomComments();
+          if (domComments.length) return domComments;
+          throw new Error('当前页尚未渲染首屏评论；OpenCLI 不会主动请求、滚动或翻页评论');
         })()
       retry: false
   - limit: ${{ args.limit | default(10) }}

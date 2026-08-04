@@ -32,3 +32,5 @@ anyhow = { workspace = true }
 directories = "5"
 dirs = "5"
 serde_yaml = "0.9"
+axum = "0.8"
+url = "2"

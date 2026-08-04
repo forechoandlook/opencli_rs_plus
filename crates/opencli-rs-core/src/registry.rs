@@ -75,6 +75,7 @@ mod tests {
             navigate_before: NavigateBefore::default(),
             version: None,
             updated_at: None,
+            context: None,
         }
     }
 

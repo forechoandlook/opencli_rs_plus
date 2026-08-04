@@ -1274,6 +1274,7 @@ name = "opencli-rs-daemon"
 version = "0.0.3"
 dependencies = [
  "anyhow",
+ "axum",
  "chrono",
  "clap",
  "directories",
@@ -1292,6 +1293,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
 ]
 

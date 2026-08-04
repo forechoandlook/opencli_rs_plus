@@ -149,9 +149,9 @@ describe('background tab isolation', () => {
     vi.stubGlobal('chrome', chrome);
 
     const mod = await import('./background');
-    mod.__test__.setAutomationWindowId('site:xiaohongshu', 1);
+    mod.__test__.setAutomationWindowId('site:example', 1);
 
-    const tabId = await mod.__test__.resolveTabId(undefined, 'site:xiaohongshu');
+    const tabId = await mod.__test__.resolveTabId(undefined, 'site:example');
 
     expect(tabId).toBe(10);
     expect(create).toHaveBeenCalledWith({

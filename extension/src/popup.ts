@@ -4,7 +4,7 @@
  * Lets the user set the daemon port and shows connection status.
  */
 
-import { getStoredPortConfig, storePort, DAEMON_PORT } from './protocol';
+import { EXTENSION_API_PORT, getStoredPortConfig, storePort, DAEMON_PORT } from './protocol';
 
 function setStatus(el: HTMLElement, text: string, color: string): void {
   el.textContent = text;
@@ -42,6 +42,31 @@ type AutomationState = {
   windowId: number | null;
   pages: CachedPage[];
 };
+
+type ContextAction = {
+  adapter: string;
+  title: string;
+  description: string;
+  activeTab: { usePipeline?: boolean; extract?: string };
+  args?: Record<string, string>;
+  pipeline?: unknown[];
+};
+
+function safePageLabel(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname}${parsed.pathname}`;
+  } catch {
+    return 'invalid-url';
+  }
+}
+
+function logPopup(message: string): void {
+  // The background worker forwards these sanitized diagnostics to the existing
+  // browser-daemon extension log. Never include the query string: it can carry
+  // a short-lived site signature such as xsec_token.
+  void chrome.runtime.sendMessage({ type: 'popupLog', message: `[popup] ${message}` }).catch(() => undefined);
+}
 
 async function getRuntimeState(fallbackPort: number, fallbackPinned: boolean): Promise<RuntimeState> {
   try {
@@ -91,6 +116,83 @@ async function getTasks(port: number): Promise<BrowserTask[]> {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json() as { tasks?: BrowserTask[] };
   return data.tasks ?? [];
+}
+
+async function getActivePageUrl(): Promise<string | null> {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const url = tab?.url;
+  return url && /^https?:\/\//i.test(url) ? url : null;
+}
+
+async function getContextActions(url: string): Promise<ContextAction[]> {
+  const response = await fetch(`http://127.0.0.1:${EXTENSION_API_PORT}/extension/actions?${new URLSearchParams({ url })}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = await response.json() as { actions?: ContextAction[] };
+  return data.actions ?? [];
+}
+
+async function runContextAction(action: ContextAction, url: string): Promise<string> {
+  const response = await chrome.runtime.sendMessage({
+    type: 'runCurrentPageAction',
+    action,
+    expectedUrl: url,
+  }) as { ok: boolean; result?: { message?: string }; error?: string };
+  if (!response.ok) throw new Error(response.error ?? '当前页面操作失败');
+  return response.result?.message ?? '已保存';
+}
+
+function renderContextActions(container: HTMLElement, url: string | null, actions: ContextAction[] | null, error?: string): void {
+  if (!url) {
+    container.innerHTML = '<p class="empty">当前标签不是网页，暂无可用操作。</p>';
+    return;
+  }
+  if (error) {
+    container.replaceChildren(contextPageDiagnostic(url, `读取失败：${error}`));
+    return;
+  }
+  if (!actions?.length) {
+    container.replaceChildren(contextPageDiagnostic(url, `0 个匹配操作 · API :${EXTENSION_API_PORT}`));
+    return;
+  }
+
+  const hostname = new URL(url).hostname;
+  const page = document.createElement('p');
+  page.className = 'context-page';
+  page.textContent = `${hostname}${new URL(url).pathname} · ${actions.length} 个操作 · API :${EXTENSION_API_PORT}`;
+  const rows = actions.map((action) => {
+    const row = document.createElement('article');
+    row.className = 'context-action';
+    const text = document.createElement('div');
+    const title = document.createElement('div');
+    title.className = 'task-title';
+    title.textContent = action.title;
+    const description = document.createElement('div');
+    description.className = 'context-description';
+    description.textContent = action.description;
+    text.append(title, description);
+    const button = document.createElement('button');
+    button.textContent = '执行';
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      button.textContent = '启动中…';
+      try {
+        button.textContent = await runContextAction(action, url);
+      } catch (runError) {
+        button.textContent = '失败';
+        description.textContent = runError instanceof Error ? runError.message : String(runError);
+      }
+    });
+    row.append(text, button);
+    return row;
+  });
+  container.replaceChildren(page, ...rows);
+}
+
+function contextPageDiagnostic(url: string, message: string): HTMLElement {
+  const diagnostic = document.createElement('p');
+  diagnostic.className = 'empty';
+  diagnostic.textContent = `${safePageLabel(url)} · ${message}`;
+  return diagnostic;
 }
 
 function renderTasks(container: HTMLElement, tasks: BrowserTask[], available: boolean): void {
@@ -167,10 +269,11 @@ async function init(): Promise<void> {
   const statusEl = document.getElementById('status') as HTMLElement;
   const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
   const refreshBtn = document.getElementById('refresh-btn') as HTMLButtonElement;
+  const actionsEl = document.getElementById('context-actions') as HTMLElement;
   const tasksEl = document.getElementById('tasks') as HTMLElement;
   const cacheEl = document.getElementById('page-cache') as HTMLElement;
 
-  if (!portInput || !statusEl || !saveBtn || !refreshBtn || !tasksEl || !cacheEl) return;
+  if (!portInput || !statusEl || !saveBtn || !refreshBtn || !actionsEl || !tasksEl || !cacheEl) return;
 
   const refreshTasks = async (state: RuntimeState): Promise<void> => {
     refreshBtn.disabled = true;
@@ -191,6 +294,23 @@ async function init(): Promise<void> {
     }
   };
 
+  const refreshActions = async (): Promise<void> => {
+    const url = await getActivePageUrl();
+    if (!url) {
+      renderContextActions(actionsEl, null, null);
+      return;
+    }
+    try {
+      const actions = await getContextActions(url);
+      logPopup(`context actions url=${safePageLabel(url)} count=${actions.length} api_port=${EXTENSION_API_PORT}`);
+      renderContextActions(actionsEl, url, actions);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logPopup(`context actions failed url=${safePageLabel(url)} error=${message}`);
+      renderContextActions(actionsEl, url, null, message);
+    }
+  };
+
   // Load saved port
   const { port: savedPort, pinned } = await getStoredPortConfig();
   const initialPort = savedPort ?? DAEMON_PORT;
@@ -203,11 +323,13 @@ async function init(): Promise<void> {
   setStatus(statusEl, initialRendered.text, initialRendered.color);
   await refreshTasks(initialState);
   await refreshCache();
+  await refreshActions();
 
   refreshBtn.addEventListener('click', async () => {
     const state = await getRuntimeState(Number(portInput.value), initialState.pinned);
     await refreshTasks(state);
     await refreshCache();
+    await refreshActions();
   });
 
   // Save button
@@ -229,6 +351,7 @@ async function init(): Promise<void> {
     setStatus(statusEl, rendered.text, rendered.color);
     await refreshTasks(stateAfterSave);
     await refreshCache();
+    await refreshActions();
   });
 
   // Enter key to save

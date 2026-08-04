@@ -1,5 +1,6 @@
 pub mod adapter_manager;
 pub mod client;
+pub mod extension_api;
 pub mod index;
 pub mod plugin;
 pub mod scheduler;
@@ -46,6 +47,11 @@ pub async fn run_daemon(addr: String, db_path: Option<PathBuf>, poll_interval: u
         plugin_manager,
     });
 
+    let extension_api_addr = std::env::var("OPENCLI_EXTENSION_API_ADDR")
+        .unwrap_or_else(|_| extension_api::DEFAULT_EXTENSION_API_ADDR.to_string());
+    let extension_api_handle =
+        extension_api::start(&extension_api_addr, Arc::clone(&socket_state)).await?;
+
     let addr_clone = addr.clone();
     let socket_handle = tokio::spawn(async move {
         if let Err(e) = socket::serve(&addr_clone, socket_state).await {
@@ -53,11 +59,12 @@ pub async fn run_daemon(addr: String, db_path: Option<PathBuf>, poll_interval: u
         }
     });
 
-    info!(addr = %addr, poll_interval, "Scheduler daemon started");
+    info!(addr = %addr, extension_api_addr = %extension_api_addr, poll_interval, "Scheduler daemon started");
     signal::ctrl_c().await?;
     info!("Shutting down scheduler daemon");
     sched_handle.abort();
     socket_handle.abort();
+    extension_api_handle.abort();
     Ok(())
 }
 

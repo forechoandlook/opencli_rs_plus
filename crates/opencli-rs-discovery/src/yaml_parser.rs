@@ -1,4 +1,6 @@
-use opencli_rs_core::{ArgDef, ArgType, CliCommand, CliError, NavigateBefore, Strategy};
+use opencli_rs_core::{
+    ArgDef, ArgType, CliCommand, CliError, ContextAction, NavigateBefore, Strategy,
+};
 use serde_json::Value;
 
 /// Parse a YAML adapter file content into a CliCommand.
@@ -80,6 +82,16 @@ pub fn parse_yaml_adapter(content: &str) -> Result<CliCommand, CliError> {
             .get("updatedAt")
             .and_then(|v| v.as_str())
             .map(String::from),
+        context: raw
+            .get("context")
+            .cloned()
+            .map(serde_json::from_value::<ContextAction>)
+            .transpose()
+            .map_err(|e| CliError::AdapterLoad {
+                message: format!("Invalid context field: {e}"),
+                suggestions: vec![],
+                source: None,
+            })?,
     })
 }
 
@@ -265,6 +277,28 @@ args:
         let yaml = "site: test\nname: cmd\n";
         let cmd = parse_yaml_adapter(yaml).unwrap();
         assert!(cmd.pipeline.is_none());
+    }
+
+    #[test]
+    fn test_context_action() {
+        let yaml = r#"
+site: example
+name: download
+domain: example.com
+context:
+  title: Download current item
+  paths: ["/item/*"]
+  activeTab:
+    usePipeline: true
+  args:
+    url: current_url
+"#;
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        let context = cmd.context.unwrap();
+        assert_eq!(context.title, "Download current item");
+        assert_eq!(context.paths, vec!["/item/*"]);
+        assert!(context.active_tab.unwrap().use_pipeline);
+        assert_eq!(context.args.get("url"), Some(&"current_url".to_string()));
     }
 
     #[test]

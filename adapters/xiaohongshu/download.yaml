@@ -5,6 +5,14 @@ domain: www.xiaohongshu.com
 strategy: cookie
 browser: true
 
+context:
+  title: "下载当前笔记"
+  paths: ["/explore/*"]
+  activeTab:
+    usePipeline: true
+  args:
+    note-id: current_url
+
 args:
   note-id:
     positional: true
@@ -59,11 +67,34 @@ pipeline:
         }
         const noteMap = window.__INITIAL_STATE__?.note?.noteDetailMap || {};
         const stateEntry = Object.values(noteMap).find(entry => entry?.note)?.note || {};
+        const cleanText = value => String(value || '').replace(/\s+/g, ' ').trim();
+        const stateText = value => {
+          if (typeof value === 'string') return cleanText(value);
+          if (Array.isArray(value)) return cleanText(value.map(stateText).filter(Boolean).join('\n'));
+          if (value && typeof value === 'object') {
+            return stateText(value.text || value.content || value.desc || value.description || '');
+          }
+          return '';
+        };
+        const noteTextFromDom = () => {
+          const selectors = [
+            '#detail-desc',
+            '#noteContainer .note-content',
+            '#noteContainer .desc',
+            '#noteContainer [class*="note-content"]',
+            '#noteContainer [class*="desc"]',
+          ];
+          for (const selector of selectors) {
+            const text = cleanText(document.querySelector(selector)?.textContent || '');
+            if (text) return text;
+          }
+          return '';
+        };
         const result = {
           noteId: noteId,
           title: stateEntry.title || '',
           author: stateEntry.user?.nickname || '',
-          content: stateEntry.desc || '',
+          content: stateText(stateEntry.desc || stateEntry.content || stateEntry.description) || noteTextFromDom(),
           noteType: stateEntry.type || '',
           // Metadata is written locally by the download step. It will redact
           // xsec_token before persisting the source URL.
@@ -156,6 +187,22 @@ pipeline:
         if (result.items.length === 0 && !result.content && result.title === 'untitled') {
           throw new Error('未找到笔记内容或媒体：笔记可能已下架、需要登录、或页面结构变化（检查 note-id 与登录状态）');
         }
+
+        // Only preserve comments that the current detail page has already
+        // hydrated. Direct current-tab mode never scrolls, paginates, or calls
+        // a comments API merely to complete this list.
+        const commentsEntry = Object.values(noteMap).find(entry => entry?.comments && entry?.note);
+        result.comments = Array.isArray(commentsEntry?.comments?.list)
+          ? commentsEntry.comments.list.map(comment => {
+              const user = comment?.userInfo || comment?.user || {};
+              return {
+                author: String(user?.nickname || user?.nickName || '').trim(),
+                content: String(comment?.content || '').trim(),
+                likes: Number(comment?.likeCount || 0),
+                replies: Number(comment?.subCommentCount || 0),
+              };
+            }).filter(comment => comment.content)
+          : [];
 
         result.output = ${{ args.output | default('./xiaohongshu-downloads') | json }};
         result.username = noteId;

@@ -16,6 +16,7 @@ import {
   WS_RECONNECT_MAX_DELAY,
 } from './protocol';
 import * as executor from './cdp';
+import { runCurrentPageAction } from './page_actions';
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -536,8 +537,8 @@ async function handleNavigate(cmd: Command, workspace: string): Promise<Result> 
   }
 
   // Detach any existing debugger before top-level navigation.
-  // Some sites (observed on creator.xiaohongshu.com flows) can invalidate the
-  // current inspected target during navigation, which leaves a stale CDP attach
+  // Some sites can invalidate the current inspected target during navigation,
+  // which leaves a stale CDP attach
   // state and causes the next Runtime.evaluate to fail with
   // "Inspected target navigated or closed". Resetting here forces a clean
   // re-attach after navigation.
@@ -784,7 +785,22 @@ async function getAutomationState(): Promise<{ capacity: number; count: number; 
 
 // ─── Popup / chrome.runtime message handler ──────────────────────────
 
-chrome.runtime.onMessage.addListener((message: { type: string }, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: { type: string; message?: string; action?: import('./page_actions').DirectContextAction; expectedUrl?: string }, _sender, sendResponse) => {
+  if (message.type === 'popupLog') {
+    console.info(message.message ?? '[popup] missing diagnostic message');
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message.type === 'runCurrentPageAction') {
+    if (!message.action) {
+      sendResponse({ ok: false, error: '缺少当前页面 action 配置' });
+      return false;
+    }
+    void runCurrentPageAction(message.action, message.expectedUrl ?? '')
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
   if (message.type === 'getPort') {
     void getStoredPortConfig().then(({ port }) => {
       sendResponse({ port: port ?? DAEMON_PORT });

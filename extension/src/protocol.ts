@@ -60,6 +60,8 @@ export const DAEMON_PORT = 19825;
 export const DAEMON_HOST = 'localhost';
 export const DAEMON_PORT_RANGE_START = 19825;
 export const DAEMON_PORT_RANGE_END = 19834;
+/** Loopback API exposed by the scheduler daemon for contextual popup actions. */
+export const EXTENSION_API_PORT = 10009;
 
 /** Storage key for the configured daemon port */
 export const STORAGE_KEY_PORT = 'opencli_daemon_port';

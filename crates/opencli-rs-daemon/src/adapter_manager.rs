@@ -65,9 +65,11 @@ pub struct AdapterEntry {
     pub browser: bool,
     pub args: Vec<opencli_rs_core::ArgDef>,
     pub columns: Vec<String>,
+    pub pipeline: Option<Vec<serde_json::Value>>,
     pub timeout_seconds: Option<u64>,
     pub version: Option<String>,
     pub updated_at: Option<String>,
+    pub context: Option<opencli_rs_core::ContextAction>,
     pub enabled: bool,
     pub hidden: bool,
 }
@@ -83,9 +85,11 @@ impl AdapterEntry {
             browser: cmd.browser,
             args: cmd.args.clone(),
             columns: cmd.columns.clone(),
+            pipeline: cmd.pipeline.clone(),
             timeout_seconds: cmd.timeout_seconds,
             version: cmd.version.clone(),
             updated_at: cmd.updated_at.clone(),
+            context: cmd.context.clone(),
             enabled,
             hidden,
         }

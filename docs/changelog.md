@@ -1,5 +1,13 @@
 # 2026-08-04
 
+## 浏览器扩展当前页面操作
+
+- **contextual adapter actions**：adapter YAML 可用 `context` 声明标题、URL 路径模式与 `activeTab` 计划；调度 daemon 在 loopback `127.0.0.1:10009` 仅提供 action 发现 API。点击后在用户已经打开的标签内直接、只读地解释 YAML 的 `evaluate`/`limit`/`download`，并调用浏览器下载，不会走 engine、browser-daemon 或任务面板。
+- **小红书首批接入**：推荐首页 `/explore` 可在扩展中读取当前推荐 Feed；笔记详情页可直接启动“下载当前笔记”和“导出当前笔记首屏评论”。完整 URL 会原样传给 adapter，以保留页面提供的 `xsec_*` 签名参数。评论 adapter 仍保持被动首屏读取、无滚动和无翻页。
+- **当前页字段兜底**：笔记下载在页面状态缺失正文时读取详情 DOM；评论在已加载状态为空时读取已渲染的首屏评论 DOM；Feed 按卡片提取标题、作者、点赞、类型、封面与签名链接。三者均不触发额外请求或滚动。
+- **本地 API 边界**：当前页面 API 仅允许 `chrome-extension://` Origin；网页不能调用，也不能传入脚本、cookie 或页面 HTML。仅用户已启用的 adapter YAML 会作为当前页计划下发。
+- **可见诊断**：弹窗显示当前 URL 的 host/path、匹配 action 数与 API 端口；查询失败会显示 HTTP 原因。相同的脱敏诊断会进入既有 extension log；以 `OPENCLI_VERBOSE=1` 启动 scheduler daemon 时，终端会记录 action 查询。
+
 ## 浏览器 Adapter 静默化与加速
 
 - **所有浏览器 adapter 都改为隔离静默窗口执行**：扩展不再把复用 Chrome 窗口中的任意现有标签当作自动化目标；自动化只会使用一个最小化的 OpenCLI 自有窗口及后台页。因此包含 `navigate` 的 pipeline 不会刷新、抢占或在用户当前窗口标签栏中新增网站标签。

@@ -15,6 +15,28 @@
 
 调度 daemon 在执行需要浏览器的 adapter 时，通过 HTTP POST 调用 browser-daemon，browser-daemon 再通过 WebSocket 转发给 Chrome 插件执行。
 
+### 浏览器插件当前页面操作
+
+调度 daemon 还会在 `127.0.0.1:10009` 启动一个仅供 Chrome 扩展调用的本地 action-discovery API。扩展打开时读取当前标签 URL，向 daemon 请求已注册且匹配该 URL 的 action；点击后的读取与下载在用户当前标签内直接完成，browser-daemon 不参与这类操作。
+
+adapter 通过可选的 `context` 字段注册操作：
+
+```yaml
+context:
+  title: 下载当前笔记
+  paths: ["/explore/*"]
+  activeTab:
+    usePipeline: true
+  args:
+    note-id: current_url
+```
+
+daemon 仅负责 action 发现，扩展会解释 YAML 的 `activeTab` 计划：`usePipeline` 复用 adapter 既有 `evaluate`/`limit`/`download` 步骤，但跳过 `navigate`；`extract` 则用于直接读取当前页面的简短提取器。扩展只读取用户已打开页面的 DOM/状态并通过浏览器下载 API 落盘，不会导航、滚动、点击、创建自动化窗口或写入任务面板。adapter 需要显式写出 `activeTab` 才能在当前页运行；daemon 仍会校验 `domain` 与 `paths`，API 只接受 `chrome-extension://` Origin；网页不能跨域调用。扩展和 daemon 默认通过 `127.0.0.1:10009` 通信。
+
+新增当前页面能力时，先在登录态页面验证只读提取逻辑，再优先用 `usePipeline: true` 复用已有 adapter YAML；只有原 pipeline 包含 `tap`、`fetch` 等非当前页步骤时才在 `activeTab.extract` 增加短提取器。当前页执行会运行该 adapter 的 YAML `evaluate`，所以只对用户已启用的、受信任 adapter 开放；扩展不会接受网页传入的脚本。
+
+排查时用 `OPENCLI_VERBOSE=1 cargo run -- daemon` 启动调度 daemon；它会打印当前页面 action 查询的 host、path 与匹配数，但不会记录 URL query（避免记录短期签名）。弹窗也会显示匹配数和 API 端口，并将相同的脱敏诊断转发到 browser-daemon 的 extension log。
+
 ### 命令发现
 
 顶层帮助默认只展示内置命令和 daemon/client 命令，不直接展开全部 adapter，避免输出过长：

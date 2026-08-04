@@ -5,6 +5,43 @@ domain: www.xiaohongshu.com
 strategy: intercept
 browser: true
 
+context:
+  title: "保存当前推荐 Feed"
+  paths: ["/explore"]
+  activeTab:
+    extract: |
+      (() => {
+        const cleanText = value => String(value || '').replace(/\s+/g, ' ').trim();
+        const seen = new Set();
+        const cards = Array.from(document.querySelectorAll('section.note-item'));
+        const roots = cards.length
+          ? cards
+          : Array.from(document.querySelectorAll('a[href*="/explore/"]'));
+        return roots.map(root => {
+          const link = root.matches?.('a[href*="/explore/"]')
+            ? root
+            : root.querySelector('a.cover.mask, a[href*="/explore/"]');
+          const url = link?.href || link?.getAttribute?.('href') || '';
+          if (!url || seen.has(url)) return null;
+          seen.add(url);
+          const image = root.querySelector('img');
+          const textLines = String(root.innerText || '').split('\n').map(cleanText).filter(Boolean);
+          const title = cleanText(root.querySelector('.title, .note-title, a.title, .footer .title span, [class*="title"]')?.textContent || image?.alt || textLines[0] || '');
+          const author = cleanText(root.querySelector('a.author .name, .author-name, .nick-name, .author .name, [class*="author"] [class*="name"]')?.textContent || '');
+          const likes = cleanText(root.querySelector('.like-count, .like-wrapper .count, .count, [class*="like"] [class*="count"]')?.textContent || '0');
+          const type = root.querySelector('video, [class*="video"], [class*="Video"]') ? 'video' : 'image';
+          return {
+            id: url.match(/\/explore\/([^/?#]+)/)?.[1] || '',
+            title,
+            author,
+            likes,
+            type,
+            url,
+            image: String(image?.currentSrc || image?.src || ''),
+          };
+        }).filter(Boolean);
+      })()
+
 args:
   limit:
     type: int

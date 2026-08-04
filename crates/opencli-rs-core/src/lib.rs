@@ -7,7 +7,9 @@ mod strategy;
 mod value_ext;
 
 pub use args::{ArgDef, ArgType};
-pub use command::{AdapterFunc, CliCommand, CommandArgs, NavigateBefore};
+pub use command::{
+    ActiveTabAction, AdapterFunc, CliCommand, CommandArgs, ContextAction, NavigateBefore,
+};
 pub use error::CliError;
 pub use page::{
     AutoScrollOptions, Cookie, CookieOptions, GotoOptions, IPage, InterceptedRequest,
