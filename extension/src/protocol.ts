@@ -1,11 +1,10 @@
 /**
  * opencli browser protocol — shared types between daemon, extension, and CLI.
  *
- * 5 actions: exec, navigate, tabs, cookies, screenshot.
- * Everything else is just JS code sent via 'exec'.
+ * Browser bridge actions shared by daemon, extension, and CLI.
  */
 
-export type Action = 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions' | 'bg_fetch';
+export type Action = 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions' | 'bg_fetch' | 'upload';
 
 export interface Command {
   /** Unique request ID */
@@ -36,6 +35,10 @@ export interface Command {
   body?: string;
   /** URL to extract cookies from for bg_fetch (defaults to url) */
   cookie_url?: string;
+  /** CSS selector used by the browser-native file input upload action. */
+  selector?: string;
+  /** Absolute local paths to set on the selected file input. */
+  file_paths?: string[];
   /** Screenshot format: png (default) or jpeg */
   format?: 'png' | 'jpeg';
   /** JPEG quality (0-100), only for jpeg format */

@@ -392,6 +392,8 @@ async function handleCommand(cmd: Command): Promise<Result> {
         return await handleSessions(cmd);
       case 'bg_fetch':
         return await handleBgFetch(cmd);
+      case 'upload':
+        return await handleUpload(cmd, workspace);
       default:
         return { id: cmd.id, ok: false, error: `Unknown action: ${cmd.action}` };
       }
@@ -507,6 +509,18 @@ async function handleExec(cmd: Command, workspace: string): Promise<Result> {
   try {
     const data = await executor.evaluateAsync(tabId, cmd.code);
     return { id: cmd.id, ok: true, data };
+  } catch (err) {
+    return { id: cmd.id, ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function handleUpload(cmd: Command, workspace: string): Promise<Result> {
+  if (!cmd.selector) return { id: cmd.id, ok: false, error: 'Missing file input selector' };
+  if (!cmd.file_paths?.length) return { id: cmd.id, ok: false, error: 'No files supplied for upload' };
+  const tabId = await resolveTabId(cmd.tabId, workspace);
+  try {
+    await executor.uploadFiles(tabId, cmd.selector, cmd.file_paths);
+    return { id: cmd.id, ok: true, data: { uploaded: cmd.file_paths.length } };
   } catch (err) {
     return { id: cmd.id, ok: false, error: err instanceof Error ? err.message : String(err) };
   }

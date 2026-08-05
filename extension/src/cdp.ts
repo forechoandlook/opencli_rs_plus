@@ -95,6 +95,34 @@ export async function evaluate(tabId: number, expression: string): Promise<unkno
 export const evaluateAsync = evaluate;
 
 /**
+ * Place local files into an existing <input type=file> through CDP.
+ * Page JavaScript cannot set FileList safely, so this deliberately stays in
+ * the browser bridge rather than becoming an adapter-specific workaround.
+ */
+export async function uploadFiles(tabId: number, selector: string, filePaths: string[]): Promise<void> {
+  await ensureAttached(tabId);
+  if (!selector) throw new Error('Missing file input selector');
+  if (!filePaths.length) throw new Error('No files supplied for upload');
+
+  const document = await chrome.debugger.sendCommand({ tabId }, 'DOM.getDocument', { depth: 1 }) as {
+    root?: { nodeId?: number };
+  };
+  const rootNodeId = document.root?.nodeId;
+  if (!rootNodeId) throw new Error('CDP did not return a document root');
+
+  const match = await chrome.debugger.sendCommand({ tabId }, 'DOM.querySelector', {
+    nodeId: rootNodeId,
+    selector,
+  }) as { nodeId?: number };
+  if (!match.nodeId) throw new Error('File input selector did not match');
+
+  await chrome.debugger.sendCommand({ tabId }, 'DOM.setFileInputFiles', {
+    nodeId: match.nodeId,
+    files: filePaths,
+  });
+}
+
+/**
  * Capture a screenshot via CDP Page.captureScreenshot.
  * Returns base64-encoded image data.
  */

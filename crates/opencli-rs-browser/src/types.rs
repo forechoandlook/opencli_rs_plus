@@ -32,6 +32,12 @@ pub struct DaemonCommand {
     /// URL to extract cookies from for bg_fetch (defaults to url)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cookie_url: Option<String>,
+    /// CSS selector for a browser-native file upload action.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+    /// Absolute local paths to place into the selected file input.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_paths: Option<Vec<String>>,
 }
 
 impl DaemonCommand {
@@ -49,6 +55,8 @@ impl DaemonCommand {
             request_headers: None,
             body: None,
             cookie_url: None,
+            selector: None,
+            file_paths: None,
         }
     }
 
@@ -99,6 +107,16 @@ impl DaemonCommand {
 
     pub fn with_cookie_url(mut self, cookie_url: impl Into<String>) -> Self {
         self.cookie_url = Some(cookie_url.into());
+        self
+    }
+
+    pub fn with_selector(mut self, selector: impl Into<String>) -> Self {
+        self.selector = Some(selector.into());
+        self
+    }
+
+    pub fn with_file_paths(mut self, paths: Vec<String>) -> Self {
+        self.file_paths = Some(paths);
         self
     }
 }

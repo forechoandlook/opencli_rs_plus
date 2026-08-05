@@ -214,6 +214,34 @@ impl IPage for CdpPage {
         Ok(())
     }
 
+    async fn upload_files(&self, selector: &str, paths: &[String]) -> Result<(), CliError> {
+        let document = self
+            .send_cdp("DOM.getDocument", json!({ "depth": 1 }))
+            .await?;
+        let root_id = document
+            .get("root")
+            .and_then(|root| root.get("nodeId"))
+            .and_then(|id| id.as_i64())
+            .ok_or_else(|| CliError::command_execution("CDP did not return a document root"))?;
+        let node = self
+            .send_cdp(
+                "DOM.querySelector",
+                json!({ "nodeId": root_id, "selector": selector }),
+            )
+            .await?;
+        let node_id = node
+            .get("nodeId")
+            .and_then(|id| id.as_i64())
+            .filter(|id| *id != 0)
+            .ok_or_else(|| CliError::command_execution("file input selector did not match"))?;
+        self.send_cdp(
+            "DOM.setFileInputFiles",
+            json!({ "files": paths, "nodeId": node_id }),
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn cookies(&self, _options: Option<CookieOptions>) -> Result<Vec<Cookie>, CliError> {
         let result = self.send_cdp("Network.getCookies", json!({})).await?;
         let cookies_val = result.get("cookies").cloned().unwrap_or(json!([]));

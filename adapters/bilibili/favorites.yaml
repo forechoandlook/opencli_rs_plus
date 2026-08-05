@@ -1,0 +1,32 @@
+site: bilibili
+name: favorites
+description: "我的 B 站收藏夹列表（只读）"
+domain: www.bilibili.com
+strategy: cookie
+browser: true
+
+columns: [id, title, count, visibility]
+
+pipeline:
+  - navigate: https://www.bilibili.com
+  - evaluate: |
+      (async () => {
+        const navRes = await fetch('https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' });
+        const nav = await navRes.json();
+        const uid = nav?.data?.mid;
+        if (!uid) throw new Error('AUTH_REQUIRED: bilibili.com');
+
+        const res = await fetch('https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid=' + encodeURIComponent(uid), {
+          credentials: 'include',
+        });
+        const payload = await res.json();
+        if (payload?.code !== 0) {
+          throw new Error('获取收藏夹列表失败: ' + (payload?.message || payload?.code || 'unknown error'));
+        }
+        return (payload?.data?.list || []).map((folder) => ({
+          id: String(folder.id || ''),
+          title: String(folder.title || ''),
+          count: Number(folder.media_count || 0),
+          visibility: Number(folder.attr || 0) === 0 ? 'public' : 'private',
+        }));
+      })()

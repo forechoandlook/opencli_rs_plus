@@ -1,0 +1,122 @@
+site: xiaohongshu
+name: favorites
+description: "我的小红书收藏笔记（只读）"
+domain: www.xiaohongshu.com
+strategy: cookie
+browser: true
+
+args:
+  limit:
+    type: int
+    default: 20
+    description: "返回首屏笔记数量，最多 30"
+
+columns: [id, title, author, likes, type, url]
+
+context:
+  title: "导出当前个人收藏"
+  paths: ["/user/profile/"]
+  activeTab:
+    extract: |
+      (() => {
+        const query = new URL(location.href).searchParams;
+        if (query.get('tab') !== 'fav' || query.get('subTab') !== 'note') {
+          throw new Error('请先在当前标签打开个人收藏页（?tab=fav&subTab=note）。');
+        }
+        const userStore = window.__INITIAL_STATE__?.user || {};
+        const noteGroups = userStore.notes?._value || userStore.notes || [];
+        const groups = Array.isArray(noteGroups) ? noteGroups : [];
+        const entries = groups.flatMap((group) => Array.isArray(group) ? group : [group]).filter(Boolean);
+        const seen = new Set();
+        return entries.map((entry) => {
+          const note = entry?.noteCard || entry?.note_card || entry;
+          const id = String(note?.noteId || note?.note_id || entry?.noteId || entry?.note_id || entry?.id || '').trim();
+          if (!id || seen.has(id)) return null;
+          seen.add(id);
+          const user = note?.user || {};
+          const interact = note?.interactInfo || note?.interact_info || {};
+          const token = String(entry?.xsecToken || entry?.xsec_token || note?.xsecToken || note?.xsec_token || '').trim();
+          const baseUrl = 'https://www.xiaohongshu.com/explore/' + encodeURIComponent(id);
+          return {
+            id,
+            title: String(note?.displayTitle || note?.display_title || note?.title || '').trim(),
+            author: String(user?.nickname || '').trim(),
+            likes: String(interact?.likedCount || interact?.liked_count || 0),
+            type: String(note?.type || '').trim(),
+            url: token ? baseUrl + '?xsec_token=' + encodeURIComponent(token) + '&xsec_source=pc_user' : baseUrl,
+          };
+        }).filter(Boolean);
+      })()
+
+pipeline:
+  - navigate:
+      url: https://creator.xiaohongshu.com/new/home
+      settleMs: 2000
+      reuseCurrent: true
+      retry: false
+  - evaluate:
+      retry: false
+      js: |
+        (async () => {
+          const res = await fetch('/api/galaxy/creator/home/personal_info', { credentials: 'include' });
+          const payload = await res.json();
+          const redId = String(payload?.data?.red_num || '').trim();
+          if (!/^\d+$/.test(redId)) throw new Error('无法从当前登录创作者账号解析小红书号。');
+          return redId;
+        })()
+  - navigate:
+      url: https://www.xiaohongshu.com/user/profile/${{ data }}
+      settleMs: 2000
+      retry: false
+  - evaluate:
+      retry: false
+      js: |
+        (() => {
+          const value = window.__INITIAL_STATE__?.user?.userInfo;
+          const info = value?.__v_isRef ? value._value : value;
+          const userId = String(info?.userId || info?.user_id || '').trim();
+          if (!/^[a-zA-Z0-9]{12,}$/.test(userId)) {
+            throw new Error('无法从当前登录账号的公开主页解析内部用户 ID。');
+          }
+          return userId;
+        })()
+  - navigate:
+      url: https://www.xiaohongshu.com/user/profile/${{ data }}?tab=fav&subTab=note
+      settleMs: 2000
+      retry: false
+  - evaluate:
+      retry: false
+      js: |
+        (() => {
+          const query = new URL(location.href).searchParams;
+          if (query.get('tab') !== 'fav' || query.get('subTab') !== 'note') {
+            throw new Error('请提供或打开带有 ?tab=fav&subTab=note 的个人收藏页。');
+          }
+          const userStore = window.__INITIAL_STATE__?.user || {};
+          const noteGroups = userStore.notes?._value || userStore.notes || [];
+          const groups = Array.isArray(noteGroups) ? noteGroups : [];
+          const entries = groups.flatMap((group) => Array.isArray(group) ? group : [group]).filter(Boolean);
+          const rows = [];
+          const seen = new Set();
+          for (const entry of entries) {
+            const note = entry?.noteCard || entry?.note_card || entry;
+            const id = String(note?.noteId || note?.note_id || entry?.noteId || entry?.note_id || entry?.id || '').trim();
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            const user = note?.user || {};
+            const interact = note?.interactInfo || note?.interact_info || {};
+            const token = String(entry?.xsecToken || entry?.xsec_token || note?.xsecToken || note?.xsec_token || '').trim();
+            const baseUrl = 'https://www.xiaohongshu.com/explore/' + encodeURIComponent(id);
+            rows.push({
+              id,
+              title: String(note?.displayTitle || note?.display_title || note?.title || '').trim(),
+              author: String(user?.nickname || '').trim(),
+              likes: String(interact?.likedCount || interact?.liked_count || 0),
+              type: String(note?.type || '').trim(),
+              url: token ? baseUrl + '?xsec_token=' + encodeURIComponent(token) + '&xsec_source=pc_user' : baseUrl,
+            });
+          }
+          if (!rows.length) throw new Error('个人收藏页未自然加载笔记，或收藏为空。');
+          return rows;
+        })()
+  - limit: ${{ args.limit | default(20) }}

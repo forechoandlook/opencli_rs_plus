@@ -22,6 +22,11 @@ use crate::template::{render_template_str, TemplateContext};
 /// - `type: article` — extract article content
 pub struct DownloadStep;
 
+/// Download separate DASH video/audio URLs that are already supplied by a
+/// browser page, then mux them locally with ffmpeg. Site adapters only select
+/// the naturally exposed URLs; this step knows nothing about a specific site.
+pub struct DashMuxStep;
+
 #[async_trait]
 impl StepHandler for DownloadStep {
     fn name(&self) -> &'static str {
@@ -126,6 +131,192 @@ impl StepHandler for DownloadStep {
         );
 
         Ok(Value::Object(result))
+    }
+}
+
+fn render_dash_param(
+    params: &serde_json::Map<String, Value>,
+    key: &str,
+    ctx: &TemplateContext,
+) -> Result<String, CliError> {
+    let raw = params
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| CliError::pipeline(format!("dash-mux: missing {key}")))?;
+    render_template_str(raw, ctx)?
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| CliError::pipeline(format!("dash-mux: {key} must render to a string")))
+}
+
+async fn download_dash_stream(
+    client: &reqwest::Client,
+    url: &str,
+    path: &std::path::Path,
+    referer: Option<&str>,
+) -> Result<u64, CliError> {
+    let mut request = client.get(url);
+    if let Some(referer) = referer.filter(|value| !value.is_empty()) {
+        request = request.header(reqwest::header::REFERER, referer);
+    }
+    let mut response = request.send().await.map_err(|error| {
+        CliError::command_execution(format!("dash-mux: media request failed: {error}"))
+    })?;
+    if !response.status().is_success() {
+        return Err(CliError::command_execution(format!(
+            "dash-mux: media request returned HTTP {}",
+            response.status()
+        )));
+    }
+    let mut file = tokio::fs::File::create(path).await.map_err(|error| {
+        CliError::command_execution(format!(
+            "dash-mux: cannot create temporary stream file: {error}"
+        ))
+    })?;
+    let mut written = 0u64;
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        CliError::command_execution(format!("dash-mux: media stream failed: {error}"))
+    })? {
+        file.write_all(&chunk).await.map_err(|error| {
+            CliError::command_execution(format!(
+                "dash-mux: cannot write temporary stream file: {error}"
+            ))
+        })?;
+        written += chunk.len() as u64;
+    }
+    file.flush().await.map_err(|error| {
+        CliError::command_execution(format!(
+            "dash-mux: cannot flush temporary stream file: {error}"
+        ))
+    })?;
+    Ok(written)
+}
+
+#[async_trait]
+impl StepHandler for DashMuxStep {
+    fn name(&self) -> &'static str {
+        "dash-mux"
+    }
+
+    async fn execute(
+        &self,
+        _page: Option<Arc<dyn IPage>>,
+        params: &Value,
+        data: &Value,
+        args: &HashMap<String, Value>,
+    ) -> Result<Value, CliError> {
+        let params = params
+            .as_object()
+            .ok_or_else(|| CliError::pipeline("dash-mux: params must be an object"))?;
+        let ctx = TemplateContext {
+            args: args.clone(),
+            data: data.clone(),
+            item: Value::Null,
+            index: 0,
+        };
+        let video_url = render_dash_param(params, "video_url", &ctx)?;
+        let audio_url = render_dash_param(params, "audio_url", &ctx)?;
+        let output_dir = render_dash_param(params, "output", &ctx)?;
+        let title = render_dash_param(params, "title", &ctx)?;
+        let filename = render_dash_param(params, "filename", &ctx)?;
+        let referer = params
+            .get("referer")
+            .and_then(Value::as_str)
+            .map(|value| render_template_str(value, &ctx))
+            .transpose()?
+            .and_then(|value| value.as_str().map(str::to_string));
+        let user_agent = params
+            .get("user_agent")
+            .and_then(Value::as_str)
+            .map(|value| render_template_str(value, &ctx))
+            .transpose()?
+            .and_then(|value| value.as_str().map(str::to_string));
+
+        if !is_direct_http_url(&video_url) || !is_direct_http_url(&audio_url) {
+            return Err(CliError::argument(
+                "dash-mux requires direct HTTP(S) video and audio URLs",
+            ));
+        }
+        if filename.is_empty()
+            || filename.contains('/')
+            || filename.contains('\\')
+            || filename.contains("..")
+        {
+            return Err(CliError::argument(
+                "dash-mux filename must be a simple file name",
+            ));
+        }
+
+        let output_dir = std::path::PathBuf::from(output_dir);
+        std::fs::create_dir_all(&output_dir).map_err(|error| {
+            CliError::command_execution(format!(
+                "dash-mux: cannot create output directory: {error}"
+            ))
+        })?;
+        let output = output_dir.join(format!("{filename}.mp4"));
+        if output.exists() {
+            return Err(CliError::command_execution(
+                "dash-mux refuses to overwrite an existing output file",
+            ));
+        }
+        let video_part = output_dir.join(format!(".{filename}.video.m4s.part"));
+        let audio_part = output_dir.join(format!(".{filename}.audio.m4s.part"));
+        let mux_part = output_dir.join(format!(".{filename}.mux.part.mp4"));
+        let client = reqwest::Client::builder()
+            .user_agent(user_agent.unwrap_or_else(|| {
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36".to_string()
+            }))
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .map_err(|error| {
+                CliError::command_execution(format!("dash-mux: client setup failed: {error}"))
+            })?;
+
+        let result = async {
+            download_dash_stream(&client, &video_url, &video_part, referer.as_deref()).await?;
+            download_dash_stream(&client, &audio_url, &audio_part, referer.as_deref()).await?;
+            let status = tokio::process::Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-i")
+                .arg(&video_part)
+                .arg("-i")
+                .arg(&audio_part)
+                .arg("-c")
+                .arg("copy")
+                .arg("-movflags")
+                .arg("+faststart")
+                .arg(&mux_part)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await
+                .map_err(|error| {
+                    CliError::command_execution(format!(
+                        "dash-mux: ffmpeg could not start: {error}"
+                    ))
+                })?;
+            if !status.success() {
+                return Err(CliError::command_execution("dash-mux: ffmpeg mux failed"));
+            }
+            std::fs::rename(&mux_part, &output).map_err(|error| {
+                CliError::command_execution(format!("dash-mux: cannot finalize output: {error}"))
+            })?;
+            let bytes = std::fs::metadata(&output)
+                .map(|metadata| metadata.len())
+                .unwrap_or(0);
+            Ok::<Value, CliError>(serde_json::json!([{
+                "title": title,
+                "status": "ok",
+                "size": format_size(bytes as usize),
+                "path": output.display().to_string(),
+            }]))
+        }
+        .await;
+
+        for path in [&video_part, &audio_part, &mux_part] {
+            let _ = std::fs::remove_file(path);
+        }
+        result
     }
 }
 
@@ -1011,11 +1202,52 @@ async fn execute_ytdlp(
         })
         .unwrap_or_else(|| "best".to_string());
 
+    let user_agent = params
+        .get("user_agent")
+        .and_then(|value| value.as_str())
+        .map(|value| {
+            render_template_str(value, ctx)
+                .ok()
+                .and_then(|rendered| rendered.as_str().map(String::from))
+                .unwrap_or_else(|| value.to_string())
+        })
+        .or_else(|| {
+            data.get("user_agent")
+                .and_then(|value| value.as_str())
+                .map(String::from)
+        });
+    let referer = params
+        .get("referer")
+        .and_then(|value| value.as_str())
+        .map(|value| {
+            render_template_str(value, ctx)
+                .ok()
+                .and_then(|rendered| rendered.as_str().map(String::from))
+                .unwrap_or_else(|| value.to_string())
+        })
+        .or_else(|| {
+            data.get("referer")
+                .and_then(|value| value.as_str())
+                .map(String::from)
+        });
+
+    let dry_run = params
+        .get("dry_run")
+        .and_then(|value| match value {
+            Value::Bool(value) => Some(*value),
+            Value::String(raw) => render_template_str(raw, ctx).ok().and_then(|rendered| {
+                rendered.as_bool().or_else(|| {
+                    rendered
+                        .as_str()
+                        .map(|value| value.eq_ignore_ascii_case("true"))
+                })
+            }),
+            _ => None,
+        })
+        .unwrap_or(false);
+
     // Extract cookies from data (set by evaluate step from document.cookie)
     let cookies_str = data.get("cookies").and_then(|v| v.as_str()).unwrap_or("");
-
-    // Create output directory
-    let _ = std::fs::create_dir_all(&output_dir);
 
     // Sanitize title for filename
     let safe_title: String = title
@@ -1043,11 +1275,18 @@ async fn execute_ytdlp(
 
     let output_path = format!("{}/{}.mp4", output_dir, safe_title);
 
-    info!(url = %url, output = %output_path, "Downloading with yt-dlp");
-
-    // Write cookies to Netscape format temp file for yt-dlp
+    // yt-dlp needs the browser session on sites that reject anonymous media
+    // metadata requests. Keep a short-lived Netscape file in the system temp
+    // directory, never beside user downloads, and remove it on every path.
     let cookie_file = if !cookies_str.is_empty() {
-        let cookie_path = format!("{}/.ytdlp_cookies.txt", output_dir);
+        let cookie_path = std::env::temp_dir().join(format!(
+            "opencli-ytdlp-{}-{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0),
+        ));
         let domain = url
             .strip_prefix("https://")
             .or_else(|| url.strip_prefix("http://"))
@@ -1074,11 +1313,56 @@ async fn execute_ytdlp(
                 ));
             }
         }
-        let _ = std::fs::write(&cookie_path, &netscape);
+        std::fs::write(&cookie_path, netscape).map_err(|error| {
+            CliError::command_execution(format!(
+                "Failed to prepare temporary yt-dlp session: {error}"
+            ))
+        })?;
         Some(cookie_path)
     } else {
         None
     };
+
+    if dry_run {
+        let mut command = tokio::process::Command::new("yt-dlp");
+        command
+            .arg("--simulate")
+            .arg("--no-playlist")
+            .arg("-f")
+            .arg(&format)
+            .arg(&url);
+        if let Some(user_agent) = &user_agent {
+            command.arg("--user-agent").arg(user_agent);
+        }
+        if let Some(referer) = &referer {
+            command.arg("--referer").arg(referer);
+        }
+        if let Some(path) = &cookie_file {
+            command.arg("--cookies").arg(path);
+        }
+        let result = command
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
+        if let Some(path) = &cookie_file {
+            let _ = std::fs::remove_file(path);
+        }
+        let status = result
+            .map_err(|e| CliError::command_execution(format!("Failed to run yt-dlp: {}", e)))?;
+        return Ok(serde_json::json!([{
+            "title": title,
+            "status": if status.success() { "dry-run ok" } else { "dry-run failed" },
+            "size": "-",
+            "path": "",
+        }]));
+    }
+
+    // Only materialize an output directory for a real download. A dry run
+    // should not leave files, cookie material, or empty directories behind.
+    let _ = std::fs::create_dir_all(&output_dir);
+
+    info!(url = %url, output = %output_path, "Downloading with yt-dlp");
 
     let mut cmd = tokio::process::Command::new("yt-dlp");
     cmd.arg("-f")
@@ -1089,17 +1373,31 @@ async fn execute_ytdlp(
         .arg("-o")
         .arg(&output_path);
 
-    if let Some(ref cf) = cookie_file {
+    if let Some(user_agent) = &user_agent {
+        cmd.arg("--user-agent").arg(user_agent);
+    }
+    if let Some(referer) = &referer {
+        cmd.arg("--referer").arg(referer);
+    }
+
+    if let Some(cf) = &cookie_file {
         cmd.arg("--cookies").arg(cf);
     }
 
     cmd.arg(&url);
 
-    let status = cmd
+    let command_result = cmd
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .status()
-        .await
+        .await;
+
+    // Clean up cookie file even if yt-dlp could not start.
+    if let Some(cf) = &cookie_file {
+        let _ = std::fs::remove_file(cf);
+    }
+
+    let status = command_result
         .map_err(|e| CliError::command_execution(format!("Failed to run yt-dlp: {}", e)))?;
 
     let file_size = std::fs::metadata(&output_path)
@@ -1117,11 +1415,6 @@ async fn execute_ytdlp(
 
     let result_status = if status.success() { "ok" } else { "failed" };
 
-    // Clean up cookie file
-    if let Some(ref cf) = cookie_file {
-        let _ = std::fs::remove_file(cf);
-    }
-
     debug!(status = %result_status, size = %file_size, "yt-dlp download complete");
 
     Ok(serde_json::json!([{
@@ -1138,6 +1431,7 @@ async fn execute_ytdlp(
 
 pub fn register_download_steps(registry: &mut StepRegistry) {
     registry.register(Arc::new(DownloadStep));
+    registry.register(Arc::new(DashMuxStep));
 }
 
 // ---------------------------------------------------------------------------

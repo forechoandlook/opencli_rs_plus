@@ -1,6 +1,6 @@
 site: bilibili
 name: favorite
-description: 我的默认收藏夹
+description: "读取指定 B 站收藏夹的视频；不传 --folder-id 时读取第一个收藏夹"
 domain: www.bilibili.com
 strategy: cookie
 
@@ -13,6 +13,9 @@ args:
     type: int
     default: 1
     description: Page number
+  folder_id:
+    type: string
+    description: "收藏夹 ID；可由 bilibili favorites 获取"
 
 columns: [rank, title, author, plays, url]
 
@@ -103,11 +106,23 @@ pipeline:
         }
         // --- End helpers ---
 
-        // Step 1: Get default favorite folder ID
-        const foldersPayload = await apiGet('/x/v3/fav/folder/created/list-all', { up_mid: 0 }, true);
+        // Step 1: resolve the authenticated account before listing its folders.
+        // `up_mid=0` returns an empty list for some accounts.
+        const navRes = await fetch('https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' });
+        const nav = await navRes.json();
+        const uid = nav?.data?.mid;
+        if (!uid) throw new Error('AUTH_REQUIRED: bilibili.com');
+
+        const foldersPayload = await apiGet('/x/v3/fav/folder/created/list-all', { up_mid: uid }, true);
+        if (foldersPayload?.code !== 0) {
+          throw new Error('获取收藏夹列表失败: ' + (foldersPayload?.message || foldersPayload?.code || 'unknown error'));
+        }
         const folders = foldersPayload?.data?.list || [];
         if (!folders.length) return [];
-        const fid = folders[0].id;
+        const requestedId = String(${{ args.folder_id | json }} || '').trim();
+        const folder = requestedId ? folders.find(item => String(item.id) === requestedId) : folders[0];
+        if (!folder) throw new Error('未找到收藏夹 ID: ' + requestedId);
+        const fid = folder.id;
 
         // Step 2: Fetch favorite items
         const payload = await apiGet('/x/v3/fav/resource/list', {
@@ -115,6 +130,9 @@ pipeline:
           pn: pageNum,
           ps: Math.min(Number(limit), 40)
         }, true);
+        if (payload?.code !== 0) {
+          throw new Error('获取收藏夹内容失败: ' + (payload?.message || payload?.code || 'unknown error'));
+        }
         const medias = payload?.data?.medias || [];
 
         return medias.slice(0, Number(limit)).map((item, i) => ({

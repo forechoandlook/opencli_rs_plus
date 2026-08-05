@@ -60,6 +60,7 @@ pipeline:
           location: clean(seller.publishCity || seller.city || ''),
           seller_name: clean(seller.nick || seller.uniqueName || ''),
           want_count: String(item.wantCnt ?? ''),
+          image_count: Array.isArray(item.imageInfos) ? item.imageInfos.length : 0,
           status: clean(item.itemStatusStr || ''),
         }];
       })()
@@ -73,5 +74,6 @@ pipeline:
       location: ${{ item.location }}
       seller_name: ${{ item.seller_name }}
       want_count: ${{ item.want_count }}
+      image_count: ${{ item.image_count }}
 
-columns: [item_id, title, price, condition, brand, location, seller_name, want_count]
+columns: [item_id, title, price, condition, brand, location, seller_name, want_count, image_count]

@@ -1,5 +1,19 @@
 # 2026-08-05
 
+## 闲鱼搜索 adapter
+
+- 修复 `xianyu search` 对当前商品链接的识别：闲鱼会将 `spm` 跟踪参数置于 `id` 之前，现按 `/item?` 路由匹配后再解析商品 ID，避免真实搜索结果被误报为空。
+- 新增只读的 `xianyu feed`、`hot`、`messages` 和 `conversation`：分别读取首页猜你喜欢、首页展示的热门搜索词、已加载会话摘要/未读数，以及聊天页当前会话的已加载消息。不会发送私信、操作订单、购买、收藏或翻页加载历史消息。
+- 新增 `xianyu download <item_id>`：只下载商品详情响应中已展示的 `imageInfos` 公共图片，默认写入 `./xianyu-downloads` 并生成 `item.md` 元数据；`xianyu item` 同步输出 `image_count`，便于从 feed 结果选择有图片的商品后下载。
+- `xianyu messages` 改为复用消息页真实调用的 `mtop.taobao.idlemessage.pc.session.sync`（`v: 3.0`），稳定输出会话 ID、类型、对方昵称、最新摘要、时间和每会话未读数；新增 `xianyu unread`，复用 `pc.redpoint.query` 返回消息总未读数。两者均为只读请求，不会切换会话、标记已读或发送消息。
+- 新增 `xianyu publish`：通过浏览器原生 CDP 文件输入能力上传本机图片，填写描述、售价、可选原价与运费后才点击闲鱼发布按钮。该命令强制要求 `--confirm true`，并在上传或写入页面前校验；没有确认不会修改表单。扩展/浏览器桥新增通用 YAML `upload` step，使用 `DOM.setFileInputFiles`，不把站点上传逻辑硬编码进扩展，也不伪造闲鱼的最终发布 API。
+- 重构 `xiaohongshu publish`：删除旧流程“忽略 `--images` 且直接发布”的问题，改为在新版创作页切换“上传图文”、通过通用 `upload` step 上传真实本地图片，再填写标题/正文。该命令要求 `--confirm true`；默认 `--draft true`，显式 `--draft false` 才会尝试公开发布。话题以 `#话题` 追加进正文，未调用或伪造未验证的发布 API。
+- 新增 B 站 `publish-status` 与 `publish`：前者只读确认投稿页/视频上传控件；后者使用浏览器原生文件上传填写标题和简介。`publish` 强制 `--confirm true`，并默认 `--submit false`；只有同时显式传 `--submit true` 才会点击“立即投稿”，不会伪造投稿 API。
+- B 站 `download` 不再依赖 `yt-dlp`：仅复用视频页自然提供的 DASH 音视频地址，以页面 Referer/User-Agent 下载后由本机 `ffmpeg` 合成为单个 MP4；不伪造播放签名或调用未验证下载 API。新增通用 YAML `dash-mux` step，供任何页面已提供 DASH 地址的 adapter 复用。
+- 新增 `bilibili comments <BV号>`：读取视频首屏顶层评论，支持热门/最新排序和最多 50 条限制；不点赞、回复、加载二级回复或翻页。
+- 修复 `bilibili favorite`：先读取当前登录 UID 再请求收藏夹，修正 `up_mid=0` 导致误报为空的问题；新增 `bilibili favorites` 列出全部收藏夹（ID、名称、数量和可见性），`favorite --folder_id <ID>` 可读取指定收藏夹内容。两项均为只读。
+- 新增 `xiaohongshu favorites`：先从当前登录创作者账号读取小红书号，再自动打开 `?tab=fav&subTab=note` 并读取自然加载的首屏收藏笔记；保留每项页面提供的 `xsec_token` 链接，不伪造签名、不翻页、不执行收藏或取消收藏。扩展在该页面可提供“导出当前个人收藏”动作。
+
 ## 主流游戏素材源接入
 
 - 新增 `opengameart search`、`kenney category`、`itchio assets`、`ambientcg popular` 与 `freesound search`，分别覆盖开放游戏素材、CC0 资源包、独立创作者市场、PBR 材质和音效发现。

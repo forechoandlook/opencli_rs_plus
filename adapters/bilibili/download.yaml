@@ -1,50 +1,82 @@
 site: bilibili
 name: download
-description: 下载B站视频（需要 yt-dlp）
+description: "下载单个 B 站视频：复用当前视频页自然提供的 DASH 音视频地址并本地合成 MP4"
 domain: www.bilibili.com
 strategy: cookie
+browser: true
+timeoutSeconds: 180
 
 args:
   bvid:
-    required: true
     positional: true
-    description: Video BV ID (e.g., BV1xxx)
+    type: string
+    required: true
+    description: "视频 BV 号，例如 BV1xxx"
   output:
+    type: string
     default: ./bilibili-downloads
-    description: Output directory
+    description: "输出目录"
   quality:
-    default: best
-    description: "Video quality (best, 1080p, 720p, 480p)"
+    type: string
+    default: 480p
+    choices: [1080p, 720p, 480p, 360p]
+    description: "最高下载清晰度；只选择不高于该值的页面已提供流，无匹配档位则停止"
+  max_duration_seconds:
+    type: int
+    default: 0
+    description: "可选时长上限；0 不限制，超出会在下载前停止"
 
-columns: [bvid, title, status, size]
+columns: [title, status, size, path]
 
 pipeline:
   - navigate:
-      url: "https://www.bilibili.com/video/${{ args.bvid }}"
+      url: https://www.bilibili.com/video/${{ args.bvid }}/
       settleMs: 3000
-
-  - evaluate: |
-      (async () => {
-        const bvid = args.bvid;
-        const title = document.querySelector('h1.video-title, .video-title')?.textContent?.trim() || 'video';
-        const author = document.querySelector('.up-name, .username')?.textContent?.trim() || 'unknown';
-
-        // Get cookies as Netscape format for yt-dlp
-        const cookies = document.cookie;
-
-        return {
-          bvid: bvid,
-          title: title,
-          author: author,
-          cookies: cookies,
-          url: 'https://www.bilibili.com/video/' + bvid,
-        };
-      })()
-
-  - download:
-      type: video
-      tool: yt-dlp
-      url: "${{ data.url }}"
-      title: "${{ data.title }}"
-      output: "${{ args.output }}"
-      quality: "${{ args.quality }}"
+      retry: false
+  - evaluate:
+      retry: false
+      js: |
+        (() => {
+          const bvid = String(args.bvid || '').trim();
+          if (!/^BV[0-9A-Za-z]+$/.test(bvid)) throw new Error('bvid 格式应为 BV 开头的视频号');
+          const state = window.__INITIAL_STATE__ || {};
+          const playinfo = window.__playinfo__?.data || window.__playinfo__ || state.playinfo?.data || state.playinfo || {};
+          const dash = playinfo.dash || playinfo.data?.dash;
+          const title = String(state.videoData?.title || document.querySelector('h1.video-title, .video-title')?.textContent || 'video').replace(/\s+/g, ' ').trim();
+          const duration = Number(state.videoData?.duration || 0);
+          const maxDuration = Number(args.max_duration_seconds || 0);
+          if (maxDuration > 0 && duration > maxDuration) {
+            throw new Error(`视频时长 ${duration}s 超出 --max_duration_seconds=${maxDuration}；未下载`);
+          }
+          if (!Array.isArray(dash?.video) || !Array.isArray(dash?.audio)) {
+            throw new Error('视频页未自然提供 DASH 播放信息；未伪造请求或签名');
+          }
+          const maxHeight = ({ '1080p': 1080, '720p': 720, '480p': 480, '360p': 360 })[String(args.quality || '480p')] || 480;
+          const allVideos = [...dash.video].filter(item => Number(item.height || 0) > 0)
+            .sort((left, right) => Number(right.height || 0) - Number(left.height || 0) || Number(right.bandwidth || 0) - Number(left.bandwidth || 0));
+          const video = allVideos.find(item => Number(item.height) <= maxHeight);
+          const audio = [...dash.audio].sort((left, right) => Number(right.bandwidth || 0) - Number(left.bandwidth || 0))[0];
+          const urlOf = stream => stream?.baseUrl || stream?.base_url || stream?.backupUrl?.[0] || stream?.backup_url?.[0] || '';
+          const videoUrl = urlOf(video);
+          const audioUrl = urlOf(audio);
+          if (!video) throw new Error(`页面没有不高于 ${maxHeight}p 的可下载视频流；未下载`);
+          if (!videoUrl || !audioUrl) throw new Error('页面未提供可直接复用的音视频地址；未下载');
+          return {
+            bvid,
+            title,
+            duration,
+            selected_height: Number(video.height || 0),
+            video_url: videoUrl,
+            audio_url: audioUrl,
+            referer: location.href,
+            user_agent: navigator.userAgent,
+          };
+        })()
+  - dash-mux:
+      video_url: '${{ data.video_url }}'
+      audio_url: '${{ data.audio_url }}'
+      output: '${{ args.output }}'
+      title: '${{ data.title }}'
+      filename: 'bilibili_${{ data.bvid }}'
+      referer: '${{ data.referer }}'
+      user_agent: '${{ data.user_agent }}'

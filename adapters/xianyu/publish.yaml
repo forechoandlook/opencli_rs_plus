@@ -1,0 +1,144 @@
+site: xianyu
+name: publish
+description: "发布图文闲置；仅在 --confirm true 时上传文件、填写页面并点击最终发布"
+domain: www.goofish.com
+strategy: cookie
+browser: true
+timeoutSeconds: 120
+
+args:
+  description:
+    positional: true
+    type: string
+    required: true
+    description: "商品描述（最多 1500 字；应包含品牌、型号、成色和来源）"
+  images:
+    type: string
+    required: true
+    description: "图片绝对路径，逗号分隔，最多 9 张"
+  price:
+    type: number
+    required: true
+    description: "售价，正数"
+  original_price:
+    type: number
+    description: "可选原价，正数"
+  shipping:
+    type: string
+    default: free
+    choices: [free, distance, fixed, pickup]
+    description: "运费：free=包邮，distance=按距离计费，fixed=一口价，pickup=无需邮寄"
+  confirm:
+    type: bool
+    required: true
+    description: "必须显式传 --confirm true 才会实际上传并点击发布"
+
+columns: [status, detail, page_url]
+
+pipeline:
+  # Keep the confirmation check before any form mutation. Navigation uses an
+  # OpenCLI-owned background tab, never the user's visible publish tab.
+  - navigate:
+      url: https://www.goofish.com/publish
+      retry: false
+  - wait:
+      selector: 'input[type="file"][name="file"]'
+  - evaluate:
+      retry: false
+      js: |
+        (() => {
+          if (args.confirm !== true) {
+            throw new Error('实际发布需要显式传 --confirm true；当前没有修改页面或上传文件');
+          }
+          const description = String(args.description || '').trim();
+          const price = Number(args.price);
+          const originalPrice = args.original_price == null ? null : Number(args.original_price);
+          const images = String(args.images || '').split(',').map(value => value.trim()).filter(Boolean);
+          if (!description) throw new Error('description 不能为空');
+          if (description.length > 1500) throw new Error(`description 长度为 ${description.length}，不能超过 1500`);
+          if (!Number.isFinite(price) || price <= 0) throw new Error('price 必须是正数');
+          if (originalPrice != null && (!Number.isFinite(originalPrice) || originalPrice <= 0)) {
+            throw new Error('original_price 必须是正数');
+          }
+          if (!images.length || images.length > 9) throw new Error('images 需要 1 至 9 个绝对路径，以英文逗号分隔');
+          if (!document.querySelector('input[type="file"][name="file"]')) {
+            throw new Error('未找到闲鱼图片上传控件；页面可能已改版或登录已过期');
+          }
+          return { validated: true, imageCount: images.length };
+        })()
+  - upload:
+      selector: 'input[type="file"][name="file"]'
+      paths: '${{ args.images }}'
+      retry: false
+  # Image upload may start the site's category/attribute recognition. Give it
+  # a short single settle window; no retries to avoid duplicate uploads.
+  - wait:
+      time: 2
+  - evaluate:
+      retry: false
+      js: |
+        (() => {
+          const setValue = (input, value) => {
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+            if (!setter) throw new Error('浏览器不支持价格输入');
+            setter.call(input, String(value));
+            input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: String(value) }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          };
+          const description = String(args.description || '').trim();
+          const editor = document.querySelector('[contenteditable="true"][data-placeholder*="描述"]')
+            || document.querySelector('[contenteditable="true"]');
+          if (!(editor instanceof HTMLElement)) throw new Error('未找到闲鱼描述编辑器');
+          editor.focus();
+          editor.textContent = description;
+          editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: description }));
+          editor.dispatchEvent(new Event('change', { bubbles: true }));
+
+          const fieldByLabel = label => [...document.querySelectorAll('.ant-form-item')].find(item =>
+            (item.querySelector('.ant-form-item-label')?.textContent || '').replace(/\s+/g, '').startsWith(label)
+          )?.querySelector('input[placeholder="0.00"]');
+          const priceInput = fieldByLabel('价格');
+          if (!(priceInput instanceof HTMLInputElement)) throw new Error('未找到闲鱼价格输入框');
+          setValue(priceInput, Number(args.price).toFixed(2));
+          if (args.original_price != null) {
+            const originalInput = fieldByLabel('原价');
+            if (!(originalInput instanceof HTMLInputElement)) throw new Error('未找到闲鱼原价输入框');
+            setValue(originalInput, Number(args.original_price).toFixed(2));
+          }
+
+          const shippingValues = { free: '0', distance: '1', fixed: '2', pickup: '3' };
+          const shippingValue = shippingValues[String(args.shipping || 'free')];
+          const shipping = [...document.querySelectorAll('input[type="radio"]')].find(input => input.value === shippingValue);
+          if (!(shipping instanceof HTMLInputElement)) throw new Error('未找到闲鱼运费选项');
+          if (!shipping.checked) shipping.click();
+
+          const images = document.querySelector('input[type="file"][name="file"]');
+          const uploaded = images instanceof HTMLInputElement ? images.files?.length || 0 : 0;
+          if (!uploaded) throw new Error('图片尚未进入闲鱼表单；未点击发布');
+          return { ready: true, uploaded, shipping: String(args.shipping || 'free') };
+        })()
+  - evaluate:
+      retry: false
+      js: |
+        (async () => {
+          const button = document.querySelector('button.publish-button--KBpTVopQ')
+            || [...document.querySelectorAll('button')].find(item => item.offsetParent !== null && item.textContent?.trim() === '发布');
+          if (!(button instanceof HTMLButtonElement)) throw new Error('未找到闲鱼发布按钮');
+          if (button.disabled) throw new Error('闲鱼发布按钮仍不可用，请补全页面要求的属性规格后重试');
+          const before = location.href;
+          button.click();
+          await new Promise(resolve => setTimeout(resolve, 2500));
+          const errors = [...document.querySelectorAll('.ant-form-item-explain-error, [class*="error"]')]
+            .map(item => (item.textContent || '').replace(/\s+/g, ' ').trim())
+            .filter(Boolean)
+            .slice(0, 3);
+          return [{
+            status: errors.length ? '未发布：请补全闲鱼表单' : '已点击发布，请在闲鱼后台确认',
+            detail: errors.length ? errors.join('；') : '平台可能仍在审核、跳转或要求补充属性规格',
+            page_url: location.href || before,
+          }];
+        })()
+  - map:
+      status: '${{ item.status }}'
+      detail: '${{ item.detail }}'
+      page_url: '${{ item.page_url }}'

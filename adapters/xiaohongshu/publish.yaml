@@ -1,15 +1,16 @@
 site: xiaohongshu
 name: publish
-description: "小红书发布图文笔记 (creator center UI automation)"
+description: "发布小红书图文笔记；仅在 --confirm true 时上传、填写并保存草稿或发布"
 domain: creator.xiaohongshu.com
 strategy: cookie
 browser: true
+timeoutSeconds: 120
 
 args:
   title:
     type: string
     required: true
-    description: "笔记标题 (最多20字)"
+    description: "笔记标题（最多 20 字）"
   content:
     positional: true
     type: string
@@ -17,123 +18,129 @@ args:
     description: "笔记正文"
   images:
     type: string
-    description: "图片路径，逗号分隔，最多9张 (jpg/png/gif/webp)"
+    required: true
+    description: "图片绝对路径，逗号分隔（jpg/jpeg/png/webp）"
   topics:
     type: string
-    description: "话题标签，逗号分隔，不含 # 号"
+    description: "可选话题，逗号分隔；作为 #话题 写入正文"
   draft:
     type: bool
-    default: false
-    description: "保存为草稿，不直接发布"
+    default: true
+    description: "默认 true，保存草稿；传 false 才尝试公开发布"
+  confirm:
+    type: bool
+    required: true
+    description: "必须显式传 --confirm true 才会上传文件或写入页面"
 
-columns: [status, detail]
+columns: [status, detail, page_url]
 
 pipeline:
-  - navigate: https://creator.xiaohongshu.com/publish/publish?from=menu_left
-  - wait: 3
-  - evaluate: |
-      (async () => {
-        const title = ${{ args.title | json }};
-        const content = ${{ args.content | json }};
-        const isDraft = ${{ args.draft | json }};
-        const topicStr = ${{ args.topics | default('') | json }};
-        const topics = topicStr ? topicStr.split(',').map(s => s.trim()).filter(Boolean) : [];
-
-        if (!title) throw new Error('--title is required');
-        if (title.length > 20) throw new Error('Title is ' + title.length + ' chars — must be <= 20');
-        if (!content) throw new Error('Positional argument <content> is required');
-
-        // Check we're on creator center
-        if (!location.href.includes('creator.xiaohongshu.com')) {
-          throw new Error('Redirected away from creator center — session may have expired.');
-        }
-
-        // Select 图文 tab if present
-        const allEls = document.querySelectorAll('[class*="tab"], [class*="note-type"], [class*="type-item"]');
-        for (const el of allEls) {
-          const text = el.innerText || el.textContent || '';
-          if ((text.includes('图文') || text.includes('图片')) && el.offsetParent !== null) {
-            el.click();
-            await new Promise(r => setTimeout(r, 1000));
-            break;
+  - navigate:
+      url: https://creator.xiaohongshu.com/publish/publish?from=menu_left
+      retry: false
+  - wait:
+      selector: '.creator-tab'
+  # The current creator page opens the video tab first. Check confirmation
+  # before switching to image mode, then choose the visible image tab.
+  - evaluate:
+      retry: false
+      js: |
+        (() => {
+          if (args.confirm !== true) {
+            throw new Error('上传、存草稿或发布都需要显式传 --confirm true；当前没有修改页面或上传文件');
           }
-        }
+          const title = String(args.title || '').trim();
+          const content = String(args.content || '').trim();
+          const images = String(args.images || '').split(',').map(value => value.trim()).filter(Boolean);
+          if (!title) throw new Error('title 不能为空');
+          if (title.length > 20) throw new Error(`title 长度为 ${title.length}，不能超过 20`);
+          if (!content) throw new Error('content 不能为空');
+          if (!images.length || images.length > 18) throw new Error('images 需要 1 至 18 个绝对路径，以英文逗号分隔');
+          const imageTab = [...document.querySelectorAll('.creator-tab')].find(item =>
+            item.offsetParent !== null && (item.textContent || '').trim() === '上传图文'
+          );
+          if (!(imageTab instanceof HTMLElement)) throw new Error('未找到小红书“上传图文”入口；页面可能已改版或登录已过期');
+          imageTab.click();
+          return { validated: true, imageCount: images.length, draft: args.draft !== false };
+        })()
+  - wait:
+      selector: 'input.upload-input[type="file"][accept*=".jpg"]'
+  - upload:
+      selector: 'input.upload-input[type="file"][accept*=".jpg"]'
+      paths: '${{ args.images }}'
+      retry: false
+  # Wait once for the site to render the title/editor form. Do not retry the
+  # upload or call unpublished creator APIs.
+  - wait:
+      time: 2
+  - evaluate:
+      retry: false
+      js: |
+        (() => {
+          const setInputValue = (input, value) => {
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+            if (!setter) throw new Error('浏览器不支持标题输入');
+            setter.call(input, value);
+            input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          };
+          const title = String(args.title || '').trim();
+          const rawContent = String(args.content || '').trim();
+          const topics = String(args.topics || '').split(',')
+            .map(value => value.trim().replace(/^#/, ''))
+            .filter(Boolean)
+            .map(value => `#${value}`);
+          const content = [rawContent, ...topics].filter(Boolean).join('\n');
+          const titleInput = [...document.querySelectorAll('input')].find(input =>
+            input.offsetParent !== null && (input.maxLength === 20 || input.placeholder?.includes('标题'))
+          );
+          if (!(titleInput instanceof HTMLInputElement)) throw new Error('图片上传后未找到小红书标题输入框；未提交');
+          setInputValue(titleInput, title);
 
-        // Fill title
-        const titleSelectors = [
-          'input[maxlength="20"]', 'input[class*="title"]',
-          'input[placeholder*="标题"]', 'input[placeholder*="title" i]',
-        ];
-        let titleFilled = false;
-        for (const sel of titleSelectors) {
-          const candidates = document.querySelectorAll(sel);
-          for (const el of candidates) {
-            if (!el || el.offsetParent === null) continue;
-            el.focus();
-            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
-              el.value = '';
-              document.execCommand('selectAll', false);
-              document.execCommand('insertText', false, title);
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-            titleFilled = true;
-            break;
+          const editor = [...document.querySelectorAll('[contenteditable="true"], textarea')].find(element =>
+            element.offsetParent !== null && !element.matches('input')
+          );
+          if (!(editor instanceof HTMLElement)) throw new Error('图片上传后未找到小红书正文编辑器；未提交');
+          editor.focus();
+          if (editor instanceof HTMLTextAreaElement) {
+            const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+            if (!setter) throw new Error('浏览器不支持正文输入');
+            setter.call(editor, content);
+          } else {
+            editor.textContent = content;
           }
-          if (titleFilled) break;
-        }
-        if (!titleFilled) throw new Error('Could not find title input');
-        await new Promise(r => setTimeout(r, 500));
-
-        // Fill content
-        const contentSelectors = [
-          '[contenteditable="true"][class*="content"]',
-          '[contenteditable="true"][class*="editor"]',
-          '[contenteditable="true"][placeholder*="描述"]',
-          '[contenteditable="true"]:not([placeholder*="标题"])',
-        ];
-        let contentFilled = false;
-        for (const sel of contentSelectors) {
-          const candidates = document.querySelectorAll(sel);
-          for (const el of candidates) {
-            if (!el || el.offsetParent === null) continue;
-            el.focus();
-            el.textContent = '';
-            document.execCommand('selectAll', false);
-            document.execCommand('insertText', false, content);
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            contentFilled = true;
-            break;
+          editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: content }));
+          editor.dispatchEvent(new Event('change', { bubbles: true }));
+          return { ready: true, topicCount: topics.length };
+        })()
+  - evaluate:
+      retry: false
+      js: |
+        (async () => {
+          const isDraft = args.draft !== false;
+          const labels = isDraft ? ['保存草稿', '存草稿'] : ['发布', '发布笔记'];
+          const button = [...document.querySelectorAll('button, [role="button"]')].find(item => {
+            const label = (item.textContent || '').replace(/\s+/g, '').trim();
+            return item.offsetParent !== null && !item.hasAttribute('disabled') && labels.some(expected => label === expected || label.includes(expected));
+          });
+          if (!(button instanceof HTMLElement)) {
+            throw new Error(`未找到小红书${isDraft ? '保存草稿' : '发布'}按钮；未提交`);
           }
-          if (contentFilled) break;
-        }
-        if (!contentFilled) throw new Error('Could not find content input');
-        await new Promise(r => setTimeout(r, 500));
-
-        // Publish or save draft
-        const actionLabel = isDraft ? '存草稿' : '发布';
-        const buttons = document.querySelectorAll('button, [role="button"]');
-        let btnClicked = false;
-        for (const btn of buttons) {
-          const text = (btn.innerText || btn.textContent || '').trim();
-          if ((text === actionLabel || text.includes(actionLabel) || text === '发布笔记') && btn.offsetParent !== null && !btn.disabled) {
-            btn.click();
-            btnClicked = true;
-            break;
-          }
-        }
-        if (!btnClicked) throw new Error('Could not find "' + actionLabel + '" button');
-
-        await new Promise(r => setTimeout(r, 4000));
-
-        const finalUrl = location.href;
-        const navigatedAway = !finalUrl.includes('/publish/publish');
-        const verb = isDraft ? '草稿已保存' : '发布成功';
-
-        return [{
-          status: navigatedAway ? verb : '操作完成，请在浏览器中确认',
-          detail: '"' + title + '"',
-        }];
-      })()
+          const before = location.href;
+          button.click();
+          await new Promise(resolve => setTimeout(resolve, 2500));
+          const errors = [...document.querySelectorAll('[class*="error"], [class*="Error"]')]
+            .filter(item => item.offsetParent !== null)
+            .map(item => (item.textContent || '').replace(/\s+/g, ' ').trim())
+            .filter(Boolean)
+            .slice(0, 3);
+          return [{
+            status: errors.length ? '未提交：请补全小红书表单' : (isDraft ? '已点击保存草稿，请在创作中心确认' : '已点击发布，请在创作中心确认'),
+            detail: errors.length ? errors.join('；') : '平台可能仍在审核、跳转或要求补充内容',
+            page_url: location.href || before,
+          }];
+        })()
   - map:
-      status: ${{ item.status }}
-      detail: ${{ item.detail }}
+      status: '${{ item.status }}'
+      detail: '${{ item.detail }}'
+      page_url: '${{ item.page_url }}'

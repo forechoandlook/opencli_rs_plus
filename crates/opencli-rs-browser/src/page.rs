@@ -119,6 +119,16 @@ impl IPage for DaemonPage {
         Ok(())
     }
 
+    async fn upload_files(&self, selector: &str, paths: &[String]) -> Result<(), CliError> {
+        let cmd = self
+            .cmd("upload")
+            .await
+            .with_selector(selector)
+            .with_file_paths(paths.to_vec());
+        self.send(cmd).await?;
+        Ok(())
+    }
+
     async fn cookies(&self, _options: Option<CookieOptions>) -> Result<Vec<Cookie>, CliError> {
         let cmd = self.cmd("cookies").await;
         let val = self.send(cmd).await?;

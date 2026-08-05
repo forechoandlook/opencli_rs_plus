@@ -1,0 +1,49 @@
+site: bilibili
+name: publish-status
+description: "只读检查 B 站投稿页登录状态、上传控件和可用操作，不上传或投稿"
+domain: member.bilibili.com
+strategy: cookie
+browser: true
+timeoutSeconds: 60
+
+args: {}
+
+columns: [status, file_inputs, accepts, input_summary, actions, page_url]
+
+pipeline:
+  - navigate:
+      url: https://member.bilibili.com/platform/upload/video/frame
+      retry: false
+  - wait:
+      time: 2
+  - evaluate:
+      retry: false
+      js: |
+        (() => {
+          const files = [...document.querySelectorAll('input[type="file"]')];
+          const actions = [...document.querySelectorAll('button, [role="button"], a')]
+            .filter(item => item.offsetParent !== null)
+            .map(item => (item.textContent || '').replace(/\s+/g, ' ').trim())
+            .filter(Boolean)
+            .filter(label => /上传|投稿|发布|草稿|视频/.test(label))
+            .slice(0, 12);
+          const onMemberSite = location.hostname === 'member.bilibili.com';
+          return [{
+            status: !onMemberSite ? '未登录或被重定向' : (files.length ? '投稿页可用' : '投稿页已打开，等待上传控件渲染'),
+            file_inputs: files.length,
+            accepts: files.map(input => input.getAttribute('accept') || '').filter(Boolean).join(', '),
+            input_summary: files.map(input => JSON.stringify({
+              class: input.className || '', name: input.getAttribute('name') || '', multiple: input.multiple,
+              accept: input.getAttribute('accept') || '', parent: (input.parentElement?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+            })).join(' | '),
+            actions: actions.join(' | '),
+            page_url: location.href,
+          }];
+        })()
+  - map:
+      status: '${{ item.status }}'
+      file_inputs: '${{ item.file_inputs }}'
+      accepts: '${{ item.accepts }}'
+      input_summary: '${{ item.input_summary }}'
+      actions: '${{ item.actions }}'
+      page_url: '${{ item.page_url }}'

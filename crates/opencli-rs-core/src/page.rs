@@ -153,6 +153,17 @@ pub trait IPage: Send + Sync {
     /// Type text into an element
     async fn type_text(&self, selector: &str, text: &str) -> Result<(), CliError>;
 
+    /// Set local files on a file input selected by CSS selector.
+    ///
+    /// Implementations should use the browser's DevTools file-input mechanism,
+    /// rather than trying to synthesize a file chooser from page JavaScript.
+    async fn upload_files(&self, selector: &str, paths: &[String]) -> Result<(), CliError> {
+        let _ = (selector, paths);
+        Err(CliError::command_execution(
+            "file upload is not supported by this page implementation",
+        ))
+    }
+
     /// Get cookies
     async fn cookies(&self, options: Option<CookieOptions>) -> Result<Vec<Cookie>, CliError>;
 

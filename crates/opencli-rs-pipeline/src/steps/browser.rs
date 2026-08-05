@@ -310,6 +310,106 @@ impl StepHandler for EvaluateStep {
 }
 
 // ---------------------------------------------------------------------------
+// UploadStep
+// ---------------------------------------------------------------------------
+
+/// Set one or more local files on an `<input type=file>` through the browser
+/// bridge. This intentionally has no page-JavaScript fallback: browsers do
+/// not permit scripts to manufacture a FileList for security reasons.
+pub struct UploadStep;
+
+fn upload_paths(
+    value: &Value,
+    data: &Value,
+    args: &HashMap<String, Value>,
+) -> Result<Vec<String>, CliError> {
+    let ctx = default_ctx(data, args);
+    let raw_paths = match value {
+        Value::String(raw) => {
+            let rendered = render_template_str(raw, &ctx)?;
+            let value = rendered.as_str().ok_or_else(|| {
+                CliError::pipeline("upload paths template must render to a string")
+            })?;
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(str::to_string)
+                .collect()
+        }
+        Value::Array(values) => values
+            .iter()
+            .map(|value| {
+                let raw = value
+                    .as_str()
+                    .ok_or_else(|| CliError::pipeline("each upload path must be a string"))?;
+                let rendered = render_template_str(raw, &ctx)?;
+                rendered.as_str().map(str::to_string).ok_or_else(|| {
+                    CliError::pipeline("upload path template must render to a string")
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => {
+            return Err(CliError::pipeline(
+                "upload paths must be a string or string array",
+            ))
+        }
+    };
+
+    if raw_paths.is_empty() {
+        return Err(CliError::argument(
+            "upload requires at least one local file",
+        ));
+    }
+    if raw_paths.iter().any(|path| !Path::new(path).is_absolute()) {
+        return Err(CliError::argument(
+            "upload paths must be absolute so the browser receives unambiguous local files",
+        ));
+    }
+    if raw_paths.iter().any(|path| !Path::new(path).is_file()) {
+        return Err(CliError::argument(
+            "one or more upload files are unavailable; use readable absolute paths",
+        ));
+    }
+    Ok(raw_paths)
+}
+
+#[async_trait]
+impl StepHandler for UploadStep {
+    fn name(&self) -> &'static str {
+        "upload"
+    }
+
+    fn is_browser_step(&self) -> bool {
+        true
+    }
+
+    async fn execute(
+        &self,
+        page: Option<Arc<dyn IPage>>,
+        params: &Value,
+        data: &Value,
+        args: &HashMap<String, Value>,
+    ) -> Result<Value, CliError> {
+        let pg = require_page(&page)?;
+        let object = params
+            .as_object()
+            .ok_or_else(|| CliError::pipeline("upload expects {selector, paths}"))?;
+        let selector = object
+            .get("selector")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| CliError::pipeline("upload requires a string selector"))?;
+        let paths_value = object
+            .get("paths")
+            .or_else(|| object.get("files"))
+            .ok_or_else(|| CliError::pipeline("upload requires paths"))?;
+        let paths = upload_paths(paths_value, data, args)?;
+        pg.upload_files(selector, &paths).await?;
+        Ok(data.clone())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ScrollStep
 // ---------------------------------------------------------------------------
 
@@ -609,6 +709,7 @@ pub fn register_browser_steps(registry: &mut StepRegistry) {
     registry.register(Arc::new(NavigateStep));
     registry.register(Arc::new(WaitStep));
     registry.register(Arc::new(EvaluateStep));
+    registry.register(Arc::new(UploadStep));
     registry.register(Arc::new(ScrollStep));
     registry.register(Arc::new(CollectStep));
     registry.register(Arc::new(BgFetchStep));
@@ -635,6 +736,7 @@ mod tests {
         evaluate_script: std::sync::Mutex<Option<String>>,
         evaluate_result: Value,
         current_url: String,
+        upload: std::sync::Mutex<Option<(String, Vec<String>)>>,
     }
 
     impl MockPage {
@@ -645,6 +747,7 @@ mod tests {
                 evaluate_script: std::sync::Mutex::new(None),
                 evaluate_result,
                 current_url: "https://example.com".to_string(),
+                upload: std::sync::Mutex::new(None),
             }
         }
 
@@ -697,6 +800,10 @@ mod tests {
             Ok(())
         }
         async fn type_text(&self, _selector: &str, _text: &str) -> Result<(), CliError> {
+            Ok(())
+        }
+        async fn upload_files(&self, selector: &str, paths: &[String]) -> Result<(), CliError> {
+            *self.upload.lock().unwrap() = Some((selector.to_string(), paths.to_vec()));
             Ok(())
         }
         async fn cookies(
@@ -760,6 +867,7 @@ mod tests {
         assert!(registry.get("navigate").is_some());
         assert!(registry.get("wait").is_some());
         assert!(registry.get("evaluate").is_some());
+        assert!(registry.get("upload").is_some());
         assert!(registry.get("scroll").is_some());
     }
 
@@ -823,6 +931,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn upload_step_renders_and_forwards_absolute_files() {
+        let path = std::env::temp_dir().join(format!(
+            "opencli-upload-step-{}-{}.jpg",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        std::fs::write(&path, b"test image").unwrap();
+        let path_string = path.to_string_lossy().to_string();
+        let mock = Arc::new(MockPage::new(json!(null)));
+        let mut args = HashMap::new();
+        args.insert("images".to_string(), json!(path_string));
+
+        let result = UploadStep
+            .execute(
+                Some(mock.clone()),
+                &json!({ "selector": "input[type=file]", "paths": "${{ args.images }}", "retry": false }),
+                &json!(null),
+                &args,
+            )
+            .await;
+        std::fs::remove_file(&path).unwrap();
+
+        assert!(result.is_ok());
+        assert_eq!(
+            *mock.upload.lock().unwrap(),
+            Some(("input[type=file]".to_string(), vec![path_string]))
+        );
+    }
+
+    #[tokio::test]
     async fn test_browser_step_requires_page() {
         let step = NavigateStep;
         let result = step
@@ -841,6 +982,7 @@ mod tests {
         assert!(NavigateStep.is_browser_step());
         assert!(WaitStep.is_browser_step());
         assert!(EvaluateStep.is_browser_step());
+        assert!(UploadStep.is_browser_step());
         assert!(ScrollStep.is_browser_step());
     }
 
