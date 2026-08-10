@@ -1,6 +1,6 @@
 site: bilibili
 name: favorite
-description: "读取指定 B 站收藏夹的视频；不传 --folder-id 时读取第一个收藏夹"
+description: "读取 B 站收藏内容；--all true 时导出全部收藏夹的全部条目（只读）"
 domain: www.bilibili.com
 strategy: cookie
 
@@ -8,7 +8,7 @@ args:
   limit:
     type: int
     default: 20
-    description: Number of results
+    description: "返回数量；仅在未传 --all true 时生效"
   page:
     type: int
     default: 1
@@ -16,8 +16,12 @@ args:
   folder_id:
     type: string
     description: "收藏夹 ID；可由 bilibili favorites 获取"
+  all:
+    type: bool
+    default: false
+    description: "读取全部页；未指定 --folder-id 时读取全部收藏夹"
 
-columns: [rank, title, author, plays, url]
+columns: [folder_id, folder, rank, bvid, title, author, favorite_time, published_at, duration_seconds, plays, description, cover, url, download_command]
 
 pipeline:
   # Prefer cached mid so we skip an extra nav-only identity call when possible.
@@ -33,8 +37,9 @@ pipeline:
 
   - evaluate: |
       (async () => {
-        const limit = ${{ args.limit }};
+        const limit = Number(${{ args.limit }});
         const pageNum = ${{ args.page }};
+        const wantAll = Boolean(args.all);
         let mid = String(data.mid || '').trim();
 
         // --- WBI helpers ---
@@ -142,29 +147,61 @@ pipeline:
           return { mid, rows: [] };
         }
         const requestedId = String(${{ args.folder_id | json }} || '').trim();
-        const folder = requestedId ? folders.find(item => String(item.id) === requestedId) : folders[0];
-        if (!folder) throw new Error('未找到收藏夹 ID: ' + requestedId);
-        const fid = folder.id;
-
-        const payload = await apiGet('/x/v3/fav/resource/list', {
-          media_id: fid,
-          pn: pageNum,
-          ps: Math.min(Number(limit), 40)
-        }, true);
-        if (payload?.code !== 0) {
-          throw new Error('获取收藏夹内容失败: ' + (payload?.message || payload?.code || 'unknown error'));
+        const selected = requestedId ? folders.filter(item => String(item.id) === requestedId) : (wantAll ? folders : [folders[0]]);
+        if (!selected.length) throw new Error('未找到收藏夹 ID: ' + requestedId);
+        const toIso = value => {
+          const n = Number(value || 0);
+          return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toISOString() : '';
+        };
+        const format = (item, folder, rank) => {
+          const bvid = String(item.bvid || '').trim();
+          const url = bvid ? 'https://www.bilibili.com/video/' + bvid : '';
+          return {
+            folder_id: String(folder.id || ''),
+            folder: String(folder.title || ''),
+            rank,
+            bvid,
+            title: String(item.title || ''),
+            author: String(item.upper?.name || ''),
+            favorite_time: toIso(item.fav_time),
+            published_at: toIso(item.pubtime || item.ctime),
+            duration_seconds: Number(item.duration || 0),
+            plays: Number(item.cnt_info?.play || 0),
+            description: String(item.intro || '').replace(/\s+/g, ' ').trim(),
+            cover: String(item.cover || ''),
+            url,
+            download_command: bvid ? 'opencli bilibili download ' + bvid : '',
+          };
+        };
+        const rows = [];
+        for (const folder of selected) {
+          let pn = wantAll ? 1 : Number(pageNum);
+          let rank = wantAll ? 1 : (pn - 1) * Math.min(Math.max(limit, 1), 40) + 1;
+          while (true) {
+            const payload = await apiGet('/x/v3/fav/resource/list', {
+              media_id: folder.id,
+              pn,
+              ps: wantAll ? 40 : Math.min(Math.max(limit, 1), 40)
+            }, true);
+            if (payload?.code !== 0) {
+              throw new Error('获取收藏夹内容失败: ' + (payload?.message || payload?.code || 'unknown error'));
+            }
+            const medias = payload?.data?.medias || [];
+            for (const item of medias) {
+              if (!wantAll && rows.length >= limit) break;
+              rows.push(format(item, folder, rank));
+              rank += 1;
+            }
+            const total = Number(payload?.data?.info?.media_count || folder.media_count || 0);
+            const folderRows = rows.filter(row => row.folder_id === String(folder.id)).length;
+            if (!wantAll || !medias.length || (total > 0 && folderRows >= total)) break;
+            pn += 1;
+          }
         }
-        const medias = payload?.data?.medias || [];
 
         return {
           mid,
-          rows: medias.slice(0, Number(limit)).map((item, i) => ({
-            rank: i + 1,
-            title: item.title || '',
-            author: item.upper?.name || '',
-            plays: item.cnt_info?.play || 0,
-            url: item.bvid ? 'https://www.bilibili.com/video/' + item.bvid : ''
-          })),
+          rows,
         };
       })()
   - kv_set:
