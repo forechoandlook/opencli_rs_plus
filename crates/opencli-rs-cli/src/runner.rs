@@ -6,7 +6,7 @@
 //!   3. Build the CLI, parse args.
 //!   4. Route to built-in commands (via `dispatch::dispatch_builtin`) or adapter execution.
 
-use opencli_rs_core::{AdapterSettings, Registry};
+use opencli_rs_core::{AdapterSettings, CliError, Registry};
 use opencli_rs_discovery::{discover_adapters, scan_dir_no_cache};
 use opencli_rs_output::format::{OutputFormat, RenderOptions};
 use opencli_rs_output::render;
@@ -71,6 +71,15 @@ pub async fn run() {
     match discover_adapters(&mut registry) {
         Ok(n) => tracing::debug!(count = n, "Discovered adapters"),
         Err(e) => tracing::warn!(error = %e, "Failed to discover adapters"),
+    }
+
+    // Installed plugins replace stale legacy definitions in
+    // ~/.opencli-rs/adapters. The checkout's adapters/ is intentionally loaded
+    // afterwards, so `cargo run` always exercises the code under development.
+    match load_plugin_adapters(&mut registry) {
+        Ok(n) if n > 0 => tracing::debug!(count = n, "Loaded plugin adapters"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!(error = %e, "Failed to load plugin adapters"),
     }
 
     let local_adapters_dir = std::path::PathBuf::from("adapters");
@@ -171,4 +180,34 @@ pub async fn run() {
         let app = build_cli(&registry);
         let _ = app.try_get_matches_from(vec!["opencli", site_name, "--help"]);
     }
+}
+
+/// Direct mode cannot depend on `opencli-rs-daemon` (the daemon already
+/// depends on this crate), so mirror its read-only plugin loading here.
+fn load_plugin_adapters(registry: &mut Registry) -> Result<usize, CliError> {
+    let plugins_dir = dirs::home_dir()
+        .map(|home| home.join(".opencli-rs").join("plugins"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".opencli-rs/plugins"));
+    if !plugins_dir.exists() {
+        return Ok(0);
+    }
+
+    let mut total = 0;
+    for entry in std::fs::read_dir(plugins_dir)?.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || !path.is_dir() {
+            continue;
+        }
+        match scan_dir_no_cache(&path, registry) {
+            Ok(count) => {
+                total += count;
+                tracing::debug!(plugin = %name, adapters = count, "Loaded plugin adapters");
+            }
+            Err(error) => {
+                tracing::warn!(plugin = %name, error = %error, "Failed to load plugin adapters");
+            }
+        }
+    }
+    Ok(total)
 }

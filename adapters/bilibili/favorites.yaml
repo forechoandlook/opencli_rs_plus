@@ -8,14 +8,14 @@ args:
   limit:
     type: int
     default: 20
-    description: "返回数量；仅在未传 --all true 时生效"
+    description: "总返回数量；大于 40 时自动翻页，--all true 时忽略"
   page:
     type: int
     default: 1
     description: Page number
   folder_id:
     type: string
-    description: "收藏夹 ID；可由 bilibili favorites 获取"
+    description: "可选收藏夹 ID；省略时读取默认收藏夹"
   all:
     type: bool
     default: false
@@ -79,8 +79,8 @@ pipeline:
 
   - evaluate: |
       (async () => {
-        const limit = Number(${{ args.limit }});
-        const pageNum = ${{ args.page }};
+        const limit = Math.max(Number(${{ args.limit }}) || 1, 1);
+        const pageNum = Math.max(Number(${{ args.page }}) || 1, 1);
         const wantAll = Boolean(args.all);
         let mid = String(data.mid || '').trim();
 
@@ -216,14 +216,15 @@ pipeline:
           };
         };
         const rows = [];
+        const pageSize = 40;
         for (const folder of selected) {
           let pn = wantAll ? 1 : Number(pageNum);
-          let rank = wantAll ? 1 : (pn - 1) * Math.min(Math.max(limit, 1), 40) + 1;
+          let rank = wantAll ? 1 : (pn - 1) * pageSize + 1;
           while (true) {
             const payload = await apiGet('/x/v3/fav/resource/list', {
               media_id: folder.id,
               pn,
-              ps: wantAll ? 40 : Math.min(Math.max(limit, 1), 40)
+              ps: pageSize
             }, true);
             if (payload?.code !== 0) {
               throw new Error('获取收藏夹内容失败: ' + (payload?.message || payload?.code || 'unknown error'));
@@ -236,7 +237,7 @@ pipeline:
             }
             const total = Number(payload?.data?.info?.media_count || folder.media_count || 0);
             const folderRows = rows.filter(row => row.folder_id === String(folder.id)).length;
-            if (!wantAll || !medias.length || (total > 0 && folderRows >= total)) break;
+            if ((!wantAll && rows.length >= limit) || !medias.length || (total > 0 && folderRows >= total)) break;
             pn += 1;
           }
         }

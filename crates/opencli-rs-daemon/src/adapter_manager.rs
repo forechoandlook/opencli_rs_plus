@@ -66,14 +66,6 @@ impl AdapterManager {
         // Load built-in adapters from ~/.opencli-rs/adapters/
         let home_count = discover_adapters(&mut registry)?;
 
-        // Load local adapters/ directory for development
-        let local_dir = PathBuf::from("adapters");
-        let local_count = if local_dir.exists() && local_dir.is_dir() {
-            scan_dir_no_cache(&local_dir, &mut registry)?
-        } else {
-            0
-        };
-
         // Load plugin adapters from ~/.opencli-rs/plugins/*/
         let plugin_manager = Arc::new(PluginManager::new());
         let plugin_count = plugin_manager
@@ -82,6 +74,15 @@ impl AdapterManager {
                 tracing::warn!(error = %e, "Failed to load plugin adapters");
                 0
             });
+
+        // A checkout is the development authority and must override an
+        // installed plugin with the same site/command.
+        let local_dir = PathBuf::from("adapters");
+        let local_count = if local_dir.exists() && local_dir.is_dir() {
+            scan_dir_no_cache(&local_dir, &mut registry)?
+        } else {
+            0
+        };
 
         tracing::info!(
             home_adapters = home_count,
@@ -167,16 +168,16 @@ impl AdapterManager {
             let mut registry = self.registry.write().await;
             *registry = Registry::new();
             let mut c = discover_adapters(&mut registry)?;
-            let local_dir = PathBuf::from("adapters");
-            if local_dir.exists() && local_dir.is_dir() {
-                c += scan_dir_no_cache(&local_dir, &mut registry)?;
-            }
             c += plugin_mgr
                 .load_into_registry(&mut registry)
                 .unwrap_or_else(|e| {
                     tracing::warn!(error = %e, "Failed to reload plugin adapters");
                     0
                 });
+            let local_dir = PathBuf::from("adapters");
+            if local_dir.exists() && local_dir.is_dir() {
+                c += scan_dir_no_cache(&local_dir, &mut registry)?;
+            }
             c
         };
         tracing::info!(count = count, "Adapters reloaded");

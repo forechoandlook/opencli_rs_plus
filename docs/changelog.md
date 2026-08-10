@@ -1,3 +1,10 @@
+# 2026-08-10
+
+## Direct CLI adapter precedence
+
+- **`favorites` 直连修复**：direct CLI 现与 daemon 使用同一 adapter 加载顺序，并加载已安装插件。官方插件中的 `bilibili favorites` 与 `zhihu favorites` 会覆盖 `~/.opencli-rs/adapters` 里遗留的同名目录/collection 定义，直接输出具体收藏条目；不再需要改用 collection 命令。
+- **B 站 `favorite` / `favorites` 翻页**：`--limit` 现在是总条数；超过站点单页上限 40 时会继续请求后续页，直到达到指定数量或收藏夹耗尽。
+
 # 2026-08-08
 
 ## 小红书与 B 站收藏全量导出
