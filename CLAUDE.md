@@ -1,14 +1,11 @@
 # CLAUDE.md
 
 ## Agents
-
 - 使用中文，当有问题解决不了的时候及时停下反思.
-- 开发新的adapters的时候 加载 playwright cli skills （使用--extension）尽可能使用api的方式，需要先通过playwright调试，最后固化为adapters 开发测试通过 `cargo run --` 实现, 参考 docs/develop.md
-- 功能修改等需要记录到 docs/changelog.md 中
+- 开发新的adapters的时候 先通过chrome cdp调试，最后固化为adapters 开发测试通过 `cargo run --` 实现
 - 保持项目简洁，并将获取cli这项任务完成到极致.
 
 ## 项目概述
-
 opencli-rs 用于从任意网站抓取信息,通过 浏览器插件实现登陆状态复用,yaml adapters 实现扩展。目前有两种模式: 
 - cli 模式, 每次执行都经历完整流程：启动浏览器、加载适配器、执行 pipeline、输出结果、退出。每次都会新建浏览器连接。
 - daemon 模式 docs/daemon.md ，常驻进程，Socket API 接收命令，浏览器连接复用，支持 adapter/plugin 管理与扩展 action API。
