@@ -3,9 +3,8 @@
 
 use anyhow::Result;
 use opencli_rs_core::{AdapterSettings, CliCommand, Registry};
-use opencli_rs_discovery::{discover_adapters, scan_dir_no_cache};
+use opencli_rs_discovery::discover_adapters;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -75,18 +74,8 @@ impl AdapterManager {
                 0
             });
 
-        // A checkout is the development authority and must override an
-        // installed plugin with the same site/command.
-        let local_dir = PathBuf::from("adapters");
-        let local_count = if local_dir.exists() && local_dir.is_dir() {
-            scan_dir_no_cache(&local_dir, &mut registry)?
-        } else {
-            0
-        };
-
         tracing::info!(
             home_adapters = home_count,
-            local_adapters = local_count,
             plugin_adapters = plugin_count,
             disabled = settings.disabled.len(),
             "Adapter manager initialized"
@@ -174,10 +163,6 @@ impl AdapterManager {
                     tracing::warn!(error = %e, "Failed to reload plugin adapters");
                     0
                 });
-            let local_dir = PathBuf::from("adapters");
-            if local_dir.exists() && local_dir.is_dir() {
-                c += scan_dir_no_cache(&local_dir, &mut registry)?;
-            }
             c
         };
         tracing::info!(count = count, "Adapters reloaded");

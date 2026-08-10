@@ -29,6 +29,7 @@ curl -fsSL https://github.com/forechoandlook/opencli_rs_plus/releases/latest/dow
 ```bash
 opencli --version
 opencli doctor
+opencli plugin install forechoandlook/opencli-adapters
 ```
 
 本地开发构建并安装 release 二进制：
@@ -94,18 +95,18 @@ opencli kv list
 
 ## 开发
 
-新增或修改 adapter 时，推荐流程是：
+Rust runtime 的开发与验证：
 
-1. 先用 Playwright 或浏览器调试把页面流程跑通
-2. 将验证过的逻辑固化到 YAML adapter 的 `evaluate` / pipeline 步骤
-3. 用 `cargo run -- <site> <command>` 做端到端测试
-4. 必要时更新 `docs/changelog.md`
+```bash
+cargo test
+cargo run -- --help
+```
 
-开发细节和 schema 约定见：
+YAML adapter 的开发、调试、回归和发布均在 [opencli-adapters](https://github.com/forechoandlook/opencli-adapters) 进行。本地开发时将该目录作为插件安装，修改会通过符号链接即时生效：
 
-- [docs/develop.md](docs/develop.md)
-- [docs/daemon.md](docs/daemon.md)
-- [docs/search.md](docs/search.md)
+```bash
+opencli plugin install /path/to/opencli-adapters
+```
 
 ## 目录结构
 
@@ -116,7 +117,6 @@ opencli kv list
 - `crates/opencli-rs-discovery` YAML 解析和缓存
 - `crates/opencli-rs-cli` CLI 入口与执行流程
 - `crates/opencli-rs-daemon` AdapterManager、PluginManager、Socket API
-- `adapters/` 运行时加载的 YAML adapter（产品核心）
 - `extension/` Chrome extension
 
 ## 版本与发布
@@ -132,6 +132,5 @@ opencli update --check
 ## 文档
 
 - [docs/daemon.md](docs/daemon.md)
-- [docs/develop.md](docs/develop.md)
 - [docs/search.md](docs/search.md)
 - [docs/changelog.md](docs/changelog.md)

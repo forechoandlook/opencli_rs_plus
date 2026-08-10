@@ -2,7 +2,7 @@
 
 ## Agents
 - 使用中文，当有问题解决不了的时候及时停下反思.
-- 开发新的adapters的时候 先通过chrome cdp调试，最后固化为adapters 开发测试通过 `cargo run --` 实现
+- 新增或修改 adapter 一律在 `/Users/zzwy/tmp/opencli-adapters` 进行：先通过 chrome cdp 调试，再通过本仓库构建的 `opencli` 以本地插件方式验证；本仓库不保存站点 YAML
 - 保持项目简洁，并将获取cli这项任务完成到极致.
 
 ## 项目概述
@@ -29,5 +29,5 @@ opencli-rs 用于从任意网站抓取信息,通过 浏览器插件实现登陆�
 
 ## 额外功能
 
-Adapter 发现: `adapter search`（子串，见 docs/search.md）。本地 KV: docs/develop.md。  
+Adapter 发现: `adapter search`（子串，见 docs/search.md）。本地 KV: `opencli kv --help`。
 已移除：tools/summary/feedback/job/history/sync/hidden/FTS/find/socket-exec（专注 adapter 质量）。

@@ -187,7 +187,7 @@ opencli plugin update
 opencli plugin uninstall my-plugin
 ```
 
-开发仍以本仓库 `adapters/` 为准；向用户分发时用 `scripts/sync-adapters-repo.sh` 同步到 [opencli-adapters](https://github.com/forechoandlook/opencli-adapters) 并打 tag。默认不自动静默覆盖已装插件。
+[opencli-adapters](https://github.com/forechoandlook/opencli-adapters) 独立维护官方 YAML adapter。开发时以本地路径安装为插件，Unix 上会建立符号链接，adapter 改动即时生效；默认不自动静默覆盖已装插件。
 
 安装/卸载/更新后 daemon 自动重新加载所有 adapter（等同于 `adapter.reload`）。
 

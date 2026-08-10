@@ -44,7 +44,7 @@ OPENCLI_API_DUMP=1 cargo run -- <site> <cmd>
 OPENCLI_CDP_ENDPOINT=http://127.0.0.1:9222 cargo run -- <site> <cmd>
 ```
 
-这一层能排除"browser-daemon 转发出问题"还是"页面/选择器本身有问题"。如果直连 CDP 还是不行，去 chrome-cdp / playwright-cli 里手动跑一遍探索流程（见 docs/develop.md Step 1），确认选择器/JS 逻辑本身是对的，再回来写回 YAML。
+这一层能排除"browser-daemon 转发出问题"还是"页面/选择器本身有问题"。如果直连 CDP 还是不行，去 chrome-cdp / playwright-cli 里手动跑一遍探索流程，确认选择器/JS 逻辑本身是对的，再在 [opencli-adapters](https://github.com/forechoandlook/opencli-adapters) 写回 YAML。
 
 ## 速查表
 
@@ -53,4 +53,4 @@ OPENCLI_CDP_ENDPOINT=http://127.0.0.1:9222 cargo run -- <site> <cmd>
 | 命令直接报错/panic | 第1层，看 VERBOSE 日志 |
 | 拿到空数据/字段缺失 | 第2层，API dump 对比 |
 | 卡住不返回/超时 | 第3层，确认插件连接状态，再直连 CDP |
-| 新写的 adapter 选择器不对 | 回 docs/develop.md，用 chrome-cdp/playwright-cli 重新探索，不要直接改 YAML 猜 |
+| 新写的 adapter 选择器不对 | 在 opencli-adapters 中用 chrome-cdp/playwright-cli 重新探索，不要直接改 YAML 猜 |

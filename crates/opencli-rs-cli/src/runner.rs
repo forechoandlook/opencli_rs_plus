@@ -74,21 +74,11 @@ pub async fn run() {
     }
 
     // Installed plugins replace stale legacy definitions in
-    // ~/.opencli-rs/adapters. The checkout's adapters/ is intentionally loaded
-    // afterwards, so `cargo run` always exercises the code under development.
+    // ~/.opencli-rs/adapters. Adapter development happens in plugin repositories.
     match load_plugin_adapters(&mut registry) {
         Ok(n) if n > 0 => tracing::debug!(count = n, "Loaded plugin adapters"),
         Ok(_) => {}
         Err(e) => tracing::warn!(error = %e, "Failed to load plugin adapters"),
-    }
-
-    let local_adapters_dir = std::path::PathBuf::from("adapters");
-    if local_adapters_dir.exists() && local_adapters_dir.is_dir() {
-        match scan_dir_no_cache(&local_adapters_dir, &mut registry) {
-            Ok(n) if n > 0 => tracing::debug!(count = n, "Loaded local dev adapters"),
-            Ok(_) => {}
-            Err(e) => tracing::warn!(error = %e, "Failed to load local dev adapters"),
-        }
     }
 
     // Drop disabled adapters so they disappear from help and cannot run in direct mode.

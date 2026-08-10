@@ -31,18 +31,13 @@ jobs:
             --exclude opencli-rs-cli \
             --exclude opencli-rs-external
 
-  # ── Step 2：打包 adapters + extension（与平台无关，只需一次）────
+  # ── Step 2：打包 Chrome extension（与平台无关，只需一次）────────
   package-assets:
     name: Package assets
     needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Package adapters
-        run: |
-          tar -czf adapters.tar.gz adapters/
-          sha256sum adapters.tar.gz > adapters.tar.gz.sha256
 
       - name: Build Chrome extension
         working-directory: extension
@@ -62,8 +57,6 @@ jobs:
         with:
           name: packages
           path: |
-            adapters.tar.gz
-            adapters.tar.gz.sha256
             opencli-extension.zip
             opencli-extension.zip.sha256
           retention-days: 1
@@ -210,7 +203,7 @@ jobs:
             curl -fsSL https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/install.sh | bash
             ```
 
-            脚本会自动检测平台，下载 `opencli` 二进制并安装 adapters。
+            脚本会自动检测平台并下载 `opencli` 二进制。Adapter 由独立插件仓库发布。
 
             ### 手动安装
 
@@ -229,14 +222,13 @@ jobs:
             sudo mv opencli /usr/local/bin/
             ```
 
-            **2. 安装 adapters（必须）**
+            **2. 安装官方 adapter 插件**
 
             ```bash
-            mkdir -p ~/.opencli-rs
-            curl -L .../adapters.tar.gz | tar -xz -C ~/.opencli-rs/
+            opencli plugin install forechoandlook/opencli-adapters
             ```
 
-            **3. 安装 Chrome 扩展（必须）**
+            **3. 安装 Chrome 扩展（需要访问浏览器登录态时）**
 
             下载 `opencli-extension.zip`，在 Chrome `chrome://extensions` 开启开发者模式，
             解压后点击「加载已解压的扩展程序」选择 `dist/` 目录。
@@ -249,14 +241,11 @@ jobs:
             opencli adapter disable wikipedia  # 关掉不需要的站
             opencli daemon start               # 后台 daemon（插件/扩展）
             opencli daemon status
-            opencli plugin install forechoandlook/opencli-adapters
             ```
           files: |
             artifacts/opencli-macos-arm64*
             artifacts/opencli-linux-x86_64*
             artifacts/opencli-windows-x86_64*
-            artifacts/adapters.tar.gz
-            artifacts/adapters.tar.gz.sha256
             artifacts/opencli-extension.zip
             artifacts/opencli-extension.zip.sha256
           fail_on_unmatched_files: false
@@ -286,7 +275,6 @@ jobs:
           REPO="__REPO__"
           BASE_URL="__BASE_URL__"
           INSTALL_DIR="${OPENCLI_INSTALL_DIR:-$HOME/.local/bin}"
-          DATA_DIR="${OPENCLI_DATA_DIR:-$HOME/.opencli-rs}"
 
           OS="$(uname -s)"
           case "$OS" in
@@ -317,16 +305,13 @@ jobs:
           fi
           echo "✓ Installed opencli to $INSTALL_DIR/"
 
-          mkdir -p "$DATA_DIR"
-
-          echo "Downloading adapters..."
-          curl -fsSL "${BASE_URL}/adapters.tar.gz" | tar -xz -C "$DATA_DIR"
-          echo "✓ Adapters installed to $DATA_DIR/adapters/"
-
           echo ""
           echo "Installation complete!"
           echo ""
-          echo "Next step: install the Chrome extension"
+          echo "Next step: install the official adapter plugin"
+          echo "  opencli plugin install forechoandlook/opencli-adapters"
+          echo ""
+          echo "To reuse browser login state, install the Chrome extension"
           echo "  1. Download opencli-extension.zip from:"
           echo "     ${BASE_URL}/opencli-extension.zip"
           echo "  2. Unzip it"
