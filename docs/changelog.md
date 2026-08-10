@@ -1,3 +1,10 @@
+# 2026-08-10 — v0.0.6
+
+## Release CI 修复
+
+- **删除** release workflow 末尾的 `sync-public-tools` job：`GH_PAT` 无法向 `public_tools` 推送，导致 v0.0.5 在资产已上传后仍被标红失败。
+- workspace 版本对齐到 **0.0.6**（`Cargo.toml` / `Cargo.lock`），满足 `scripts/verify-release-version.sh`（v0.0.6 标签曾因仍是 0.0.5 而失败）。
+
 # 2026-08-10 — v0.0.5
 
 ## Release v0.0.5

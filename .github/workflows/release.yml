@@ -355,30 +355,3 @@ jobs:
         run: |
           gh release upload "${{ github.ref_name }}" install.sh --clobber
           gh release upload "${{ github.ref_name }}" latest --clobber
-
-  sync-public-tools:
-    name: Sync public tools
-    needs: upload-install-script
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Sync docs to public_tools
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          set -euo pipefail
-          git clone https://x-access-token:${GITHUB_TOKEN}@github.com/forechoandlook/public_tools.git _public_tools
-          mkdir -p _public_tools/skills/opencli_plus
-          rm -rf _public_tools/skills/opencli_plus
-          cp -r skills/ _public_tools/skills/
-          cp README.md _public_tools/opencli_plus.md
-          cd _public_tools
-          git config user.email "ci@github.com"
-          git config user.name "GitHub Actions"
-          git add .
-          git diff --cached --quiet || git commit -m "sync: tools docs from opencli-rs ${GITHUB_REF_NAME}"
-          git push
