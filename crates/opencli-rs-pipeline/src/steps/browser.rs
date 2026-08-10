@@ -70,12 +70,12 @@ impl StepHandler for NavigateStep {
         let pg = require_page(&page)?;
         let ctx = default_ctx(data, args);
 
-        let (url, settle_ms, wait_until, reuse_current) = match params {
+        let (url, settle_ms, wait_until, reuse_current, reuse_existing_tab) = match params {
             // navigate: "https://example.com"
             Value::String(s) => {
                 let rendered = render_template_str(s, &ctx)?;
                 let url = rendered.as_str().unwrap_or("").to_string();
-                (url, None, None, false)
+                (url, None, None, false, false)
             }
             // navigate: { url: "...", waitUntil: commit, reuseCurrent: true }
             Value::Object(obj) => {
@@ -98,7 +98,12 @@ impl StepHandler for NavigateStep {
                     .or_else(|| obj.get("reuse_current"))
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                (url, settle, wait_until, reuse_current)
+                let reuse_existing_tab = obj
+                    .get("reuseExistingTab")
+                    .or_else(|| obj.get("reuse_existing_tab"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                (url, settle, wait_until, reuse_current, reuse_existing_tab)
             }
             _ => {
                 return Err(CliError::pipeline(
@@ -114,10 +119,15 @@ impl StepHandler for NavigateStep {
         };
         let already_at_target = reuse_current && same_document_url(&current_url, &url);
         if !already_at_target {
-            let options = wait_until.map(|wait_until| GotoOptions {
-                wait_until: Some(wait_until),
-                timeout_ms: None,
-            });
+            let options = if wait_until.is_some() || reuse_existing_tab {
+                Some(GotoOptions {
+                    wait_until,
+                    timeout_ms: None,
+                    reuse_existing_tab,
+                })
+            } else {
+                None
+            };
             pg.goto(&url, options).await?;
         }
 
@@ -588,6 +598,7 @@ async fn same_origin_fetch(
                 // subresources to finish loading before running fetch.
                 wait_until: Some("commit".to_string()),
                 timeout_ms: None,
+                reuse_existing_tab: false,
             }),
         )
         .await?;

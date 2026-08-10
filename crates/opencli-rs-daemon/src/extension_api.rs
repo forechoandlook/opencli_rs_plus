@@ -118,17 +118,21 @@ fn context_args(context: &ContextAction, current_url: &str) -> Result<HashMap<St
 }
 
 fn context_matches(domain: Option<&str>, context: &ContextAction, url: &Url) -> bool {
-    let Some(domain) = domain.map(|value| value.trim().trim_end_matches('.').to_ascii_lowercase())
-    else {
-        return false;
-    };
     let Some(host) = url
         .host_str()
         .map(|value| value.trim_end_matches('.').to_ascii_lowercase())
     else {
         return false;
     };
-    if host != domain && !host.ends_with(&format!(".{domain}")) {
+    let domains = if context.hosts.is_empty() {
+        domain.into_iter().collect::<Vec<_>>()
+    } else {
+        context.hosts.iter().map(String::as_str).collect()
+    };
+    if !domains.into_iter().any(|domain| {
+        let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+        host == domain || host.ends_with(&format!(".{domain}"))
+    }) {
         return false;
     }
     context.paths.is_empty()
@@ -202,6 +206,7 @@ mod tests {
     fn context_url_must_match_domain_and_path() {
         let context = ContextAction {
             title: "Download".into(),
+            hosts: vec![],
             paths: vec!["/explore/*".into()],
             active_tab: Some(opencli_rs_core::ActiveTabAction {
                 use_pipeline: true,
@@ -223,6 +228,59 @@ mod tests {
             Some("www.xiaohongshu.com"),
             &context,
             &Url::parse("https://example.com/explore/note").unwrap()
+        ));
+    }
+
+    #[test]
+    fn context_url_matches_bilibili_favorites_for_any_user_mid() {
+        let context = ContextAction {
+            title: "Save favorites".into(),
+            hosts: vec!["space.bilibili.com".into()],
+            paths: vec!["/*/favlist".into()],
+            active_tab: Some(opencli_rs_core::ActiveTabAction {
+                use_pipeline: false,
+                extract: Some("(() => [])()".into()),
+            }),
+            args: HashMap::new(),
+        };
+        assert!(context_matches(
+            Some("www.bilibili.com"),
+            &context,
+            &Url::parse("https://space.bilibili.com/404691455/favlist?fid=335790455").unwrap()
+        ));
+        assert!(context_matches(
+            Some("www.bilibili.com"),
+            &context,
+            &Url::parse("https://space.bilibili.com/1/favlist").unwrap()
+        ));
+        assert!(!context_matches(
+            Some("www.bilibili.com"),
+            &context,
+            &Url::parse("https://space.bilibili.com/404691455/video").unwrap()
+        ));
+    }
+
+    #[test]
+    fn context_url_matches_xiaohongshu_profile_with_dynamic_user_id() {
+        let context = ContextAction {
+            title: "Export favorites".into(),
+            hosts: vec![],
+            paths: vec!["/user/profile/*".into()],
+            active_tab: Some(opencli_rs_core::ActiveTabAction {
+                use_pipeline: false,
+                extract: Some("(() => [])()".into()),
+            }),
+            args: HashMap::new(),
+        };
+        assert!(context_matches(
+            Some("www.xiaohongshu.com"),
+            &context,
+            &Url::parse("https://www.xiaohongshu.com/user/profile/55b21552b7ba226b7385f107?tab=fav&subTab=note").unwrap()
+        ));
+        assert!(!context_matches(
+            Some("www.xiaohongshu.com"),
+            &context,
+            &Url::parse("https://www.xiaohongshu.com/explore/6a7467e600000000280338da").unwrap()
         ));
     }
 }

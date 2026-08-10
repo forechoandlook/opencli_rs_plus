@@ -37,7 +37,6 @@ jobs:
           cargo test \
             --workspace \
             --exclude opencli-rs-browser \
-            --exclude opencli-rs-ai \
             --exclude opencli-rs-cli \
             --exclude opencli-rs-external \
             -- --test-threads=4

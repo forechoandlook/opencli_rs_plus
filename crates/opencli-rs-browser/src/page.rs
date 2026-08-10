@@ -52,8 +52,13 @@ impl DaemonPage {
 impl IPage for DaemonPage {
     async fn goto(&self, url: &str, options: Option<GotoOptions>) -> Result<(), CliError> {
         let mut cmd = self.cmd("navigate").await.with_url(url);
-        if let Some(wait_until) = options.and_then(|options| options.wait_until) {
-            cmd = cmd.with_wait_until(wait_until);
+        if let Some(options) = options {
+            if let Some(wait_until) = options.wait_until {
+                cmd = cmd.with_wait_until(wait_until);
+            }
+            if options.reuse_existing_tab {
+                cmd = cmd.with_reuse_existing_tab(true);
+            }
         }
         let result = self.send(cmd).await?;
         // Pin subsequent commands to the tab that was actually navigated.

@@ -161,6 +161,26 @@ describe('background tab isolation', () => {
     });
   });
 
+  it('borrows an exact user-page match only when navigation explicitly opts in', async () => {
+    const { chrome, tabs, update } = createChromeMock();
+    tabs[1].url = 'https://user.example/favorites';
+    vi.stubGlobal('chrome', chrome);
+
+    const mod = await import('./background');
+    const result = await mod.__test__.handleNavigate({
+      id: 'borrow',
+      action: 'navigate',
+      url: 'https://user.example/favorites',
+      reuse_existing_tab: true,
+      workspace: 'site:user',
+    }, 'site:user');
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual(expect.objectContaining({ tabId: 2, reused: true }));
+    expect(update).not.toHaveBeenCalled();
+    await expect(mod.__test__.resolveTabId(2, 'site:user')).resolves.toBe(2);
+  });
+
   it('creates a minimized dedicated window instead of using a user window', async () => {
     const { chrome } = createChromeMock();
     vi.stubGlobal('chrome', chrome);

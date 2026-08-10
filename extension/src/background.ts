@@ -151,9 +151,9 @@ function scheduleReconnect(): void {
 }
 
 // ─── Automation session ───────────────────────────────────────────────
-// Uses a dedicated minimized Chrome window. Automation never shares a user's
-// normal window or tabs: sharing looks like a new site tab to the user, and
-// reusing a visible tab would let `navigate` refresh the page they are reading.
+// Uses a dedicated minimized Chrome window. A YAML adapter can explicitly opt
+// into borrowing a user tab, but only when that tab already has the exact
+// target URL. Borrowed tabs are never cached, closed, or navigated.
 
 type AutomationSession = {
   tabIds: Set<number>;
@@ -162,6 +162,7 @@ type AutomationSession = {
 };
 
 const automationSessions = new Map<string, AutomationSession>();
+const borrowedTabWorkspaces = new Map<number, string>();
 const PAGE_CACHE_LIMIT = 10;
 const AUTOMATION_STATE_STORAGE_KEY = 'opencliAutomationStateV1';
 let automationWindowId: number | null = null;
@@ -249,6 +250,7 @@ function forgetTab(workspace: string, tabId: number): void {
   if (!session) return;
   session.tabIds.delete(tabId);
   session.tabLastUsedAt.delete(tabId);
+  if (borrowedTabWorkspaces.get(tabId) === workspace) borrowedTabWorkspaces.delete(tabId);
   if (!session.tabIds.size) automationSessions.delete(workspace);
 }
 
@@ -336,6 +338,7 @@ chrome.windows.onRemoved.addListener((windowId) => {
 
 // Track when our tabs are closed externally
 chrome.tabs.onRemoved.addListener((tabId) => {
+  borrowedTabWorkspaces.delete(tabId);
   for (const workspace of automationSessions.keys()) {
     forgetTab(workspace, tabId);
   }
@@ -438,6 +441,15 @@ async function resolveTabId(tabId: number | undefined, workspace: string): Promi
   // Even when an explicit tabId is provided, validate it is still debuggable.
   // This prevents issues when extensions hijack the tab URL to chrome-extension://
   // or when the tab has been closed by the user.
+  if (tabId !== undefined && borrowedTabWorkspaces.get(tabId) === workspace) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (isDebuggableUrl(tab.url)) return tabId;
+      borrowedTabWorkspaces.delete(tabId);
+    } catch {
+      borrowedTabWorkspaces.delete(tabId);
+    }
+  }
   if (tabId !== undefined && automationSessions.get(workspace)?.tabIds.has(tabId)) {
     try {
       const tab = await chrome.tabs.get(tabId);
@@ -480,6 +492,15 @@ async function resolveTabId(tabId: number | undefined, workspace: string): Promi
   trackTab(workspace, newTab.id);
   await enforcePageCacheLimit(newTab.id);
   return newTab.id;
+}
+
+async function findExactUserTab(targetUrl: string): Promise<number | undefined> {
+  const tabs = await chrome.tabs.query({});
+  const match = tabs
+    .filter((tab) => tab.id !== undefined && tab.windowId !== automationWindowId && isDebuggableUrl(tab.url))
+    .filter((tab) => isSameNavigationTarget(tab.url ?? '', targetUrl))
+    .sort((left, right) => Number(Boolean(right.active)) - Number(Boolean(left.active)))[0];
+  return match?.id;
 }
 
 async function listAutomationTabs(workspace: string): Promise<chrome.tabs.Tab[]> {
@@ -528,12 +549,17 @@ async function handleUpload(cmd: Command, workspace: string): Promise<Result> {
 
 async function handleNavigate(cmd: Command, workspace: string): Promise<Result> {
   if (!cmd.url) return { id: cmd.id, ok: false, error: 'Missing url' };
-  const tabId = await resolveTabId(cmd.tabId, workspace);
+  const targetUrl = cmd.url;
+  const borrowedTabId = cmd.reuse_existing_tab ? await findExactUserTab(targetUrl) : undefined;
+  const tabId = borrowedTabId ?? await resolveTabId(cmd.tabId, workspace);
+  if (borrowedTabId !== undefined) {
+    borrowedTabWorkspaces.set(borrowedTabId, workspace);
+    console.log(`[navigate] BORROWED existing user tab url=${targetUrl} tabId=${borrowedTabId}`);
+  }
 
   // Capture the current URL before navigation to detect actual URL change
   const beforeTab = await chrome.tabs.get(tabId);
   const beforeUrl = beforeTab.url ?? '';
-  const targetUrl = cmd.url;
   const waitUntilCommit = cmd.wait_until === 'commit';
 
   // A same-origin API fetch routinely asks to navigate to the page that is
@@ -855,6 +881,7 @@ chrome.runtime.onMessage.addListener((message: { type: string; message?: string;
 export const __test__ = {
   handleTabs,
   handleSessions,
+  handleNavigate,
   resolveTabId,
   getAutomationState,
   isSameNavigationTarget,

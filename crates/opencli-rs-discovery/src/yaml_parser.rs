@@ -287,6 +287,7 @@ name: download
 domain: example.com
 context:
   title: Download current item
+  hosts: ["items.example.com"]
   paths: ["/item/*"]
   activeTab:
     usePipeline: true
@@ -296,6 +297,7 @@ context:
         let cmd = parse_yaml_adapter(yaml).unwrap();
         let context = cmd.context.unwrap();
         assert_eq!(context.title, "Download current item");
+        assert_eq!(context.hosts, vec!["items.example.com"]);
         assert_eq!(context.paths, vec!["/item/*"]);
         assert!(context.active_tab.unwrap().use_pipeline);
         assert_eq!(context.args.get("url"), Some(&"current_url".to_string()));

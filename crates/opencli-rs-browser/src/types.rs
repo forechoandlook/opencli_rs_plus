@@ -14,6 +14,10 @@ pub struct DaemonCommand {
     /// the default waits for the page load event.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<String>,
+    /// When true, a navigation may borrow an already open user tab that is
+    /// already at the exact destination. It is never added to the cache.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reuse_existing_tab: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,6 +52,7 @@ impl DaemonCommand {
             code: None,
             url: None,
             wait_until: None,
+            reuse_existing_tab: None,
             workspace: None,
             tab_id: None,
             format: None,
@@ -72,6 +77,11 @@ impl DaemonCommand {
 
     pub fn with_wait_until(mut self, wait_until: impl Into<String>) -> Self {
         self.wait_until = Some(wait_until.into());
+        self
+    }
+
+    pub fn with_reuse_existing_tab(mut self, reuse_existing_tab: bool) -> Self {
+        self.reuse_existing_tab = Some(reuse_existing_tab);
         self
     }
 

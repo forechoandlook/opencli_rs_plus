@@ -32,7 +32,7 @@ context:
     note-id: current_url
 ```
 
-daemon 仅负责 action 发现，扩展会解释 YAML 的 `activeTab` 计划：`usePipeline` 复用 adapter 既有 `evaluate`/`limit`/`download` 步骤，但跳过 `navigate`；`extract` 则用于直接读取当前页面的简短提取器。扩展只读取用户已打开页面的 DOM/状态并通过浏览器下载 API 落盘，不会导航、滚动、点击、创建自动化窗口或写入任务面板。adapter 需要显式写出 `activeTab` 才能在当前页运行；daemon 仍会校验 `domain` 与 `paths`，API 只接受 `chrome-extension://` Origin；网页不能跨域调用。扩展和 daemon 默认通过 `127.0.0.1:10009` 通信。
+daemon 仅负责 action 发现，扩展会解释 YAML 的 `activeTab` 计划：`usePipeline` 复用 adapter 既有 `evaluate`/`limit`/`download` 步骤，但跳过 `navigate`；`extract` 则用于直接读取当前页面的简短提取器。扩展只读取用户已打开页面的 DOM/状态并通过浏览器下载 API 落盘，不会导航、滚动、点击、创建自动化窗口或写入任务面板。adapter 需要显式写出 `activeTab` 才能在当前页运行；daemon 默认会校验 adapter `domain` 与 `paths`，当页面使用另一明确子域时可用 `context.hosts` 声明允许的主机名；API 只接受 `chrome-extension://` Origin，网页不能跨域调用。扩展和 daemon 默认通过 `127.0.0.1:10009` 通信。
 
 新增当前页面能力时，先在登录态页面验证只读提取逻辑，再优先用 `usePipeline: true` 复用已有 adapter YAML；只有原 pipeline 包含 `tap`、`fetch` 等非当前页步骤时才在 `activeTab.extract` 增加短提取器。当前页执行会运行该 adapter 的 YAML `evaluate`，所以只对用户已启用的、受信任 adapter 开放；扩展不会接受网页传入的脚本。
 

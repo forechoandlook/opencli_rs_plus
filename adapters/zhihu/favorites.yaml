@@ -1,0 +1,88 @@
+site: zhihu
+name: favorites
+description: "导出当前账号全部知乎收藏夹中的具体条目（只读）"
+domain: www.zhihu.com
+strategy: cookie
+browser: true
+timeoutSeconds: 180
+
+args:
+  collection_id:
+    type: str
+    required: false
+    description: "可选：只读取此收藏夹；省略时遍历当前账号全部收藏夹"
+  limit:
+    type: int
+    default: 0
+    description: "每个收藏夹的最大条目数；0 表示不裁剪"
+
+columns: [collection_id, collection, rank, type, title, author, published_at, votes, excerpt, url]
+
+pipeline:
+  - navigate:
+      url: https://www.zhihu.com/
+      waitUntil: commit
+      reuseExistingTab: true
+  - evaluate:
+      retry: false
+      js: |
+        (async () => {
+          const requestedId = String(args.collection_id || '').trim();
+          const limit = Math.max(Number(args.limit || 0), 0);
+          const get = async (url) => {
+            const response = await fetch(url, { credentials: 'include' });
+            const payload = await response.json();
+            if (!response.ok || payload?.error) throw new Error('知乎收藏读取失败: ' + (payload?.error?.message || response.status));
+            return payload;
+          };
+          const toIso = (value) => {
+            const n = Number(value || 0);
+            return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toISOString() : '';
+          };
+          let collections = [];
+          if (requestedId) {
+            collections = [{ id: requestedId, title: '' }];
+          } else {
+            let offset = 0;
+            while (true) {
+              const payload = await get('https://www.zhihu.com/api/v4/people/self/collections?limit=20&offset=' + offset);
+              const page = Array.isArray(payload?.data) ? payload.data : [];
+              collections.push(...page);
+              if (!page.length || payload?.paging?.is_end) break;
+              offset += page.length;
+            }
+          }
+          const rows = [];
+          for (const collection of collections) {
+            const collectionId = String(collection?.id || requestedId || '');
+            if (!collectionId) continue;
+            const collectionTitle = String(collection?.title || '');
+            let offset = 0;
+            let rank = 1;
+            while (true) {
+              const payload = await get('https://www.zhihu.com/api/v4/collections/' + encodeURIComponent(collectionId) + '/items?limit=20&offset=' + offset);
+              const page = Array.isArray(payload?.data) ? payload.data : [];
+              for (const item of page) {
+                if (limit > 0 && rank > limit) break;
+                const content = item?.content || {};
+                const question = content?.question || {};
+                rows.push({
+                  collection_id: collectionId,
+                  collection: collectionTitle,
+                  rank,
+                  type: String(content?.type || ''),
+                  title: String(content?.title || content?.name || question?.title || ''),
+                  author: String(content?.author?.name || ''),
+                  published_at: toIso(content?.created_time || content?.updated_time),
+                  votes: Number(content?.voteup_count || 0),
+                  excerpt: String(content?.excerpt || '').replace(/\s+/g, ' ').trim(),
+                  url: String(content?.url || ''),
+                });
+                rank += 1;
+              }
+              if (!page.length || payload?.paging?.is_end || (limit > 0 && rank > limit)) break;
+              offset += page.length;
+            }
+          }
+          return rows;
+        })()

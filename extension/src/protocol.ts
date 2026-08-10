@@ -21,6 +21,8 @@ export interface Command {
   url?: string;
   /** Navigation readiness; commit returns as soon as the target URL is active. */
   wait_until?: 'commit' | 'load';
+  /** Borrow an already open tab only when it exactly matches the target URL. */
+  reuse_existing_tab?: boolean;
   /** Sub-operation for tabs: list, new, close, select */
   op?: 'list' | 'new' | 'close' | 'select';
   /** Tab index for tabs select/close */

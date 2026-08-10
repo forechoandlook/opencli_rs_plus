@@ -49,6 +49,10 @@ pub struct ActiveTabAction {
 pub struct ContextAction {
     /// Short label shown in the extension popup.
     pub title: String,
+    /// Optional exact hostnames for this action. When omitted, adapter `domain`
+    /// remains the matching boundary.
+    #[serde(default)]
+    pub hosts: Vec<String>,
     /// URL paths this action accepts. `*` matches any sequence of characters.
     #[serde(default)]
     pub paths: Vec<String>,

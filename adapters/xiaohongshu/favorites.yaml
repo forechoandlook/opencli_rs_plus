@@ -23,7 +23,8 @@ columns: [id, title, author, favorite_time, likes, type, url, download_command]
 
 context:
   title: "导出当前个人收藏"
-  paths: ["/user/profile/"]
+  # 个人主页路由的末段是用户 ID，收藏页 query 由提取器再严格校验。
+  paths: ["/user/profile/*"]
   activeTab:
     extract: |
       (() => {
@@ -105,6 +106,7 @@ pipeline:
       url: ${{ data.resolveUrl }}
       settleMs: 2000
       reuseCurrent: true
+      reuseExistingTab: true
       retry: false
   # 4) Authoritative me from main-site userInfo; detect account switch
   - evaluate:
@@ -161,6 +163,7 @@ pipeline:
       url: ${{ data.favUrl }}
       settleMs: 2000
       reuseCurrent: true
+      reuseExistingTab: true
       retry: false
   - evaluate:
       retry: false

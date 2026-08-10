@@ -11,6 +11,11 @@ pub struct GotoOptions {
     pub wait_until: Option<String>,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+    /// Reuse an already open user tab only when it is already at the exact
+    /// target URL. The extension borrows it for this command and never owns,
+    /// closes, or navigates it.
+    #[serde(default)]
+    pub reuse_existing_tab: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

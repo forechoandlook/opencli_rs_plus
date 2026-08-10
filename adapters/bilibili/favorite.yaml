@@ -33,7 +33,9 @@ pipeline:
       key: bilibili:me.mid
       field: mid
       only_if_empty: true
-  - navigate: https://www.bilibili.com
+  - navigate:
+      url: https://www.bilibili.com
+      reuseExistingTab: true
 
   - evaluate: |
       (async () => {
