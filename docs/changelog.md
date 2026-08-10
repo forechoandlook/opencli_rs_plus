@@ -1,4 +1,8 @@
-# 2026-08-10
+# 2026-08-10 — v0.0.5
+
+## Release v0.0.5
+
+聚焦 adapter：本地 KV、enable/disable、plugin 分发；砍掉 tools/summary/feedback/job/FTS/history/sync 等平台旁路。详见下方条目。
 
 ## 再精简：history / sync / hidden / socket exec / 顶层 status
 
