@@ -48,6 +48,8 @@ fn collect_yaml_files(dir: &Path) -> Vec<PathBuf> {
         } else if path
             .extension()
             .map_or(false, |e| e == "yaml" || e == "yml")
+            // meta.yaml is site-level metadata (name/description/version), not a command adapter
+            && path.file_name().and_then(|n| n.to_str()) != Some("meta.yaml")
         {
             result.push(path);
         }

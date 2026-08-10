@@ -1,58 +1,15 @@
 //! Adapter manager: loads adapters from discovery, manages enabled/disabled state,
-//! supports sync from arbitrary folders, and exposes search.
+//! supports sync from arbitrary folders, and simple substring search.
 
 use anyhow::Result;
-use opencli_rs_core::{CliCommand, Registry};
+use opencli_rs_core::{AdapterSettings, CliCommand, Registry};
 use opencli_rs_discovery::{discover_adapters, scan_dir_no_cache};
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::index::AdapterIndex;
 use crate::plugin::PluginManager;
-
-/// Settings file stored at ~/.opencli-rs/adapter_settings.json
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct AdapterSettings {
-    /// List of "site command" names that are disabled
-    #[serde(default)]
-    pub disabled: Vec<String>,
-
-    /// List of "site command" names that are hidden (not shown in help)
-    #[serde(default)]
-    pub hidden: Vec<String>,
-}
-
-impl AdapterSettings {
-    fn path() -> PathBuf {
-        dirs::home_dir()
-            .map(|h| h.join(".opencli-rs").join("adapter_settings.json"))
-            .unwrap_or_else(|| PathBuf::from("adapter_settings.json"))
-    }
-
-    pub fn load() -> Self {
-        let path = Self::path();
-        if !path.exists() {
-            return Self::default();
-        }
-        fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
-    }
-
-    pub fn save(&self) -> Result<()> {
-        let path = Self::path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let s = serde_json::to_string_pretty(self)?;
-        fs::write(&path, s)?;
-        Ok(())
-    }
-}
 
 /// Loaded adapter entry with metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,11 +28,10 @@ pub struct AdapterEntry {
     pub updated_at: Option<String>,
     pub context: Option<opencli_rs_core::ContextAction>,
     pub enabled: bool,
-    pub hidden: bool,
 }
 
 impl AdapterEntry {
-    fn from_cmd(cmd: &CliCommand, enabled: bool, hidden: bool) -> Self {
+    fn from_cmd(cmd: &CliCommand, enabled: bool) -> Self {
         Self {
             site: cmd.site.clone(),
             name: cmd.name.clone(),
@@ -91,7 +47,6 @@ impl AdapterEntry {
             updated_at: cmd.updated_at.clone(),
             context: cmd.context.clone(),
             enabled,
-            hidden,
         }
     }
 }
@@ -99,8 +54,6 @@ impl AdapterEntry {
 /// Adapter manager owns the registry and settings, exposing query and mutation APIs.
 pub struct AdapterManager {
     registry: RwLock<Registry>,
-    settings: RwLock<AdapterSettings>,
-    pub index: Arc<AdapterIndex>,
     plugin_manager: Arc<PluginManager>,
 }
 
@@ -138,149 +91,73 @@ impl AdapterManager {
             "Adapter manager initialized"
         );
 
-        // Initialize FTS index
-        let index_path = dirs::home_dir()
-            .map(|h| h.join(".opencli-rs").join("index.db"))
-            .unwrap_or_else(|| PathBuf::from("index.db"));
-        let index = Arc::new(AdapterIndex::new(index_path)?);
-
-        let manager = Self {
+        Ok(Self {
             registry: RwLock::new(registry),
-            settings: RwLock::new(settings),
-            index,
             plugin_manager,
-        };
-
-        // Build initial FTS index (incremental: skips unchanged adapters on restart)
-        let all = manager.list_adapters().await;
-        manager.index.sync(&all)?;
-
-        Ok(manager)
+        })
     }
 
     /// Return all adapters (including disabled), with their current enabled/disabled status.
     pub async fn list_adapters(&self) -> Vec<AdapterEntry> {
         let registry = self.registry.read().await;
-        let settings = self.settings.read().await;
+        let settings = AdapterSettings::load();
 
         registry
             .all_commands()
             .iter()
             .map(|cmd| {
                 let full_name = cmd.full_name();
-                let hidden = settings.hidden.contains(&full_name);
-                let enabled = !settings.disabled.contains(&full_name);
-                AdapterEntry::from_cmd(cmd, enabled, hidden)
+                let enabled = !settings.is_disabled(&full_name);
+                AdapterEntry::from_cmd(cmd, enabled)
             })
             .collect()
     }
 
-    /// Return only enabled (not disabled) adapters, optionally excluding hidden ones.
-    #[allow(dead_code)]
-    pub async fn list_enabled(&self, include_hidden: bool) -> Vec<AdapterEntry> {
+    /// Simple case-insensitive substring match on name / site / description / domain.
+    pub async fn search(&self, query: &str) -> Vec<AdapterEntry> {
         let all = self.list_adapters().await;
-        all.into_iter()
-            .filter(|a| a.enabled && (include_hidden || !a.hidden))
-            .collect()
-    }
-
-    /// Search adapters using FTS5/BM25 + usage hotspot hybrid ranking.
-    pub async fn search(&self, query: &str, include_hidden: bool) -> Vec<AdapterEntry> {
-        let fts_results = match self.index.search(query, 50) {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(error = %e, "FTS search failed, falling back to substring match");
-                return self.search_fallback(query, include_hidden).await;
-            }
-        };
-
-        let registry = self.registry.read().await;
-        let settings = self.settings.read().await;
-
-        fts_results
-            .into_iter()
-            .filter_map(|r| {
-                let parts: Vec<&str> = r.full_name.splitn(2, ' ').collect();
-                if parts.len() != 2 {
-                    return None;
-                }
-                let cmd = registry.get(parts[0], parts[1])?;
-                let hidden = settings.hidden.contains(&r.full_name);
-                let enabled = !settings.disabled.contains(&r.full_name);
-                if !enabled || (!include_hidden && hidden) {
-                    return None;
-                }
-                Some(AdapterEntry::from_cmd(cmd, enabled, hidden))
-            })
-            .collect()
-    }
-
-    /// Fallback substring search when FTS is unavailable.
-    async fn search_fallback(&self, query: &str, include_hidden: bool) -> Vec<AdapterEntry> {
-        let all = self.list_adapters().await;
-        let query_lower = query.to_lowercase();
+        let q = query.to_lowercase();
+        if q.is_empty() {
+            return all.into_iter().filter(|a| a.enabled).collect();
+        }
         all.into_iter()
             .filter(|a| {
                 a.enabled
-                    && (include_hidden || !a.hidden)
-                    && (a.full_name.to_lowercase().contains(&query_lower)
-                        || a.description.to_lowercase().contains(&query_lower)
-                        || a.site.to_lowercase().contains(&query_lower))
+                    && (a.full_name.to_lowercase().contains(&q)
+                        || a.description.to_lowercase().contains(&q)
+                        || a.site.to_lowercase().contains(&q)
+                        || a.domain
+                            .as_ref()
+                            .map(|d| d.to_lowercase().contains(&q))
+                            .unwrap_or(false))
             })
             .collect()
     }
 
-    /// Disable an adapter by full name ("site command").
-    pub async fn disable(&self, full_name: &str) -> Result<bool> {
-        let mut settings = self.settings.write().await;
-        if !settings.disabled.contains(&full_name.to_string()) {
-            settings.disabled.push(full_name.to_string());
-            settings.save()?;
-            tracing::info!(adapter = full_name, "Adapter disabled");
-        }
-        Ok(settings.disabled.contains(&full_name.to_string()))
+    /// Disable an adapter (`"site command"`) or whole site (`"site"`).
+    /// Returns true when the disable list contains the entry after the call.
+    pub async fn disable(&self, name: &str) -> Result<bool> {
+        let mut settings = AdapterSettings::load();
+        settings.disable(name).map_err(|e| anyhow::anyhow!(e))?;
+        let name = AdapterSettings::normalize_name(name);
+        tracing::info!(adapter = %name, "Adapter disabled");
+        Ok(settings
+            .disabled
+            .iter()
+            .any(|d| AdapterSettings::normalize_name(d) == name))
     }
 
-    /// Enable an adapter by full name ("site command").
-    pub async fn enable(&self, full_name: &str) -> Result<bool> {
-        let mut settings = self.settings.write().await;
-        settings.disabled.retain(|d| d != full_name);
-        settings.save()?;
-        tracing::info!(adapter = full_name, "Adapter enabled");
-        Ok(!settings.disabled.contains(&full_name.to_string()))
-    }
-
-    /// Hide an adapter (still functional but not shown in help).
-    #[allow(dead_code)]
-    pub async fn hide(&self, full_name: &str) -> Result<()> {
-        let mut settings = self.settings.write().await;
-        if !settings.hidden.contains(&full_name.to_string()) {
-            settings.hidden.push(full_name.to_string());
-            settings.save()?;
-        }
-        Ok(())
-    }
-
-    /// Unhide an adapter.
-    #[allow(dead_code)]
-    pub async fn unhide(&self, full_name: &str) -> Result<()> {
-        let mut settings = self.settings.write().await;
-        settings.hidden.retain(|h| h != full_name);
-        settings.save()?;
-        Ok(())
-    }
-
-    /// Sync adapters from a specific folder (replaces auto-discovery for that folder).
-    /// Returns the number of adapters loaded.
-    pub async fn sync_from(&self, folder: &Path) -> Result<usize> {
-        let count = {
-            let mut registry = self.registry.write().await;
-            scan_dir_no_cache(&folder.to_path_buf(), &mut registry)?
-        };
-        tracing::info!(folder = %folder.display(), count = count, "Adapters synced from folder");
-        let all = self.list_adapters().await;
-        self.index.sync(&all)?;
-        Ok(count)
+    /// Enable an adapter or whole-site entry.
+    /// Returns true when that exact entry is no longer on the disable list.
+    pub async fn enable(&self, name: &str) -> Result<bool> {
+        let mut settings = AdapterSettings::load();
+        settings.enable(name).map_err(|e| anyhow::anyhow!(e))?;
+        let name = AdapterSettings::normalize_name(name);
+        tracing::info!(adapter = %name, "Adapter enabled");
+        Ok(!settings
+            .disabled
+            .iter()
+            .any(|d| AdapterSettings::normalize_name(d) == name))
     }
 
     /// Full reload from default directories (including plugins).
@@ -288,6 +165,7 @@ impl AdapterManager {
         let plugin_mgr = Arc::clone(&self.plugin_manager);
         let count = {
             let mut registry = self.registry.write().await;
+            *registry = Registry::new();
             let mut c = discover_adapters(&mut registry)?;
             let local_dir = PathBuf::from("adapters");
             if local_dir.exists() && local_dir.is_dir() {
@@ -302,8 +180,6 @@ impl AdapterManager {
             c
         };
         tracing::info!(count = count, "Adapters reloaded");
-        let all = self.list_adapters().await;
-        self.index.sync(&all)?;
         Ok(count)
     }
 
@@ -316,10 +192,10 @@ impl AdapterManager {
     /// Returns None if the adapter is disabled or not found.
     pub async fn get_command(&self, site: &str, name: &str) -> Option<CliCommand> {
         let registry = self.registry.read().await;
-        let settings = self.settings.read().await;
+        let settings = AdapterSettings::load();
         let full_name = format!("{} {}", site, name);
 
-        if settings.disabled.contains(&full_name) {
+        if settings.is_disabled(&full_name) {
             return None;
         }
 

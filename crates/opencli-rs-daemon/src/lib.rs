@@ -1,49 +1,45 @@
 pub mod adapter_manager;
+pub mod autostart;
 pub mod client;
 pub mod extension_api;
-pub mod index;
 pub mod plugin;
-pub mod scheduler;
 pub mod socket;
-pub mod store;
-pub mod tools;
 
 use anyhow::Result;
 use std::path::PathBuf;
-
-pub fn default_db_path() -> PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join(".opencli-rs").join("jobs.db"))
-        .unwrap_or_else(|| PathBuf::from("jobs.db"))
-}
 
 pub fn default_addr() -> String {
     "127.0.0.1:10008".to_string()
 }
 
-/// Start the scheduler daemon. Blocks until Ctrl-C.
-pub async fn run_daemon(addr: String, db_path: Option<PathBuf>, poll_interval: u64) -> Result<()> {
+pub fn default_log_path() -> PathBuf {
+    dirs::home_dir()
+        .map(|h| h.join(".opencli-rs").join("daemon.log"))
+        .unwrap_or_else(|| PathBuf::from("daemon.log"))
+}
+
+pub fn default_pid_path() -> PathBuf {
+    dirs::home_dir()
+        .map(|h| h.join(".opencli-rs").join("daemon.pid"))
+        .unwrap_or_else(|| PathBuf::from("daemon.pid"))
+}
+
+/// Start the opencli daemon (adapter/plugin + extension API). Blocks until Ctrl-C.
+pub async fn run_daemon(addr: String) -> Result<()> {
     use std::sync::Arc;
     use tokio::signal;
     use tracing::info;
 
-    let db_path = db_path.unwrap_or_else(default_db_path);
-    let job_store = Arc::new(store::JobStore::new(db_path).map_err(|e| anyhow::anyhow!("{}", e))?);
+    let pid_path = default_pid_path();
+    if let Some(parent) = pid_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&pid_path, std::process::id().to_string());
+
     let adapter_manager = Arc::new(adapter_manager::AdapterManager::new().await?);
-    let scheduler = Arc::new(scheduler::Scheduler::new(
-        Arc::clone(&job_store),
-        Arc::clone(&adapter_manager),
-        poll_interval,
-    ));
-
-    let sched = Arc::clone(&scheduler);
-    let sched_handle = tokio::spawn(async move { sched.run_loop().await });
-
     let plugin_manager = adapter_manager.plugin_manager();
     let socket_state = Arc::new(socket::SocketState {
         adapter_manager,
-        scheduler,
-        job_store,
         plugin_manager,
     });
 
@@ -59,16 +55,16 @@ pub async fn run_daemon(addr: String, db_path: Option<PathBuf>, poll_interval: u
         }
     });
 
-    info!(addr = %addr, extension_api_addr = %extension_api_addr, poll_interval, "Scheduler daemon started");
+    info!(addr = %addr, extension_api_addr = %extension_api_addr, "opencli daemon started");
     signal::ctrl_c().await?;
-    info!("Shutting down scheduler daemon");
-    sched_handle.abort();
+    info!("Shutting down opencli daemon");
     socket_handle.abort();
     extension_api_handle.abort();
+    let _ = std::fs::remove_file(&pid_path);
     Ok(())
 }
 
-/// Run the scheduler client (job/adapter/plugin/status commands).
+/// Run the daemon client (adapter/plugin/status commands).
 pub fn run_client() -> Result<()> {
     client::run()
 }

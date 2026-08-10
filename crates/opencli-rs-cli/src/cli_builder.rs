@@ -22,203 +22,94 @@ const ORD_DAEMON: usize = 20;
 pub fn daemon_help_commands() -> Vec<Command> {
     vec![
         Command::new("daemon")
-            .about("[daemon] Start the scheduler daemon (foreground)")
+            .about("Daemon lifecycle (start/stop/status/logs) or foreground run")
             .long_about(
-                "Start the scheduler daemon. Blocks in the foreground; use nohup or a \
-                 process manager to run in the background.\n\n\
-                 Example:\n  nohup opencli daemon > ~/.opencli-rs/daemon.log 2>&1 &",
+                "Without a subcommand, starts the opencli daemon in the foreground \
+                 (adapter/plugin management + extension API).\n\n\
+                 Subcommands:\n  \
+                   opencli daemon start|stop|restart|status|logs|config\n  \
+                   opencli daemon autostart install|uninstall|status",
             )
             .display_order(ORD_DAEMON)
-            .arg(
-                Arg::new("poll_interval")
-                    .long("poll-interval")
-                    .default_value("10")
-                    .help("Job polling interval in seconds"),
-            )
-            .arg(
-                Arg::new("db")
-                    .long("db")
-                    .help("Override path to the scheduler SQLite database"),
-            )
             .arg(
                 Arg::new("addr")
                     .long("addr")
                     .help("TCP listen address, e.g. 127.0.0.1:10008"),
-            ),
-        Command::new("status")
-            .about("[daemon] Show daemon health: adapters loaded, jobs pending")
-            .display_order(ORD_DAEMON + 1),
-        Command::new("stop")
-            .about("[daemon] Stop the running daemon gracefully")
-            .display_order(ORD_DAEMON + 2),
-        Command::new("restart")
-            .about("[daemon] Stop and restart the daemon")
-            .display_order(ORD_DAEMON + 3)
-            .arg(
-                Arg::new("poll_interval")
-                    .long("poll-interval")
-                    .default_value("10")
-                    .help("Job polling interval in seconds"),
             )
-            .arg(
-                Arg::new("db")
-                    .long("db")
-                    .help("Override path to the scheduler SQLite database"),
-            ),
-        Command::new("job")
-            .about("[daemon] Manage scheduled jobs (add / list / show / cancel / delete)")
-            .display_order(ORD_DAEMON + 4)
+            .subcommand(Command::new("start").about("Start daemon in background"))
+            .subcommand(Command::new("stop").about("Stop the running daemon"))
+            .subcommand(Command::new("restart").about("Restart the daemon"))
+            .subcommand(Command::new("status").about("Show daemon health"))
             .subcommand(
-                Command::new("add")
-                    .about("Schedule an adapter to run once or repeatedly")
-                    .long_about(
-                        "Schedule an adapter to run once or on a repeating interval.\n\n\
-                         Job life-cycle:  pending → running → done | failed | cancelled\n\n\
-                         Examples:\n  \
-                           opencli job add zhihu/hot\n  \
-                           opencli job add zhihu/hot --delay 300           # run in 5 min\n  \
-                           opencli job add zhihu/hot --interval 3600       # run hourly\n  \
-                           opencli job add twitter/search --args '{\"query\":\"rust\"}'",
+                Command::new("logs")
+                    .about("Show daemon log output")
+                    .arg(
+                        Arg::new("follow")
+                            .short('f')
+                            .long("follow")
+                            .action(ArgAction::SetTrue)
+                            .help("Follow log output"),
                     )
                     .arg(
-                        Arg::new("adapter")
-                            .required(true)
-                            .help("Adapter to schedule: 'site/command', e.g. zhihu/hot"),
-                    )
-                    .arg(Arg::new("run_at").short('r').long("run-at").help(
-                        "Absolute run time (ISO 8601 or 'now'). \
-                                 Mutually exclusive with --delay. \
-                                 Examples: 2026-01-01T09:00:00, now",
-                    ))
-                    .arg(Arg::new("delay").short('d').long("delay").help(
-                        "Run after N seconds from now. \
-                                 Mutually exclusive with --run-at.",
-                    ))
-                    .arg(Arg::new("interval").short('i').long("interval").help(
-                        "Repeat every N seconds. \
-                                 Omit for a one-shot job. \
-                                 Example: --interval 3600 for hourly.",
-                    ))
-                    .arg(Arg::new("args").short('a').long("args").help(
-                        "Adapter arguments as a JSON object. \
-                                 Example: --args '{\"query\":\"rust\",\"limit\":20}'",
-                    )),
-            )
-            .subcommand(
-                Command::new("list")
-                    .about("List jobs, optionally filtered by status")
-                    .arg(
-                        Arg::new("status").short('s').long("status").help(
-                            "Filter by status: pending | running | done | failed | cancelled",
-                        ),
-                    )
-                    .arg(
-                        Arg::new("limit")
-                            .short('l')
-                            .long("limit")
+                        Arg::new("lines")
+                            .short('n')
+                            .long("lines")
                             .default_value("50")
-                            .help("Maximum number of jobs to return"),
+                            .help("Lines from end of log"),
                     ),
             )
+            .subcommand(Command::new("config").about("Show daemon paths and autostart"))
             .subcommand(
-                Command::new("show")
-                    .about("Show full details of a job")
-                    .arg(
-                        Arg::new("id")
-                            .required(true)
-                            .help("Job ID (a unique prefix is sufficient)"),
-                    ),
-            )
-            .subcommand(
-                Command::new("cancel")
-                    .about("Cancel a pending job (record is kept for auditing)")
-                    .long_about(
-                        "Mark a pending job as cancelled. The job record stays in the \
-                         database. Use 'delete' to remove it entirely.",
-                    )
-                    .arg(
-                        Arg::new("id")
-                            .required(true)
-                            .help("Job ID (a unique prefix is sufficient)"),
-                    ),
-            )
-            .subcommand(
-                Command::new("delete")
-                    .about("Delete a job record permanently from the database")
-                    .long_about(
-                        "Permanently remove a job. \
-                         Use 'cancel' if you want to stop execution but keep the history.",
-                    )
-                    .arg(
-                        Arg::new("id")
-                            .required(true)
-                            .help("Job ID (a unique prefix is sufficient)"),
-                    ),
-            )
-            .subcommand(
-                Command::new("run")
-                    .about("Force-trigger all due jobs immediately (useful for testing)"),
+                Command::new("autostart")
+                    .about("Boot-time autostart (launchd / systemd --user)")
+                    .subcommand(Command::new("install").about("Install and enable"))
+                    .subcommand(Command::new("uninstall").about("Disable and remove"))
+                    .subcommand(Command::new("status").about("Show autostart status")),
             ),
         Command::new("adapter")
-            .about("[daemon] Manage adapters (list / search / enable / disable / sync)")
-            .display_order(ORD_DAEMON + 5)
+            .about("Manage adapters (list / search / enable / disable)")
+            .display_order(ORD_DAEMON + 1)
             .subcommand(
                 Command::new("list")
-                    .about("List all adapters known to the daemon")
+                    .about("List adapters")
                     .arg(
                         Arg::new("include_disabled")
                             .long("include-disabled")
                             .action(ArgAction::SetTrue)
                             .help("Also show disabled adapters"),
-                    )
-                    .arg(
-                        Arg::new("include_hidden")
-                            .long("include-hidden")
-                            .action(ArgAction::SetTrue)
-                            .help("Also show hidden adapters"),
                     ),
             )
             .subcommand(
                 Command::new("search")
-                    .about("Search adapters (BM25 + usage rank; falls back to local scan)")
+                    .about("Search adapters (substring; prints usage)")
                     .long_about(
-                        "Full-text search over adapter name, description, domain, and summary. \
-                         Score = 0.7 × BM25 + 0.3 × log(1 + usage_count).\n\n\
-                         Falls back to a local file-system scan when the daemon is not running.",
+                        "Case-insensitive substring match on site, command name, description, \
+                         and domain. Prints a ready-to-copy invocation for each hit.\n\n\
+                         Uses the daemon registry when available; otherwise scans local files.",
                     )
                     .arg(Arg::new("query").required(true).help("Search query")),
             )
             .subcommand(
                 Command::new("enable")
-                    .about("Re-enable a disabled adapter")
+                    .about("Re-enable a disabled adapter or site")
                     .arg(
                         Arg::new("name")
                             .required(true)
-                            .help("Adapter full name, e.g. 'zhihu hot'"),
+                            .help("Adapter: 'site command', 'site/command', or bare 'site'"),
                     ),
             )
             .subcommand(
                 Command::new("disable")
-                    .about("Disable an adapter (excludes from search and execution)")
+                    .about("Disable an adapter or whole site (leave help + block run)")
                     .arg(
                         Arg::new("name")
                             .required(true)
-                            .help("Adapter full name, e.g. 'zhihu hot'"),
-                    ),
-            )
-            .subcommand(
-                Command::new("sync")
-                    .about("Sync adapters from a folder and rebuild the search index")
-                    .arg(
-                        Arg::new("folder")
-                            .short('f')
-                            .long("folder")
-                            .help("Folder path (defaults to ~/.opencli-rs/adapters)"),
+                            .help("Adapter: 'site command', 'site/command', or bare 'site'"),
                     ),
             ),
         Command::new("plugin")
-            .about("[daemon] Manage adapter plugins (install / uninstall / list / update)")
-            .display_order(ORD_DAEMON + 6)
+            .about("Manage adapter plugins (install / uninstall / list / update)")
+            .display_order(ORD_DAEMON + 2)
             .subcommand(
                 Command::new("install")
                     .about("Install a plugin from GitHub or a local path")
@@ -251,6 +142,70 @@ pub fn daemon_help_commands() -> Vec<Command> {
                         Arg::new("name").help("Plugin name; omit to update all installed plugins"),
                     ),
             ),
+        Command::new("kv")
+            .about("Local key-value store for identity/session hints (~/.opencli-rs/kv.json)")
+            .long_about(
+                "Cache small, stable identity fields across commands (e.g. bilibili:me.mid, \
+                 xiaohongshu:me.userId). Do not store cookies/tokens or full scrape results.\n\n\
+                 Examples:\n  \
+                   opencli kv get bilibili:me.mid\n  \
+                   opencli kv set xiaohongshu:me.userId 55b2... --ttl 30d\n  \
+                   opencli kv list --prefix bilibili:\n  \
+                   opencli kv clear --prefix xiaohongshu:\n  \
+                   opencli kv clear --all",
+            )
+            .display_order(ORD_TOOLS + 5)
+            .subcommand(
+                Command::new("get")
+                    .about("Read one key")
+                    .arg(Arg::new("key").required(true).help("Key, e.g. bilibili:me.mid")),
+            )
+            .subcommand(
+                Command::new("set")
+                    .about("Write one key (value is a string; use --json for raw JSON)")
+                    .arg(Arg::new("key").required(true).help("Key"))
+                    .arg(Arg::new("value").required(true).help("Value"))
+                    .arg(
+                        Arg::new("ttl")
+                            .long("ttl")
+                            .help("Optional TTL: 30d / 24h / 15m / 60s / bare seconds"),
+                    )
+                    .arg(
+                        Arg::new("json")
+                            .long("json")
+                            .action(ArgAction::SetTrue)
+                            .help("Parse value as JSON instead of a plain string"),
+                    ),
+            )
+            .subcommand(
+                Command::new("list")
+                    .about("List keys (optional prefix filter)")
+                    .arg(
+                        Arg::new("prefix")
+                            .long("prefix")
+                            .help("Only list keys with this prefix"),
+                    ),
+            )
+            .subcommand(
+                Command::new("del")
+                    .about("Delete one key")
+                    .arg(Arg::new("key").required(true).help("Key to delete")),
+            )
+            .subcommand(
+                Command::new("clear")
+                    .about("Clear keys by prefix, or entire store with --all")
+                    .arg(
+                        Arg::new("prefix")
+                            .long("prefix")
+                            .help("Only clear keys with this prefix"),
+                    )
+                    .arg(
+                        Arg::new("all")
+                            .long("all")
+                            .action(ArgAction::SetTrue)
+                            .help("Required when clearing the entire store"),
+                    ),
+            ),
     ]
 }
 
@@ -271,7 +226,7 @@ pub fn build_cli(registry: &Registry) -> Command {
                opencli zhihu hot\n  \
                opencli twitter search --query openai\n  \
                opencli adapter search zhihu\n  \
-               opencli job add zhihu/hot --interval 3600",
+               opencli plugin install forechoandlook/opencli-adapters",
         )
         .arg(
             Arg::new("format")
@@ -339,34 +294,17 @@ pub fn build_cli(registry: &Registry) -> Command {
         app = app.subcommand(daemon_cmd);
     }
 
-    // ── Local tools — no daemon, no browser (display_order 0+)
+    // ── Local / maintenance commands (display_order 0+)
     app = app
-        .subcommand(
-            Command::new("tools")
-                .about("Browse the local CLI tool knowledge base")
-                .display_order(ORD_TOOLS + 1)
-                .subcommand(
-                    Command::new("search")
-                        .about("Search tools by keyword")
-                        .arg(Arg::new("query").required(true)),
-                )
-                .subcommand(Command::new("list").about("List all tools"))
-                .subcommand(
-                    Command::new("info")
-                        .about("Show full details for a tool")
-                        .arg(Arg::new("name").required(true)),
-                )
-                .subcommand(Command::new("summary").about("Show one-line summaries for all tools")),
-        )
         .subcommand(
             Command::new("doctor")
                 .about("Check runtime dependencies and environment")
-                .display_order(ORD_TOOLS + 2),
+                .display_order(ORD_TOOLS + 1),
         )
         .subcommand(
             Command::new("update")
                 .about("Check for a newer release and update this binary in place")
-                .display_order(ORD_TOOLS + 3)
+                .display_order(ORD_TOOLS + 2)
                 .arg(
                     Arg::new("check")
                         .long("check")
@@ -377,61 +315,13 @@ pub fn build_cli(registry: &Registry) -> Command {
         .subcommand(
             Command::new("uninstall")
                 .about("Remove the current opencli binary from disk")
-                .display_order(ORD_TOOLS + 4)
+                .display_order(ORD_TOOLS + 3)
                 .long_about(
                     "Attempt to remove the currently running opencli binary from disk.\n\n\
                      This is best-effort: it works on Unix-like systems where the running \
                      executable can be unlinked, but not on Windows while the binary is in use.\n\n\
                      If opencli was installed through a package manager or symlink, remove \
                      that wrapper separately.",
-                ),
-        )
-        .subcommand(
-            Command::new("feedback")
-                .about("Record feedback and optionally open a GitHub issue draft")
-                .display_order(ORD_TOOLS + 5)
-                .arg(
-                    Arg::new("title")
-                        .required(true)
-                        .help("Short description, e.g. 'zhihu hot returns 403'"),
-                )
-                .arg(
-                    Arg::new("body")
-                        .long("body")
-                        .short('m')
-                        .help("Detailed feedback text"),
-                )
-                .arg(
-                    Arg::new("adapter")
-                        .long("adapter")
-                        .help("Related adapter, e.g. 'zhihu hot'"),
-                )
-                .arg(
-                    Arg::new("kind")
-                        .long("kind")
-                        .default_value("other")
-                        .value_parser(["broken", "bad_description", "other"])
-                        .help("Feedback category"),
-                )
-                .arg(
-                    Arg::new("open")
-                        .long("open")
-                        .action(ArgAction::SetTrue)
-                        .help("Open a prefilled GitHub issue in the browser"),
-                ),
-        )
-        .subcommand(
-            Command::new("summary")
-                .about("Browse adapter summaries")
-                .display_order(ORD_TOOLS + 6)
-                .subcommand(
-                    Command::new("show")
-                        .about("Show the summary for a specific adapter")
-                        .arg(
-                            Arg::new("adapter")
-                                .required(true)
-                                .help("Adapter name, e.g. 'zhihu'"),
-                        ),
                 ),
         );
 

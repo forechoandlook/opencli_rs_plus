@@ -92,21 +92,33 @@ pipeline:
         }
         // --- End helpers ---
 
-        // Get self UID via nav
+        // Always resolve from nav (authoritative) so KV stays correct on account switch.
         const navRes = await fetch('https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' });
         const nav = await navRes.json();
         const uid = nav?.data?.mid;
         if (!uid) throw new Error('AUTH_REQUIRED: bilibili.com');
 
-        // Get profile info with WBI signing
         const payload = await apiGet('/x/space/wbi/acc/info', { mid: uid }, true);
-        const data = payload?.data || {};
-        return [{
-          name: data.name || '',
-          uid: data.mid || uid,
-          level: data.level || 0,
-          coins: data.coins || 0,
-          followers: data.follower || 0,
-          following: data.following || 0
-        }];
+        const d = payload?.data || {};
+        const mid = String(d.mid || uid);
+        const name = String(d.name || nav?.data?.uname || '');
+        return {
+          mid,
+          uname: name,
+          rows: [{
+            name,
+            uid: mid,
+            level: d.level || 0,
+            coins: d.coins || 0,
+            followers: d.follower || 0,
+            following: d.following || 0
+          }]
+        };
       })()
+  - kv_set:
+      key: bilibili:me.mid
+      value: ${{ data.mid }}
+  - kv_set:
+      key: bilibili:me.uname
+      value: ${{ data.uname }}
+  - select: rows

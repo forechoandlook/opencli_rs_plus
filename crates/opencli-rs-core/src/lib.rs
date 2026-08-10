@@ -1,11 +1,14 @@
+mod adapter_settings;
 mod args;
 mod command;
 mod error;
+pub mod kv;
 mod page;
 mod registry;
 mod strategy;
 mod value_ext;
 
+pub use adapter_settings::AdapterSettings;
 pub use args::{ArgDef, ArgType};
 pub use command::{
     ActiveTabAction, AdapterFunc, CliCommand, CommandArgs, ContextAction, NavigateBefore,

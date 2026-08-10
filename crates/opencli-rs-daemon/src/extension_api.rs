@@ -1,7 +1,7 @@
 //! Local HTTP API used by the OpenCLI browser extension.
 //!
-//! This server deliberately lives beside the scheduler daemon, rather than in
-//! browser-daemon: adapter discovery and execution are scheduler concerns;
+//! This server deliberately lives beside the opencli daemon, rather than in
+//! browser-daemon: adapter discovery and path matching are daemon concerns;
 //! browser-daemon remains a CDP/WebSocket relay only.
 
 use crate::socket::SocketState;
@@ -27,7 +27,7 @@ struct ActionsQuery {
     url: String,
 }
 
-/// Bind the loopback-only extension API before the scheduler announces itself.
+/// Bind the loopback-only extension API before the daemon announces itself.
 pub async fn start(addr: &str, state: Arc<SocketState>) -> Result<JoinHandle<()>> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let app = Router::new()
@@ -76,7 +76,7 @@ async fn actions_handler(
         .list_adapters()
         .await
         .into_iter()
-        .filter(|entry| entry.enabled && !entry.hidden)
+        .filter(|entry| entry.enabled)
         .filter_map(|entry| {
             let context = entry.context.as_ref()?;
             let active_tab = context.active_tab.as_ref()?;

@@ -3,24 +3,17 @@
 
 use crate::adapter_manager::{is_chrome_running, AdapterManager};
 use crate::plugin::PluginManager;
-use crate::scheduler::Scheduler;
-use crate::store::{Job, JobStatus, JobStore};
 use anyhow::Result;
-use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
 /// Shared state accessible by all socket handlers.
 pub struct SocketState {
     pub adapter_manager: Arc<AdapterManager>,
-    pub scheduler: Arc<Scheduler>,
-    pub job_store: Arc<JobStore>,
     pub plugin_manager: Arc<PluginManager>,
 }
 
@@ -91,18 +84,6 @@ impl JsonRpcResponse {
     }
 }
 
-/// Stream event for `exec` command
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", content = "data")]
-pub enum StreamEvent {
-    #[serde(rename = "stdout")]
-    Stdout(String),
-    #[serde(rename = "stderr")]
-    Stderr(String),
-    #[serde(rename = "done")]
-    Done { exit_code: i32 },
-}
-
 /// Start the TCP socket server. Each connection is handled concurrently.
 pub async fn serve(addr: &str, state: Arc<SocketState>) -> Result<()> {
     let listener = TcpListener::bind(addr).await?;
@@ -127,9 +108,7 @@ pub async fn serve(addr: &str, state: Arc<SocketState>) -> Result<()> {
     }
 }
 
-/// Handle a single TCP connection.
-/// Reads line-delimited JSON requests, writes line-delimited JSON responses.
-/// For `exec`, streams JSON lines until done.
+/// Handle a single TCP connection: line-delimited JSON-RPC request/response.
 async fn handle_connection(stream: tokio::net::TcpStream, state: &Arc<SocketState>) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
@@ -139,130 +118,13 @@ async fn handle_connection(stream: tokio::net::TcpStream, state: &Arc<SocketStat
         if line.is_empty() {
             continue;
         }
-
-        // Check if this is an exec request before processing
-        let is_exec = line.contains(r#""method":"exec""#);
-
-        if is_exec {
-            // Parse and handle exec with streaming
-            let req: JsonRpcRequest = match serde_json::from_str(line) {
-                Ok(r) => r,
-                Err(e) => {
-                    let resp = JsonRpcResponse::error(&format!("invalid JSON: {}", e), -32700);
-                    writer
-                        .write_all(serde_json::to_string(&resp)?.as_bytes())
-                        .await?;
-                    writer.write_all(b"\n").await?;
-                    continue;
-                }
-            };
-
-            let id = req.id.clone();
-            let exec_result = handle_exec_streaming(&req.params, state, &mut writer).await;
-
-            match exec_result {
-                Ok(exit_code) => {
-                    let done = StreamEvent::Done { exit_code };
-                    writer
-                        .write_all(serde_json::to_string(&done)?.as_bytes())
-                        .await?;
-                    writer.write_all(b"\n").await?;
-                }
-                Err(e) => {
-                    let resp = JsonRpcResponse::error_with_id(&e.to_string(), -32603, id);
-                    writer
-                        .write_all(serde_json::to_string(&resp)?.as_bytes())
-                        .await?;
-                    writer.write_all(b"\n").await?;
-                }
-            }
-        } else {
-            let response = process_request(line, state).await;
-            let resp_json = serde_json::to_string(&response)?;
-            writer.write_all(resp_json.as_bytes()).await?;
-            writer.write_all(b"\n").await?;
-        }
+        let response = process_request(line, state).await;
+        let resp_json = serde_json::to_string(&response)?;
+        writer.write_all(resp_json.as_bytes()).await?;
+        writer.write_all(b"\n").await?;
     }
 
     Ok(())
-}
-
-/// Handle exec command with streaming output to the writer.
-async fn handle_exec_streaming(
-    params: &Value,
-    state: &Arc<SocketState>,
-    writer: &mut OwnedWriteHalf,
-) -> Result<i32> {
-    let adapter = params
-        .get("adapter")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("missing 'adapter' parameter"))?;
-
-    let args = params.get("args").cloned();
-
-    // Parse "site command"
-    let parts: Vec<&str> = adapter.split_whitespace().collect();
-    if parts.len() != 2 {
-        return Err(anyhow::anyhow!("Invalid adapter format: '{}'", adapter));
-    }
-    let (site, cmd_name) = (parts[0], parts[1]);
-
-    // Get command from adapter manager
-    let cmd = match state.adapter_manager.get_command(site, cmd_name).await {
-        Some(c) => c,
-        None => {
-            return Err(anyhow::anyhow!(
-                "Unknown or disabled adapter: {} {}",
-                site,
-                cmd_name
-            ));
-        }
-    };
-
-    let kwargs: std::collections::HashMap<String, Value> = match &args {
-        Some(serde_json::Value::Object(map)) => {
-            map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-        }
-        Some(_) => {
-            return Err(anyhow::anyhow!("args must be a JSON object"));
-        }
-        None => std::collections::HashMap::new(),
-    };
-
-    // Execute the command
-    match opencli_rs_engine::execute_command(&cmd, kwargs).await {
-        Ok(result) => {
-            // Record successful usage for hotspot tracking
-            let full_name = format!("{} {}", site, cmd_name);
-            if let Err(e) = state.adapter_manager.index.record_usage(
-                &full_name,
-                site,
-                cmd_name,
-                &cmd.description,
-            ) {
-                tracing::warn!(error = %e, adapter = %full_name, "Failed to record usage");
-            }
-
-            // Stream result as stdout
-            let stdout = serde_json::to_string(&result)?;
-            let event = StreamEvent::Stdout(stdout);
-            writer
-                .write_all(serde_json::to_string(&event)?.as_bytes())
-                .await?;
-            writer.write_all(b"\n").await?;
-            Ok(0)
-        }
-        Err(e) => {
-            // Stream error as stderr
-            let stderr = e.to_string();
-            let event = StreamEvent::Stderr(stderr);
-            writer
-                .write_all(serde_json::to_string(&event)?.as_bytes())
-                .await?;
-            writer.write_all(b"\n").await?;
-            Ok(1)
-        }
-    }
 }
 
 /// Process a single JSON-RPC request and return the response.
@@ -284,23 +146,11 @@ async fn process_request(line: &str, state: &Arc<SocketState>) -> JsonRpcRespons
         "daemon.stop" => handle_daemon_stop(),
 
         // ── Adapter ────────────────────────────────────────────────────────────
-        "adapter.sync" => handle_adapter_sync(params, state).await,
         "adapter.list" => handle_adapter_list(params, state).await,
         "adapter.search" => handle_adapter_search(params, state).await,
         "adapter.enable" => handle_adapter_enable(params, state).await,
         "adapter.disable" => handle_adapter_disable(params, state).await,
         "adapter.reload" => handle_adapter_reload(state).await,
-        "adapter.reindex" => handle_adapter_reindex(state).await,
-        "adapter.hot" => handle_adapter_hot(params, state).await,
-        "adapter.trending" => handle_adapter_trending(params, state).await,
-
-        // ── Job ───────────────────────────────────────────────────────────────
-        "job.add" => handle_job_add(params, state).await,
-        "job.list" => handle_job_list(params, state).await,
-        "job.show" => handle_job_show(params, state).await,
-        "job.cancel" => handle_job_cancel(params, state).await,
-        "job.delete" => handle_job_delete(params, state).await,
-        "job.run" => handle_job_run(state).await,
 
         // ── Plugin ────────────────────────────────────────────────────────────
         "plugin.install" => handle_plugin_install(params, state).await,
@@ -308,7 +158,6 @@ async fn process_request(line: &str, state: &Arc<SocketState>) -> JsonRpcRespons
         "plugin.list" => handle_plugin_list(state).await,
         "plugin.update" => handle_plugin_update(params, state).await,
 
-        // Note: "exec" is handled separately in handle_connection for streaming.
         _ => Err(anyhow::anyhow!("unknown method: {}", method)),
     };
 
@@ -325,16 +174,6 @@ async fn process_request(line: &str, state: &Arc<SocketState>) -> JsonRpcRespons
 async fn handle_daemon_status(state: &Arc<SocketState>) -> Result<Value> {
     let chrome_running = is_chrome_running();
 
-    let job_store = &state.job_store;
-    let pending: usize = job_store
-        .list(Some(JobStatus::Pending), 1000)
-        .map(|j: Vec<Job>| j.len())
-        .unwrap_or(0);
-    let running: usize = job_store
-        .list(Some(JobStatus::Running), 1000)
-        .map(|j: Vec<Job>| j.len())
-        .unwrap_or(0);
-
     let am = state.adapter_manager.list_adapters().await;
     let total = am.len();
     let enabled = am.iter().filter(|a| a.enabled).count();
@@ -346,10 +185,6 @@ async fn handle_daemon_status(state: &Arc<SocketState>) -> Result<Value> {
             "total": total,
             "enabled": enabled,
             "disabled": total - enabled,
-        },
-        "jobs": {
-            "pending": pending,
-            "running": running,
         },
         "uptime_seconds": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -363,9 +198,12 @@ fn handle_pong() -> Result<Value> {
 }
 
 fn handle_daemon_stop() -> Result<Value> {
-    // Signal the daemon to shut down by sending tokio signal
-    // In practice this sets a shutdown flag; the main loop will detect and exit.
-    // For now, we just acknowledge and let the caller handle the exit.
+    // Exit after a short delay so the "stopping" response reaches the client first.
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let _ = std::fs::remove_file(crate::default_pid_path());
+        std::process::exit(0);
+    });
     Ok(serde_json::json!({ "stopping": true }))
 }
 
@@ -373,38 +211,16 @@ fn handle_daemon_stop() -> Result<Value> {
 // Adapter handlers
 // ──────────────────────────────────────────────────────────────────────────────
 
-async fn handle_adapter_sync(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
-    let folder = params
-        .get("folder")
-        .and_then(|v| v.as_str())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .map(|h| h.join(".opencli-rs").join("adapters"))
-                .unwrap_or_default()
-        });
-
-    let count = state.adapter_manager.sync_from(&folder).await?;
-    Ok(serde_json::json!({
-        "synced": count,
-        "folder": folder.display().to_string(),
-    }))
-}
-
 async fn handle_adapter_list(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
     let include_disabled = params
         .get("include_disabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let include_hidden = params
-        .get("include_hidden")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
     let adapters = state.adapter_manager.list_adapters().await;
     let filtered: Vec<_> = adapters
         .into_iter()
-        .filter(|a| (include_disabled || a.enabled) && (include_hidden || !a.hidden))
+        .filter(|a| include_disabled || a.enabled)
         .collect();
 
     Ok(serde_json::json!({
@@ -418,12 +234,8 @@ async fn handle_adapter_search(params: &Value, state: &Arc<SocketState>) -> Resu
         .get("query")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
-    let include_hidden = params
-        .get("include_hidden")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
 
-    let results = state.adapter_manager.search(query, include_hidden).await;
+    let results = state.adapter_manager.search(query).await;
     Ok(serde_json::json!({
         "query": query,
         "adapters": results,
@@ -460,111 +272,6 @@ async fn handle_adapter_disable(params: &Value, state: &Arc<SocketState>) -> Res
 async fn handle_adapter_reload(state: &Arc<SocketState>) -> Result<Value> {
     let count = state.adapter_manager.reload().await?;
     Ok(serde_json::json!({ "loaded": count }))
-}
-
-/// Force full FTS rebuild (clears adapter_index_meta and re-indexes everything).
-async fn handle_adapter_reindex(state: &Arc<SocketState>) -> Result<Value> {
-    let all = state.adapter_manager.list_adapters().await;
-    state.adapter_manager.index.rebuild(&all)?;
-    Ok(serde_json::json!({ "reindexed": all.len() }))
-}
-
-async fn handle_adapter_hot(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
-    let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
-    let results = state.adapter_manager.index.hot(limit)?;
-    Ok(serde_json::json!({
-        "adapters": results,
-        "count": results.len(),
-    }))
-}
-
-async fn handle_adapter_trending(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
-    let days = params.get("days").and_then(|v| v.as_i64()).unwrap_or(7);
-    let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
-    let results = state.adapter_manager.index.trending(days, limit)?;
-    Ok(serde_json::json!({
-        "adapters": results,
-        "days": days,
-        "count": results.len(),
-    }))
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Job handlers
-// ──────────────────────────────────────────────────────────────────────────────
-
-async fn handle_job_add(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
-    let adapter = params
-        .get("adapter")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("missing 'adapter' parameter"))?;
-
-    let args = params.get("args").cloned();
-    let delay_seconds = params.get("delay_seconds").and_then(|v| v.as_i64());
-    let interval_seconds = params.get("interval_seconds").and_then(|v| v.as_i64());
-
-    let run_at = match delay_seconds {
-        Some(d) => Utc::now() + Duration::seconds(d),
-        None => Utc::now(),
-    };
-
-    let job = state
-        .job_store
-        .add(adapter, args, run_at, interval_seconds)?;
-    Ok(serde_json::json!({
-        "job": job,
-    }))
-}
-
-async fn handle_job_list(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
-    let status_filter = params
-        .get("status")
-        .and_then(|v| v.as_str())
-        .map(JobStatus::from);
-    let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
-
-    let jobs = state.job_store.list(status_filter, limit)?;
-    Ok(serde_json::json!({
-        "jobs": jobs,
-        "count": jobs.len(),
-    }))
-}
-
-async fn handle_job_show(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
-    let id = params
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("missing 'id' parameter"))?;
-
-    match state.job_store.get(id)? {
-        Some(job) => Ok(serde_json::json!({ "job": job })),
-        None => Err(anyhow::anyhow!("job not found: {}", id)),
-    }
-}
-
-async fn handle_job_cancel(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
-    let id = params
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("missing 'id' parameter"))?;
-
-    state.job_store.cancel(id)?;
-    Ok(serde_json::json!({ "id": id, "cancelled": true }))
-}
-
-async fn handle_job_delete(params: &Value, state: &Arc<SocketState>) -> Result<Value> {
-    let id = params
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("missing 'id' parameter"))?;
-
-    state.job_store.delete(id)?;
-    Ok(serde_json::json!({ "id": id, "deleted": true }))
-}
-
-async fn handle_job_run(state: &Arc<SocketState>) -> Result<Value> {
-    state.scheduler.poll_and_run().await?;
-    Ok(serde_json::json!({ "ran": true }))
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

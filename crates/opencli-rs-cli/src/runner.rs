@@ -6,7 +6,7 @@
 //!   3. Build the CLI, parse args.
 //!   4. Route to built-in commands (via `dispatch::dispatch_builtin`) or adapter execution.
 
-use opencli_rs_core::Registry;
+use opencli_rs_core::{AdapterSettings, Registry};
 use opencli_rs_discovery::{discover_adapters, scan_dir_no_cache};
 use opencli_rs_output::format::{OutputFormat, RenderOptions};
 use opencli_rs_output::render;
@@ -80,6 +80,17 @@ pub async fn run() {
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "Failed to load local dev adapters"),
         }
+    }
+
+    // Drop disabled adapters so they disappear from help and cannot run in direct mode.
+    let settings = AdapterSettings::load();
+    if !settings.disabled.is_empty() {
+        registry.retain(|cmd| !settings.is_disabled(&cmd.full_name()));
+        tracing::debug!(
+            disabled = settings.disabled.len(),
+            remaining = registry.command_count(),
+            "Applied adapter disable list"
+        );
     }
 
     // ── Parse args ─────────────────────────────────────────────────────────

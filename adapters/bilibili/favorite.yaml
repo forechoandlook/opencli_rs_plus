@@ -20,12 +20,22 @@ args:
 columns: [rank, title, author, plays, url]
 
 pipeline:
+  # Prefer cached mid so we skip an extra nav-only identity call when possible.
+  - evaluate:
+      retry: false
+      js: |
+        (() => ({ mid: '' }))()
+  - kv_get:
+      key: bilibili:me.mid
+      field: mid
+      only_if_empty: true
   - navigate: https://www.bilibili.com
 
   - evaluate: |
       (async () => {
         const limit = ${{ args.limit }};
         const pageNum = ${{ args.page }};
+        let mid = String(data.mid || '').trim();
 
         // --- WBI helpers ---
         const MIXIN_KEY_ENC_TAB = [
@@ -106,25 +116,36 @@ pipeline:
         }
         // --- End helpers ---
 
-        // Step 1: resolve the authenticated account before listing its folders.
-        // `up_mid=0` returns an empty list for some accounts.
-        const navRes = await fetch('https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' });
-        const nav = await navRes.json();
-        const uid = nav?.data?.mid;
-        if (!uid) throw new Error('AUTH_REQUIRED: bilibili.com');
+        // Resolve mid: KV first (data.mid), else nav. `up_mid=0` returns empty for some accounts.
+        if (!/^\d+$/.test(mid)) {
+          const navRes = await fetch('https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' });
+          const nav = await navRes.json();
+          mid = String(nav?.data?.mid || '').trim();
+          if (!/^\d+$/.test(mid)) throw new Error('AUTH_REQUIRED: bilibili.com');
+        }
 
-        const foldersPayload = await apiGet('/x/v3/fav/folder/created/list-all', { up_mid: uid }, true);
+        let foldersPayload = await apiGet('/x/v3/fav/folder/created/list-all', { up_mid: mid }, true);
+        if (foldersPayload?.code !== 0) {
+          const navRes = await fetch('https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' });
+          const nav = await navRes.json();
+          const fresh = String(nav?.data?.mid || '').trim();
+          if (/^\d+$/.test(fresh) && fresh !== mid) {
+            mid = fresh;
+            foldersPayload = await apiGet('/x/v3/fav/folder/created/list-all', { up_mid: mid }, true);
+          }
+        }
         if (foldersPayload?.code !== 0) {
           throw new Error('获取收藏夹列表失败: ' + (foldersPayload?.message || foldersPayload?.code || 'unknown error'));
         }
         const folders = foldersPayload?.data?.list || [];
-        if (!folders.length) return [];
+        if (!folders.length) {
+          return { mid, rows: [] };
+        }
         const requestedId = String(${{ args.folder_id | json }} || '').trim();
         const folder = requestedId ? folders.find(item => String(item.id) === requestedId) : folders[0];
         if (!folder) throw new Error('未找到收藏夹 ID: ' + requestedId);
         const fid = folder.id;
 
-        // Step 2: Fetch favorite items
         const payload = await apiGet('/x/v3/fav/resource/list', {
           media_id: fid,
           pn: pageNum,
@@ -135,11 +156,18 @@ pipeline:
         }
         const medias = payload?.data?.medias || [];
 
-        return medias.slice(0, Number(limit)).map((item, i) => ({
-          rank: i + 1,
-          title: item.title || '',
-          author: item.upper?.name || '',
-          plays: item.cnt_info?.play || 0,
-          url: item.bvid ? 'https://www.bilibili.com/video/' + item.bvid : ''
-        }));
+        return {
+          mid,
+          rows: medias.slice(0, Number(limit)).map((item, i) => ({
+            rank: i + 1,
+            title: item.title || '',
+            author: item.upper?.name || '',
+            plays: item.cnt_info?.play || 0,
+            url: item.bvid ? 'https://www.bilibili.com/video/' + item.bvid : ''
+          })),
+        };
       })()
+  - kv_set:
+      key: bilibili:me.mid
+      value: ${{ data.mid }}
+  - select: rows

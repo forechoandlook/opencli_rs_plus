@@ -1,3 +1,57 @@
+# 2026-08-10
+
+## 再精简：history / sync / hidden / socket exec / 顶层 status
+
+- **删除** `opencli history` 与 `history.jsonl` 落盘（engine 不再写审计日志）。
+- **删除** `adapter sync`、`hidden` 设置维度（仅保留 disable）。
+- **删除** socket `exec` 远程跑 adapter、裸 `socket` CLI 调试口。
+- 顶层 `status` / `stop` / `restart` 收敛为 **`opencli daemon status|stop|restart|start`**。
+- 可清理本机残留：`jobs.db`、`tools/`、`summaries/`、`feedback.jsonl`、`issues.db`、`history.jsonl`。
+- **CI/Release**：adapter corpus 跳过 `meta.yaml`；release 不再打包已移除的 `summaries/`。
+
+## adapter enable/disable 真正可用
+
+- 设置落到 `~/.opencli-rs/adapter_settings.json`（`opencli-rs-core::AdapterSettings` 共用）。
+- **direct 模式**也会过滤 disabled：不出现在 help，也不能 `opencli <site> <cmd>` 执行。
+- `adapter enable/disable` **不依赖 daemon**（daemon 在线走 socket，离线直接写文件）。
+- 支持 `site command`、`site/command`；**裸 site 名禁用整站**。
+
+## 搜索降级：去掉 FTS / 热榜 / find
+
+- **删除** SQLite FTS5 索引（`index.db`）、BM25、usage 统计、socket `adapter.hot` / `trending` / `reindex`，以及独立命令 `opencli find`。
+- **唯一入口** `opencli adapter search`：内存子串匹配（name/site/description/domain），命中时打印可复制用法；daemon 不可用时本地扫描。
+- 数百级 adapter 规模不需要全文检索引擎；发现靠 search + `opencli <site> --help`。
+
+## 移除定时 job 调度
+
+- **删除** `opencli job *`、`JobStore`（`jobs.db`）、`Scheduler` 轮询循环及 socket `job.*` API。
+- daemon 职责收敛为：adapter/plugin 管理、扩展 action 发现、status/socket；不再做间隔任务调度。
+- 去掉 `--poll-interval` / `--db` 启动参数；需要定时时用系统 cron/launchd 调用 adapter 命令。
+
+## 精简产品面：移除 tools / summary / feedback
+
+- **删除** `opencli tools`（外部 CLI 知识库）、`opencli summary`（adapter 文案浏览）、`opencli feedback`（本地反馈/开 issue）及其实现与文档。
+- `opencli find` 仅搜索 adapter 并打印可复制用法，不再混入 tools。
+- 索引里的 FTS `summary` 列仍来自各站 `meta.yaml`（检索用文本），与已删除的 `summary` 命令无关。
+- 产品重心回到 **adapter 质量**（YAML、回归、plugin 分发、KV 身份缓存）。
+
+## CLI 帮助补全 kv / history / find
+
+- `opencli --help` 此前未展示已实现的 `kv`、`history`、`find`（client 子命令已存在）。现已并入主 CLI 帮助树，避免功能「能跑但不可发现」。
+
+## adapter 分发仓库
+
+- 新增独立仓库 [forechoandlook/opencli-adapters](https://github.com/forechoandlook/opencli-adapters) 作为 YAML adapter 的 plugin 分发源（`opencli plugin install forechoandlook/opencli-adapters` / `plugin update`）。
+- opencli-rs 侧增加 `scripts/sync-adapters-repo.sh`，将本仓 `adapters/` 同步到 opencli-adapters 检出目录；开发仍以 monorepo `adapters/` 为准，远端仓用于用户安装与版本 tag。
+
+## opencli KV + 小红书 favorites 身份解析改造
+
+- **新增本地 KV 存储**（`~/.opencli-rs/kv.json`）：用于跨命令缓存稳定的身份/小状态（如 `xiaohongshu:me.userId`），不存 cookie/token，默认不缓存整份抓取结果。CLI：`opencli kv get|set|list|del|clear`；支持可选 TTL（`30d`/`24h`/`15m`/`60s` 或秒数）；`clear` 全库需 `--all`。
+- **新增 pipeline step**：`kv_get` / `kv_set`。`kv_get` 支持 `field` + `only_if_empty` 合并进当前 data；`kv_set` 默认跳过空值且不改动 pipeline data。
+- **重写 `xiaohongshu favorites`**：不再绕 `creator.xiaohongshu.com` 取 `red_num`。解析顺序为 CLI `--user-id` → KV `xiaohongshu:me.*` → 主站 `__INITIAL_STATE__.user.userInfo`；解析成功后写回 KV；直达 `?tab=fav&subTab=note` 读首屏收藏。换号时以页面 userId 覆盖缓存。
+- **B 站 me mid 接入 KV**：`bilibili me` 每次从 nav 解析后写入 `bilibili:me.mid` / `bilibili:me.uname`；`favorites` / `favorite` / `following`（无 uid 时）优先读 KV，miss 再打 nav；业务失败且疑似换号时回退 nav 并覆盖缓存。不缓存收藏内容本身。
+
+
 # 2026-08-05
 
 ## 闲鱼搜索 adapter
@@ -12,7 +66,7 @@
 - B 站 `download` 不再依赖 `yt-dlp`：仅复用视频页自然提供的 DASH 音视频地址，以页面 Referer/User-Agent 下载后由本机 `ffmpeg` 合成为单个 MP4；不伪造播放签名或调用未验证下载 API。新增通用 YAML `dash-mux` step，供任何页面已提供 DASH 地址的 adapter 复用。
 - 新增 `bilibili comments <BV号>`：读取视频首屏顶层评论，支持热门/最新排序和最多 50 条限制；不点赞、回复、加载二级回复或翻页。
 - 修复 `bilibili favorite`：先读取当前登录 UID 再请求收藏夹，修正 `up_mid=0` 导致误报为空的问题；新增 `bilibili favorites` 列出全部收藏夹（ID、名称、数量和可见性），`favorite --folder_id <ID>` 可读取指定收藏夹内容。两项均为只读。
-- 新增 `xiaohongshu favorites`：先从当前登录创作者账号读取小红书号，再自动打开 `?tab=fav&subTab=note` 并读取自然加载的首屏收藏笔记；保留每项页面提供的 `xsec_token` 链接，不伪造签名、不翻页、不执行收藏或取消收藏。扩展在该页面可提供“导出当前个人收藏”动作。
+- 新增 `xiaohongshu favorites`：解析当前登录用户并打开 `?tab=fav&subTab=note` 读取首屏收藏（实现已于 2026-08-10 改为主站 userInfo + KV，不再依赖创作者中心）。保留每项页面提供的 `xsec_token` 链接，不伪造签名、不翻页、不执行收藏或取消收藏。扩展在该页面可提供“导出当前个人收藏”动作。
 
 ## 主流游戏素材源接入
 
@@ -104,6 +158,17 @@
 - `pypi info`：PyPI 包详情。
 - `crates search` / `crates info`：crates.io Rust 包搜索与详情（带 User-Agent 头）。
 - 约定记录：`${{ }}` 模板引擎不支持函数调用（`encodeURIComponent`、`.slice()`）和可选链 `?.`；`fetch` step 返回的 JSON 不带 `body.` 前缀（仅 `bg_fetch` 带）。
+
+# 2026-08-08
+
+## Daemon 进程管理、统一检索入口、请求审计日志
+
+- **daemon 后台化 + 开机自启**：新增 `opencli daemon start/stop/restart/status/logs/config` 子命令组（`crates/opencli-rs-daemon/src/client.rs`）。`daemon start` 以 detach 方式后台启动（stdin `/dev/null`，stdout/stderr 重定向到 `~/.opencli-rs/daemon.log`），`daemon logs [-f] [-n N]` 查看日志，`daemon config` 打印 socket/db/log/pid/autostart 的解析结果。原有 `opencli daemon`（前台阻塞）、`opencli status/stop/restart` 保持不变，向后兼容。
+  - 修复：`daemon.stop` 之前只是回一个 `{"stopping": true}` 的桩实现，进程从不退出；现在真正在响应发出后延迟 200ms 调用 `std::process::exit(0)` 并清理 pid 文件（`crates/opencli-rs-daemon/src/socket.rs`）。
+- **开机自启**：`opencli daemon autostart install/uninstall/status`（`crates/opencli-rs-daemon/src/autostart.rs`），macOS 生成 `~/Library/LaunchAgents/com.opencli.daemon.plist` 并 `launchctl load -w`，Linux 生成 `~/.config/systemd/user/opencli-daemon.service` 并 `systemctl --user enable --now`。**未自动执行 install**（会修改系统开机行为），需用户手动运行。
+- **统一检索入口**：新增 `opencli find <query>`，一次性搜索 adapters（站点抓取器）和 `opencli tools` 知识库并分别打印；adapter 命中会直接生成可复制的调用命令（含必填 positional 参数和可选 flag 及默认值，取自 `CliCommand.args`），不用再单独跑一次 `--help`。
+- **请求/结果审计日志**：新增 `crates/opencli-rs-engine/src/history.rs`，在唯一的执行入口 `execute_command`（direct CLI 执行和 daemon 定时任务都走这里）落一条 JSON 到 `~/.opencli-rs/history.jsonl`：时间戳、adapter、参数、成功/失败、耗时、结果（截断 4000 字符）或错误。纯本地追加，不接 daemon。新增 `opencli history list [--limit N]` / `opencli history search <query>`。
+- **撤销的方向**：这次同时做了云端任务拉取（daemon 轮询远程端点）和账号凭据 vault（先 OS keychain 后改本地文件），review 后都撤掉了——云端任务的真实需求只是"配置 base URL + key，本地任务自动往外推"，方向和轮询相反，没必要现在建一整套轮询/鉴权/去重的基础设施；vault 则是在没有明确需求下加的一层，直接被判定为过度设计。两者的代码、依赖（`reqwest`、`keyring`、`rpassword`）和 `jobs` 表的 `remote_id` 迁移都已完全移除。
 
 # 2026-04-15
 

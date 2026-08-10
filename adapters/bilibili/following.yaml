@@ -20,13 +20,33 @@ args:
 columns: [mid, name, sign, following, fans]
 
 pipeline:
+  # When uid omitted, fill mid from opencli KV before hitting nav.
+  - evaluate:
+      retry: false
+      js: |
+        (() => {
+          const uidInput = String(args.uid || '').trim();
+          if (!uidInput || uidInput === 'undefined') {
+            return { uid: '', self: true };
+          }
+          if (/^\d+$/.test(uidInput)) {
+            return { uid: uidInput, self: false };
+          }
+          return { uid: uidInput, self: false, needSearch: true };
+        })()
+  - kv_get:
+      key: bilibili:me.mid
+      field: uid
+      only_if_empty: true
   - navigate: https://www.bilibili.com
 
   - evaluate: |
       (async () => {
-        const uidInput = '${{ args.uid }}';
+        const uidInput = String(args.uid || '').trim();
         const pn = ${{ args.page }};
         const ps = Math.min(${{ args.limit }}, 50);
+        let uid = String(data.uid || '').trim();
+        let isSelf = !uidInput || uidInput === 'undefined';
 
         // --- WBI helpers for resolveUid ---
         const MIXIN_KEY_ENC_TAB = [
@@ -107,18 +127,17 @@ pipeline:
         }
         // --- End helpers ---
 
-        // Resolve UID: if not provided, use self; if numeric use directly; otherwise search
-        let uid;
-        if (!uidInput || uidInput === '' || uidInput === 'undefined') {
-          // Get self UID
-          const navRes = await fetch('https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' });
-          const nav = await navRes.json();
-          uid = nav?.data?.mid;
-          if (!uid) throw new Error('AUTH_REQUIRED: bilibili.com');
+        // Resolve target mid: self (KV/nav) | numeric uid | username search
+        if (isSelf) {
+          if (!/^\d+$/.test(uid)) {
+            const navRes = await fetch('https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' });
+            const nav = await navRes.json();
+            uid = String(nav?.data?.mid || '').trim();
+            if (!/^\d+$/.test(uid)) throw new Error('AUTH_REQUIRED: bilibili.com');
+          }
         } else if (/^\d+$/.test(uidInput)) {
           uid = uidInput;
         } else {
-          // Search for user by name
           const payload = await apiGet('/x/web-interface/wbi/search/type', {
             search_type: 'bili_user',
             keyword: uidInput
@@ -131,7 +150,6 @@ pipeline:
           }
         }
 
-        // Fetch following list
         const res = await fetch(
           'https://api.bilibili.com/x/relation/followings?vmid=' + uid + '&pn=' + pn + '&ps=' + ps + '&order=desc',
           { credentials: 'include' }
@@ -143,15 +161,23 @@ pipeline:
         }
 
         const list = payload.data?.list || [];
-        if (list.length === 0) {
-          return [{ mid: '-', name: '共 ' + (payload.data?.total || 0) + ' 人关注，当前页无数据', sign: '', following: '', fans: '' }];
-        }
+        const rows = list.length === 0
+          ? [{ mid: '-', name: '共 ' + (payload.data?.total || 0) + ' 人关注，当前页无数据', sign: '', following: '', fans: '' }]
+          : list.map((u) => ({
+              mid: u.mid,
+              name: u.uname,
+              sign: (u.sign || '').slice(0, 40),
+              following: u.attribute === 6 ? '互相关注' : '已关注',
+              fans: u.official_verify?.desc || ''
+            }));
 
-        return list.map((u) => ({
-          mid: u.mid,
-          name: u.uname,
-          sign: (u.sign || '').slice(0, 40),
-          following: u.attribute === 6 ? '互相关注' : '已关注',
-          fans: u.official_verify?.desc || ''
-        }));
+        return {
+          // Only cache when this run resolved *self*
+          mid: isSelf ? uid : '',
+          rows,
+        };
       })()
+  - kv_set:
+      key: bilibili:me.mid
+      value: ${{ data.mid }}
+  - select: rows

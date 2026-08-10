@@ -49,6 +49,29 @@ impl Registry {
         self.commands.len()
     }
 
+    /// Remove one command. Drops the site entry if it becomes empty.
+    pub fn remove(&mut self, site: &str, name: &str) -> bool {
+        let Some(map) = self.commands.get_mut(site) else {
+            return false;
+        };
+        let removed = map.remove(name).is_some();
+        if map.is_empty() {
+            self.commands.remove(site);
+        }
+        removed
+    }
+
+    /// Drop every command for which `keep` returns false.
+    pub fn retain<F>(&mut self, mut keep: F)
+    where
+        F: FnMut(&CliCommand) -> bool,
+    {
+        self.commands.retain(|_, cmds| {
+            cmds.retain(|_, cmd| keep(cmd));
+            !cmds.is_empty()
+        });
+    }
+
     pub fn command_count(&self) -> usize {
         self.commands.values().map(|v| v.len()).sum()
     }

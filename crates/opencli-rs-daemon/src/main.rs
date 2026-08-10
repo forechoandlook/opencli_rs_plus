@@ -1,26 +1,21 @@
 use clap::Parser;
 use chrono::Local;
 use opencli_rs_daemon::{default_addr, run_client, run_daemon};
-use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::{
     fmt::time::FormatTime,
     EnvFilter, FmtSubscriber,
 };
 
-/// Scheduler daemon subcommand args
+/// Daemon subcommand args
 #[derive(Parser)]
 struct DaemonArgs {
-    #[arg(long, default_value = "10")]
-    poll_interval: u64,
-    #[arg(long)]
-    db: Option<PathBuf>,
     #[arg(long)]
     addr: Option<String>,
 }
 
-// Subcommands that belong to the scheduler client
-const CLIENT_SUBCMDS: &[&str] = &["status", "stop", "restart", "job", "adapter", "plugin", "tools"];
+// Subcommands that belong to the daemon client (top-level aliases collapsed into daemon/*)
+const CLIENT_SUBCMDS: &[&str] = &["adapter", "plugin", "kv"];
 
 #[tokio::main]
 async fn main() {
@@ -53,9 +48,25 @@ async fn main() {
         .skip(1)
         .find(|a| !a.starts_with('-'))
         .map(|s| s.as_str());
+    let daemon_second = raw
+        .iter()
+        .skip(2)
+        .find(|a| !a.starts_with('-'))
+        .map(|s| s.as_str());
+    const DAEMON_MGMT_SUBCMDS: &[&str] = &[
+        "start", "stop", "restart", "status", "logs", "config", "autostart",
+    ];
 
     match subcmd {
-        // ── Scheduler daemon ───────────────────────────────────────────────
+        // ── Daemon process management (background start/stop/logs/autostart) ──
+        Some("daemon") if daemon_second.is_some_and(|s| DAEMON_MGMT_SUBCMDS.contains(&s)) => {
+            if let Err(e) = run_client() {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+
+        // ── Daemon (foreground) ────────────────────────────────────
         Some("daemon") => {
             // Strip "daemon" from args before passing to clap
             let daemon_args: Vec<String> = std::iter::once(raw[0].clone())
@@ -63,13 +74,13 @@ async fn main() {
                 .collect();
             let args = DaemonArgs::parse_from(daemon_args);
             let addr = args.addr.unwrap_or_else(default_addr);
-            if let Err(e) = run_daemon(addr, args.db, args.poll_interval).await {
+            if let Err(e) = run_daemon(addr).await {
                 eprintln!("Daemon error: {}", e);
                 std::process::exit(1);
             }
         }
 
-        // ── Scheduler client ───────────────────────────────────────────────
+        // ── Daemon client ───────────────────────────────────────────────
         Some(s) if CLIENT_SUBCMDS.contains(&s) => {
             if let Err(e) = run_client() {
                 eprintln!("Error: {}", e);

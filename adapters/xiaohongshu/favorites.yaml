@@ -10,6 +10,10 @@ args:
     type: int
     default: 20
     description: "返回首屏笔记数量，最多 30"
+  user-id:
+    type: string
+    required: false
+    description: "内部 userId（hex）；省略则读 opencli kv / 主站登录态并缓存到 xiaohongshu:me.userId"
 
 columns: [id, title, author, likes, type, url]
 
@@ -49,40 +53,110 @@ context:
       })()
 
 pipeline:
-  - navigate:
-      url: https://creator.xiaohongshu.com/new/home
-      settleMs: 2000
-      reuseCurrent: true
-      retry: false
-  - evaluate:
-      retry: false
-      js: |
-        (async () => {
-          const res = await fetch('/api/galaxy/creator/home/personal_info', { credentials: 'include' });
-          const payload = await res.json();
-          const redId = String(payload?.data?.red_num || '').trim();
-          if (!/^\d+$/.test(redId)) throw new Error('无法从当前登录创作者账号解析小红书号。');
-          return redId;
-        })()
-  - navigate:
-      url: https://www.xiaohongshu.com/user/profile/${{ data }}
-      settleMs: 2000
-      retry: false
+  # 1) CLI arg → seed object
   - evaluate:
       retry: false
       js: |
         (() => {
-          const value = window.__INITIAL_STATE__?.user?.userInfo;
-          const info = value?.__v_isRef ? value._value : value;
-          const userId = String(info?.userId || info?.user_id || '').trim();
-          if (!/^[a-zA-Z0-9]{12,}$/.test(userId)) {
-            throw new Error('无法从当前登录账号的公开主页解析内部用户 ID。');
-          }
-          return userId;
+          const arg = String(args['user-id'] || args.user_id || '').trim();
+          const known = /^[a-zA-Z0-9]{12,}$/.test(arg);
+          return {
+            userId: known ? arg : '',
+            source: known ? 'arg' : '',
+            redId: '',
+            nickname: '',
+          };
+        })()
+  # 2) opencli KV identity cache
+  - kv_get:
+      key: xiaohongshu:me.userId
+      field: userId
+      only_if_empty: true
+  - kv_get:
+      key: xiaohongshu:me.redId
+      field: redId
+      only_if_empty: true
+  - kv_get:
+      key: xiaohongshu:me.nickname
+      field: nickname
+      only_if_empty: true
+  # 3) Choose URL: known userId → fav tab; else explore to read userInfo
+  - evaluate:
+      retry: false
+      js: |
+        (() => {
+          const userId = String(data.userId || '').trim();
+          const known = /^[a-zA-Z0-9]{12,}$/.test(userId);
+          return {
+            userId: known ? userId : '',
+            source: known ? (data.source || 'kv') : '',
+            redId: String(data.redId || ''),
+            nickname: String(data.nickname || ''),
+            resolveUrl: known
+              ? ('https://www.xiaohongshu.com/user/profile/' + encodeURIComponent(userId) + '?tab=fav&subTab=note')
+              : 'https://www.xiaohongshu.com/explore',
+          };
         })()
   - navigate:
-      url: https://www.xiaohongshu.com/user/profile/${{ data }}?tab=fav&subTab=note
+      url: ${{ data.resolveUrl }}
       settleMs: 2000
+      reuseCurrent: true
+      retry: false
+  # 4) Authoritative me from main-site userInfo; detect account switch
+  - evaluate:
+      retry: false
+      js: |
+        (() => {
+          const unwrap = (v) => (v && v.__v_isRef) ? v._value : v;
+          const info = unwrap(window.__INITIAL_STATE__?.user?.userInfo) || {};
+          const pageId = String(info.userId || info.user_id || '').trim();
+          const redId = String(info.redId || info.red_id || '').trim();
+          const nickname = String(info.nickname || '').trim();
+          let userId = String(data.userId || '').trim();
+          let source = String(data.source || '');
+          let persist = false;
+
+          if (/^[a-zA-Z0-9]{12,}$/.test(pageId)) {
+            if (!/^[a-zA-Z0-9]{12,}$/.test(userId) || userId !== pageId) {
+              userId = pageId;
+              source = 'page';
+              persist = true;
+            }
+          }
+
+          if (!/^[a-zA-Z0-9]{12,}$/.test(userId)) {
+            throw new Error('无法从主站登录态解析内部 userId。请先在 Chrome 登录 www.xiaohongshu.com。');
+          }
+
+          const pathId = (location.pathname.match(/\/user\/profile\/([a-zA-Z0-9]+)/) || [])[1] || '';
+          const q = new URL(location.href).searchParams;
+          const onFav = pathId === userId && q.get('tab') === 'fav' && q.get('subTab') === 'note';
+
+          return {
+            userId,
+            redId: redId || String(data.redId || ''),
+            nickname: nickname || String(data.nickname || ''),
+            source,
+            persist,
+            onFav,
+            favUrl: 'https://www.xiaohongshu.com/user/profile/' + encodeURIComponent(userId) + '?tab=fav&subTab=note',
+          };
+        })()
+  # 5) Cache identity (skip empty)
+  - kv_set:
+      key: xiaohongshu:me.userId
+      value: ${{ data.userId }}
+  - kv_set:
+      key: xiaohongshu:me.redId
+      value: ${{ data.redId }}
+  - kv_set:
+      key: xiaohongshu:me.nickname
+      value: ${{ data.nickname }}
+  # 6) Ensure fav tab (reuseCurrent skips work if already there)
+  - navigate:
+      url: ${{ data.favUrl }}
+      settleMs: 2000
+      reuseCurrent: true
       retry: false
   - evaluate:
       retry: false
@@ -90,7 +164,7 @@ pipeline:
         (() => {
           const query = new URL(location.href).searchParams;
           if (query.get('tab') !== 'fav' || query.get('subTab') !== 'note') {
-            throw new Error('请提供或打开带有 ?tab=fav&subTab=note 的个人收藏页。');
+            throw new Error('未能打开个人收藏页（?tab=fav&subTab=note）。');
           }
           const userStore = window.__INITIAL_STATE__?.user || {};
           const noteGroups = userStore.notes?._value || userStore.notes || [];

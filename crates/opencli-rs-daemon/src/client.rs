@@ -1,12 +1,8 @@
-//! Scheduler daemon client — connects via TCP JSON-RPC and sends commands.
+//! opencli daemon client — connects via TCP JSON-RPC and sends commands.
 
-use crate::tools;
 use anyhow::Result;
-use chrono::{DateTime, Duration, Utc};
 use clap::{Parser, Subcommand};
 use serde_json::Value;
-use std::path::PathBuf;
-use tools::{find_by_name, load_tools, search, summary};
 
 fn default_addr() -> String {
     "127.0.0.1:10008".to_string()
@@ -25,120 +21,100 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Check daemon status
-    Status,
-    /// Stop the running daemon
-    Stop,
-    /// Restart the daemon
-    Restart {
-        #[arg(long, default_value = "10")]
-        poll_interval: u64,
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Job management
-    Job {
+    /// Manage the daemon process (start/stop/status/logs/autostart)
+    Daemon {
         #[command(subcommand)]
-        sub: JobSubcommand,
+        sub: DaemonSubcommand,
     },
     /// Adapter management
     Adapter {
         #[command(subcommand)]
         sub: AdapterSubcommand,
     },
-    /// Tool knowledge base
-    Tools {
-        #[command(subcommand)]
-        sub: ToolsSubcommand,
-    },
     /// Plugin management
     Plugin {
         #[command(subcommand)]
         sub: PluginSubcommand,
     },
-    /// Send a raw socket command (for debugging)
-    Socket {
-        #[arg(trailing_var_arg = true)]
-        args: Vec<String>,
+    /// Local key-value store for identity/session hints (`~/.opencli-rs/kv.json`)
+    Kv {
+        #[command(subcommand)]
+        sub: KvSubcommand,
     },
 }
 
 #[derive(Subcommand)]
-enum ToolsSubcommand {
-    /// Search for tools by keyword
-    Search { query: String },
-    /// List all tools
-    List,
-    /// Show tool details
-    Info { name: String },
-    /// Show all tool names and short descriptions
-    Summary,
-}
-
-#[derive(Subcommand)]
-enum JobSubcommand {
-    /// Schedule an adapter to run once or repeatedly
-    ///
-    /// Job life-cycle:  pending → running → done | failed | cancelled
-    ///
-    /// Examples:
-    ///   opencli job add zhihu/hot
-    ///   opencli job add zhihu/hot --delay 300           # run in 5 min
-    ///   opencli job add zhihu/hot --interval 3600       # run hourly
-    ///   opencli job add twitter/search --args '{"query":"rust"}'
-    Add {
-        /// Adapter to schedule, in the form 'site/command', e.g. zhihu/hot
-        adapter: String,
-
-        /// Absolute run time (ISO 8601 or 'now'). Mutually exclusive with --delay.
-        /// Examples: 2026-01-01T09:00:00, now
-        #[arg(short, long)]
-        run_at: Option<String>,
-
-        /// Run after N seconds from now. Mutually exclusive with --run-at.
-        #[arg(short = 'd', long)]
-        delay: Option<i64>,
-
-        /// Repeat every N seconds (omit for a one-shot job).
-        /// Example: --interval 3600 for hourly execution.
-        #[arg(short, long)]
-        interval: Option<i64>,
-
-        /// Adapter arguments as a JSON object.
-        /// Example: --args '{"query":"rust","limit":20}'
-        #[arg(short, long)]
-        args: Option<String>,
+enum KvSubcommand {
+    /// Read one key
+    Get {
+        key: String,
     },
-    /// List jobs, optionally filtered by status
+    /// Write one key (value is a string; use --json for raw JSON)
+    Set {
+        key: String,
+        value: String,
+        /// Optional TTL: 30d / 24h / 15m / 60s / bare seconds
+        #[arg(long)]
+        ttl: Option<String>,
+        /// Parse value as JSON instead of a plain string
+        #[arg(long)]
+        json: bool,
+    },
+    /// List keys (optional prefix filter)
     List {
-        /// Filter by status: pending | running | done | failed | cancelled
+        #[arg(long)]
+        prefix: Option<String>,
+    },
+    /// Delete one key
+    Del {
+        key: String,
+    },
+    /// Clear all keys, or only those with a prefix
+    Clear {
+        #[arg(long)]
+        prefix: Option<String>,
+        /// Required when clearing the entire store
+        #[arg(long)]
+        all: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DaemonSubcommand {
+    /// Start the daemon in the background (detached, logs to ~/.opencli-rs/daemon.log)
+    Start,
+    /// Stop the running daemon
+    Stop,
+    /// Stop and restart the daemon in the background
+    Restart,
+    /// Show daemon health and process status
+    Status,
+    /// Show daemon log output
+    Logs {
+        /// Follow the log file (like tail -f)
         #[arg(short, long)]
-        status: Option<String>,
-        /// Maximum number of jobs to return
-        #[arg(short, long, default_value = "50")]
-        limit: usize,
+        follow: bool,
+        /// Number of lines to show from the end
+        #[arg(short = 'n', long, default_value = "50")]
+        lines: usize,
     },
-    /// Show full details of a job by ID (a unique prefix is sufficient)
-    Show {
-        /// Job ID (a unique prefix is sufficient)
-        id: String,
+    /// Show resolved daemon configuration (addr, log path, autostart)
+    Config,
+    /// Manage boot-time autostart (launchd on macOS, systemd --user on Linux)
+    Autostart {
+        #[command(subcommand)]
+        sub: AutostartSubcommand,
     },
-    /// Cancel a pending job — keeps the history record, stops execution
-    ///
-    /// Use 'delete' if you want to remove the record entirely.
-    Cancel {
-        /// Job ID (a unique prefix is sufficient)
-        id: String,
-    },
-    /// Delete a job record permanently from the database
-    ///
-    /// Use 'cancel' if you want to stop execution but keep the history.
-    Delete {
-        /// Job ID (a unique prefix is sufficient)
-        id: String,
-    },
-    /// Force-trigger all due jobs immediately (useful for testing)
-    Run,
+}
+
+#[derive(Subcommand)]
+enum AutostartSubcommand {
+    /// Install and enable autostart on login
+    Install,
+    /// Disable and remove autostart
+    Uninstall,
+    /// Show autostart status
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -163,8 +139,6 @@ enum AdapterSubcommand {
     List {
         #[arg(long)]
         include_disabled: bool,
-        #[arg(long)]
-        include_hidden: bool,
     },
     /// Search adapters
     Search { query: String },
@@ -172,11 +146,6 @@ enum AdapterSubcommand {
     Enable { name: String },
     /// Disable an adapter
     Disable { name: String },
-    /// Sync adapters from a folder
-    Sync {
-        #[arg(short, long)]
-        folder: Option<PathBuf>,
-    },
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -222,22 +191,6 @@ fn socket_request(addr: &str, method: &str, params: Value) -> Result<Value> {
     }
 }
 
-fn parse_datetime(s: &str) -> Result<DateTime<Utc>> {
-    if s == "now" {
-        return Ok(Utc::now());
-    }
-    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-        return Ok(dt.with_timezone(&Utc));
-    }
-    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
-        return Ok(dt.and_utc());
-    }
-    if let Ok(dt) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        return Ok(dt.and_hms_opt(0, 0, 0).unwrap().and_utc());
-    }
-    anyhow::bail!("Invalid date format: {}. Use ISO8601 or 'now'", s)
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Command handlers
 // ──────────────────────────────────────────────────────────────────────────────
@@ -264,13 +217,6 @@ fn cmd_status(addr: &str) -> Result<()> {
                 .unwrap_or(0)
         );
     }
-    if let Some(jobs) = result.get("jobs") {
-        println!(
-            "Jobs: {} pending, {} running",
-            jobs.get("pending").and_then(|v| v.as_i64()).unwrap_or(0),
-            jobs.get("running").and_then(|v| v.as_i64()).unwrap_or(0)
-        );
-    }
     Ok(())
 }
 
@@ -280,29 +226,130 @@ fn cmd_stop(addr: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_restart(addr: &str, poll_interval: u64, db: Option<PathBuf>) -> Result<()> {
-    let _ = cmd_stop(addr);
-    std::thread::sleep(std::time::Duration::from_secs(1));
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("opencli"));
-    let mut child = std::process::Command::new(exe);
-    child.arg("daemon");
-    child.arg("--poll-interval").arg(poll_interval.to_string());
-    child.arg("--addr").arg(addr);
-    if let Some(db) = db {
-        child.arg("--db").arg(db);
+fn cmd_daemon_start(addr: &str) -> Result<()> {
+    use std::fs::OpenOptions;
+    use std::process::Stdio;
+
+    if socket_request(addr, "daemon.status", serde_json::json!({})).is_ok() {
+        println!("Daemon already running at {}", addr);
+        return Ok(());
     }
-    child.spawn()?;
-    println!("Daemon restarted");
+
+    let log_path = crate::default_log_path();
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let stdout_file = OpenOptions::new().create(true).append(true).open(&log_path)?;
+    let stderr_file = OpenOptions::new().create(true).append(true).open(&log_path)?;
+
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("opencli"));
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("daemon")
+        .arg("--addr")
+        .arg(addr)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file));
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let child = cmd.spawn()?;
+    println!(
+        "Daemon started in background (pid {}), addr {}, logs: {}",
+        child.id(),
+        addr,
+        log_path.display()
+    );
     Ok(())
 }
 
-fn cmd_adapter_list(addr: &str, include_disabled: bool, include_hidden: bool) -> Result<()> {
+fn cmd_daemon_logs(follow: bool, lines: usize) -> Result<()> {
+    let log_path = crate::default_log_path();
+    if !log_path.exists() {
+        println!("No log file yet at {}", log_path.display());
+        return Ok(());
+    }
+    if follow {
+        let status = std::process::Command::new("tail")
+            .arg("-f")
+            .arg("-n")
+            .arg(lines.to_string())
+            .arg(&log_path)
+            .status()?;
+        if !status.success() {
+            anyhow::bail!("tail exited with {:?}", status.code());
+        }
+    } else {
+        let content = std::fs::read_to_string(&log_path)?;
+        let all_lines: Vec<&str> = content.lines().collect();
+        let start = all_lines.len().saturating_sub(lines);
+        for line in &all_lines[start..] {
+            println!("{}", line);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_daemon_config(addr: &str) -> Result<()> {
+    let log_path = crate::default_log_path();
+    let pid_path = crate::default_pid_path();
+    let extension_api_addr = std::env::var("OPENCLI_EXTENSION_API_ADDR")
+        .unwrap_or_else(|_| crate::extension_api::DEFAULT_EXTENSION_API_ADDR.to_string());
+    let autostart = crate::autostart::status();
+    let pid = std::fs::read_to_string(&pid_path).ok();
+
+    println!("Socket addr:        {}", addr);
+    println!("Extension API addr: {}", extension_api_addr);
+    println!("Log path:           {}", log_path.display());
+    println!(
+        "PID file:           {} ({})",
+        pid_path.display(),
+        pid.as_deref().unwrap_or("not running")
+    );
+    println!(
+        "Autostart:          {} — file {} — installed: {} — loaded: {}",
+        autostart.platform,
+        autostart.file_path.display(),
+        autostart.installed,
+        autostart.loaded
+    );
+    Ok(())
+}
+
+fn cmd_autostart_install(addr: &str) -> Result<()> {
+    crate::autostart::install(addr)?;
+    let status = crate::autostart::status();
+    println!(
+        "Autostart installed via {} ({})",
+        status.platform,
+        status.file_path.display()
+    );
+    Ok(())
+}
+
+fn cmd_autostart_uninstall() -> Result<()> {
+    crate::autostart::uninstall()?;
+    println!("Autostart removed");
+    Ok(())
+}
+
+fn cmd_autostart_status() -> Result<()> {
+    let status = crate::autostart::status();
+    println!("Platform:  {}", status.platform);
+    println!("File:      {}", status.file_path.display());
+    println!("Installed: {}", status.installed);
+    println!("Loaded:    {}", status.loaded);
+    Ok(())
+}
+
+fn cmd_adapter_list(addr: &str, include_disabled: bool) -> Result<()> {
     let result = socket_request(
         addr,
         "adapter.list",
         serde_json::json!({
             "include_disabled": include_disabled,
-            "include_hidden": include_hidden,
         }),
     )?;
     let adapters = result
@@ -349,7 +396,7 @@ fn cmd_adapter_list(addr: &str, include_disabled: bool, include_hidden: bool) ->
 }
 
 fn cmd_adapter_search(addr: &str, query: &str) -> Result<()> {
-    // Try daemon first; fall back to local scan if it isn't running.
+    // Prefer daemon registry (plugins + disable state); fall back to local scan.
     match socket_request(
         addr,
         "adapter.search",
@@ -360,38 +407,21 @@ fn cmd_adapter_search(addr: &str, query: &str) -> Result<()> {
                 .get("adapters")
                 .and_then(|v| v.as_array())
                 .map_or(&[] as &[_], |v| v.as_slice());
-            let count = result.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
             if adapters.is_empty() {
                 println!("No adapters found matching '{}'.", query);
                 return Ok(());
             }
-            println!("{:30} {:12} Description", "Name", "Browser");
-            println!("{}", "-".repeat(70));
             for entry in adapters {
-                let name = entry
-                    .get("full_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                let browser = entry
-                    .get("browser")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let desc = entry
-                    .get("description")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                println!(
-                    "{:30} {:12} {}",
-                    name,
-                    if browser { "yes" } else { "no" },
-                    desc.chars().take(35).collect::<String>()
-                );
+                print_adapter_hit_json(entry);
             }
-            println!("\n{} results for '{}' (daemon)", count, query);
+            println!(
+                "\n{} match(es) for '{}'",
+                result.get("count").and_then(|v| v.as_i64()).unwrap_or(0),
+                query
+            );
         }
         Err(e) if e.to_string().contains("Failed to connect") => {
-            // Daemon is not running — fall back to local file-system scan
-            eprintln!("(daemon not running, searching local adapter files)");
+            eprintln!("(daemon not running — local adapters only)");
             cmd_adapter_search_local(query)?;
         }
         Err(e) => return Err(e),
@@ -399,8 +429,7 @@ fn cmd_adapter_search(addr: &str, query: &str) -> Result<()> {
     Ok(())
 }
 
-/// Local fallback: scan the adapter registry from disk and do a simple
-/// case-insensitive substring match against name, site, and description.
+/// Local fallback: substring match on name / site / description / domain.
 fn cmd_adapter_search_local(query: &str) -> Result<()> {
     use opencli_rs_core::Registry;
     use opencli_rs_discovery::discover_adapters;
@@ -412,9 +441,16 @@ fn cmd_adapter_search_local(query: &str) -> Result<()> {
     let mut hits = Vec::new();
     for site in registry.list_sites() {
         for cmd in registry.list_commands(site) {
-            let haystack =
-                format!("{} {} {}", cmd.full_name(), site, cmd.description).to_lowercase();
-            if haystack.contains(&q) {
+            let domain = cmd.domain.as_deref().unwrap_or("");
+            let haystack = format!(
+                "{} {} {} {}",
+                cmd.full_name(),
+                site,
+                cmd.description,
+                domain
+            )
+            .to_lowercase();
+            if q.is_empty() || haystack.contains(&q) {
                 hits.push(cmd.clone());
             }
         }
@@ -425,276 +461,168 @@ fn cmd_adapter_search_local(query: &str) -> Result<()> {
         return Ok(());
     }
 
-    println!("{:30} {:12} Description", "Name", "Browser");
-    println!("{}", "-".repeat(70));
     for cmd in &hits {
-        let browser = cmd.needs_browser();
-        let desc = cmd.description.as_str();
-        println!(
-            "{:30} {:12} {}",
-            cmd.full_name(),
-            if browser { "yes" } else { "no" },
-            desc.chars().take(35).collect::<String>()
-        );
+        print_adapter_hit_cmd(cmd);
     }
-    println!("\n{} results for '{}' (local scan)", hits.len(), query);
+    println!("\n{} match(es) for '{}'", hits.len(), query);
     Ok(())
 }
 
-fn cmd_adapter_enable(addr: &str, name: &str) -> Result<()> {
-    let result = socket_request(addr, "adapter.enable", serde_json::json!({ "name": name }))?;
-    let enabled = result
-        .get("enabled")
+fn print_adapter_hit_json(entry: &Value) {
+    let name = entry
+        .get("full_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let browser = entry
+        .get("browser")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let desc = entry
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     println!(
-        "{}",
-        if enabled {
-            format!("Adapter '{}' enabled", name)
-        } else {
-            format!("Failed to enable '{}'", name)
-        }
+        "\n{}  (browser: {})",
+        name,
+        if browser { "yes" } else { "no" }
     );
+    if !desc.is_empty() {
+        println!("  {}", desc);
+    }
+    println!("  用法: {}", usage_from_entry_json(entry));
+}
+
+fn print_adapter_hit_cmd(cmd: &opencli_rs_core::CliCommand) {
+    println!(
+        "\n{}  (browser: {})",
+        cmd.full_name(),
+        if cmd.needs_browser() { "yes" } else { "no" }
+    );
+    if !cmd.description.is_empty() {
+        println!("  {}", cmd.description);
+    }
+    println!("  用法: {}", adapter_usage_line(cmd));
+}
+
+fn usage_from_entry_json(entry: &Value) -> String {
+    let name = entry
+        .get("full_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let mut parts = vec![format!("opencli {}", name)];
+    let args = entry
+        .get("args")
+        .and_then(|v| v.as_array())
+        .map(|a| a.as_slice())
+        .unwrap_or(&[]);
+    for a in args {
+        let n = a.get("name").and_then(|v| v.as_str()).unwrap_or("arg");
+        let positional = a
+            .get("positional")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let required = a
+            .get("required")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !positional {
+            continue;
+        }
+        parts.push(if required {
+            format!("<{}>", n)
+        } else {
+            format!("[<{}>]", n)
+        });
+    }
+    for a in args {
+        let n = a.get("name").and_then(|v| v.as_str()).unwrap_or("arg");
+        let positional = a
+            .get("positional")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let required = a
+            .get("required")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if positional {
+            continue;
+        }
+        if required {
+            parts.push(format!("--{} <value>", n));
+        } else if let Some(d) = a.get("default").and_then(|v| {
+            if v.is_string() {
+                v.as_str().map(|s| s.to_string())
+            } else if v.is_null() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        }) {
+            parts.push(format!("[--{}={}]", n, d));
+        } else {
+            parts.push(format!("[--{} <value>]", n));
+        }
+    }
+    parts.join(" ")
+}
+
+fn cmd_adapter_enable(addr: &str, name: &str) -> Result<()> {
+    let name = opencli_rs_core::AdapterSettings::normalize_name(name);
+    match socket_request(addr, "adapter.enable", serde_json::json!({ "name": name })) {
+        Ok(result) => {
+            let enabled = result
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if enabled {
+                println!("Adapter '{}' enabled", name);
+            } else {
+                println!("Adapter '{}' was not on the disable list", name);
+            }
+        }
+        Err(e) if e.to_string().contains("Failed to connect") => {
+            let mut settings = opencli_rs_core::AdapterSettings::load();
+            let changed = settings.enable(&name).map_err(|e| anyhow::anyhow!(e))?;
+            if changed {
+                println!(
+                    "Adapter '{}' enabled (wrote {})",
+                    name,
+                    opencli_rs_core::AdapterSettings::path().display()
+                );
+            } else {
+                println!("Adapter '{}' was not on the disable list", name);
+            }
+        }
+        Err(e) => return Err(e),
+    }
     Ok(())
 }
 
 fn cmd_adapter_disable(addr: &str, name: &str) -> Result<()> {
-    let result = socket_request(addr, "adapter.disable", serde_json::json!({ "name": name }))?;
-    let enabled = result
-        .get("enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    println!(
-        "{}",
-        if !enabled {
-            format!("Adapter '{}' disabled", name)
-        } else {
-            format!("Failed to disable '{}'", name)
-        }
-    );
-    Ok(())
-}
-
-fn cmd_adapter_sync(addr: &str, folder: Option<PathBuf>) -> Result<()> {
-    let result = socket_request(
-        addr,
-        "adapter.sync",
-        serde_json::json!({
-            "folder": folder.map(|p| p.display().to_string()),
-        }),
-    )?;
-    let synced = result.get("synced").and_then(|v| v.as_i64()).unwrap_or(0);
-    let folder_str = result.get("folder").and_then(|v| v.as_str()).unwrap_or("?");
-    println!("Synced {} adapters from '{}'", synced, folder_str);
-    Ok(())
-}
-
-fn cmd_job_add(
-    addr: &str,
-    adapter: &str,
-    run_at: Option<String>,
-    delay: Option<i64>,
-    interval: Option<i64>,
-    args_json: Option<String>,
-) -> Result<()> {
-    let run_at_dt = match (run_at.as_deref(), delay) {
-        (Some(s), _) => parse_datetime(s)?,
-        (None, Some(d)) => Utc::now() + Duration::seconds(d),
-        (None, None) => Utc::now(),
-    };
-    let args_val: Option<Value> = args_json
-        .as_ref()
-        .and_then(|s| serde_json::from_str(s).ok());
-    let result = socket_request(
-        addr,
-        "job.add",
-        serde_json::json!({
-            "adapter": adapter,
-            "args": args_val,
-            "run_at": run_at_dt.to_rfc3339(),
-            "interval_seconds": interval,
-        }),
-    )?;
-    let job = &result["job"];
-    println!("Job created: {}", job["id"].as_str().unwrap_or("?"));
-    println!(
-        "   Adapter: {}  |  Run at: {}  |  Status: {}",
-        job["adapter"].as_str().unwrap_or("?"),
-        job["run_at"].as_str().unwrap_or("?"),
-        job["status"].as_str().unwrap_or("?")
-    );
-    Ok(())
-}
-
-fn cmd_job_list(addr: &str, status: Option<String>, limit: usize) -> Result<()> {
-    let result = socket_request(
-        addr,
-        "job.list",
-        serde_json::json!({
-            "status": status,
-            "limit": limit,
-        }),
-    )?;
-    let jobs = result
-        .get("jobs")
-        .and_then(|v| v.as_array())
-        .map_or(&[] as &[_], |v| v.as_slice());
-    if jobs.is_empty() {
-        println!("No jobs found.");
-        return Ok(());
-    }
-    println!(
-        "{:40} {:20} {:12} {:20}",
-        "ID", "Adapter", "Status", "Run At"
-    );
-    println!("{}", "-".repeat(95));
-    for job in jobs {
-        let id = job["id"].as_str().unwrap_or("?");
-        println!(
-            "{:40} {:20} {:12} {}",
-            &id[..8.min(id.len())],
-            job["adapter"].as_str().unwrap_or("?"),
-            job["status"].as_str().unwrap_or("?"),
-            job["run_at"].as_str().unwrap_or("?")
-        );
-    }
-    println!("\n{} jobs total", jobs.len());
-    Ok(())
-}
-
-fn cmd_job_show(addr: &str, id: &str) -> Result<()> {
-    let result = socket_request(addr, "job.show", serde_json::json!({ "id": id }))?;
-    let job = &result["job"];
-    println!("ID:       {}", job["id"].as_str().unwrap_or("?"));
-    println!("Adapter:  {}", job["adapter"].as_str().unwrap_or("?"));
-    println!("Status:   {}", job["status"].as_str().unwrap_or("?"));
-    println!("Run at:   {}", job["run_at"].as_str().unwrap_or("?"));
-    if let Some(i) = job["interval_seconds"].as_i64() {
-        if i > 0 {
-            println!("Interval: {}s", i);
-        }
-    }
-    if let Some(args) = job.get("args").filter(|v| !v.is_null()) {
-        println!(
-            "Args:     {}",
-            serde_json::to_string_pretty(args).unwrap_or_default()
-        );
-    }
-    if let Some(r) = job["result"].as_str() {
-        println!("Result:   {}", r.chars().take(200).collect::<String>());
-    }
-    if let Some(e) = job["error"].as_str() {
-        println!("Error:    {}", e);
-    }
-    Ok(())
-}
-
-fn cmd_job_cancel(addr: &str, id: &str) -> Result<()> {
-    socket_request(addr, "job.cancel", serde_json::json!({ "id": id }))?;
-    println!("Cancelled: {}", id);
-    Ok(())
-}
-
-fn cmd_job_delete(addr: &str, id: &str) -> Result<()> {
-    socket_request(addr, "job.delete", serde_json::json!({ "id": id }))?;
-    println!("Deleted: {}", id);
-    Ok(())
-}
-
-fn cmd_tools_search(query: &str) -> Result<()> {
-    let tools = load_tools();
-    let results = search(query, &tools);
-    if results.is_empty() {
-        println!("No tools found for '{}'.", query);
-        return Ok(());
-    }
-    println!(
-        "{:25} {:20} {:10} Description",
-        "Name", "Binary", "Installed"
-    );
-    println!("{}", "-".repeat(85));
-    for t in results {
-        println!(
-            "{:25} {:20} {:10} {}",
-            t.name,
-            t.binary,
-            if t.is_installed() { "yes" } else { "no" },
-            t.description.chars().take(35).collect::<String>()
-        );
-    }
-    Ok(())
-}
-
-fn cmd_tools_list() -> Result<()> {
-    let tools = load_tools();
-    if tools.is_empty() {
-        println!("No tools found. Add .md files to ~/.opencli-rs/tools/");
-        return Ok(());
-    }
-    println!(
-        "{:25} {:20} {:10} Description",
-        "Name", "Binary", "Installed"
-    );
-    println!("{}", "-".repeat(85));
-    for t in &tools {
-        println!(
-            "{:25} {:20} {:10} {}",
-            t.name,
-            t.binary,
-            if t.is_installed() { "yes" } else { "no" },
-            t.description.chars().take(35).collect::<String>()
-        );
-    }
-    Ok(())
-}
-
-fn cmd_tools_info(name: &str) -> Result<()> {
-    let tools = load_tools();
-    match find_by_name(name, &tools) {
-        None => println!("Tool '{}' not found.", name),
-        Some(t) => {
-            println!("Name:        {}", t.name);
-            println!("Binary:      {}", t.binary);
+    let name = opencli_rs_core::AdapterSettings::normalize_name(name);
+    match socket_request(addr, "adapter.disable", serde_json::json!({ "name": name })) {
+        Ok(_) => {
             println!(
-                "Installed:   {}",
-                if t.is_installed() { "yes" } else { "no" }
+                "Adapter '{}' disabled\n  (hidden from help/search; direct runs blocked)",
+                name
             );
-            if let Some(hp) = &t.homepage {
-                println!("Homepage:    {}", hp);
-            }
-            if !t.description.is_empty() {
-                println!("Description: {}", t.description);
-            }
-            if !t.tags.is_empty() {
-                println!("Tags:        {}", t.tags.join(", "));
-            }
-            if let Some(cmd) = t.install_cmd() {
-                println!("Install:     {}", cmd);
-            }
-            if !t.body.trim().is_empty() {
-                println!("\n{}", t.body.trim());
+            if !name.contains(' ') {
+                println!("  note: bare site name disables the whole '{}' family", name);
             }
         }
-    }
-    Ok(())
-}
-
-fn cmd_tools_summary() -> Result<()> {
-    let tools = load_tools();
-    if tools.is_empty() {
-        println!("No tools found. Add .md files to ~/.opencli-rs/tools/");
-        return Ok(());
-    }
-    let items = summary(&tools);
-    println!("{:25} {:10} Description", "Name", "Installed");
-    println!("{}", "-".repeat(70));
-    for s in items {
-        println!(
-            "{:25} {:10} {}",
-            s.name,
-            if s.installed { "yes" } else { "no" },
-            s.description.chars().take(35).collect::<String>()
-        );
+        Err(e) if e.to_string().contains("Failed to connect") => {
+            let mut settings = opencli_rs_core::AdapterSettings::load();
+            settings.disable(&name).map_err(|e| anyhow::anyhow!(e))?;
+            println!(
+                "Adapter '{}' disabled (wrote {})\n  (hidden from help/search; direct runs blocked)",
+                name,
+                opencli_rs_core::AdapterSettings::path().display()
+            );
+            if !name.contains(' ') {
+                println!("  note: bare site name disables the whole '{}' family", name);
+            }
+        }
+        Err(e) => return Err(e),
     }
     Ok(())
 }
@@ -784,12 +712,6 @@ fn cmd_plugin_update(addr: &str, name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn cmd_job_run(addr: &str) -> Result<()> {
-    socket_request(addr, "job.run", serde_json::json!({}))?;
-    println!("Due jobs triggered");
-    Ok(())
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Main
 // ──────────────────────────────────────────────────────────────────────────────
@@ -799,45 +721,31 @@ pub fn run() -> Result<()> {
     let addr = args.addr.unwrap_or_else(default_addr);
 
     match args.command {
-        Command::Status => cmd_status(&addr)?,
-        Command::Stop => cmd_stop(&addr)?,
-        Command::Restart { poll_interval, db } => cmd_restart(&addr, poll_interval, db)?,
-
-        Command::Job { sub } => match sub {
-            JobSubcommand::Add {
-                adapter,
-                run_at,
-                delay,
-                interval,
-                args: args_json,
-            } => {
-                cmd_job_add(&addr, &adapter, run_at, delay, interval, args_json)?;
+        Command::Daemon { sub } => match sub {
+            DaemonSubcommand::Start => cmd_daemon_start(&addr)?,
+            DaemonSubcommand::Stop => cmd_stop(&addr)?,
+            DaemonSubcommand::Restart => {
+                let _ = cmd_stop(&addr);
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                cmd_daemon_start(&addr)?
             }
-            JobSubcommand::List { status, limit } => cmd_job_list(&addr, status, limit)?,
-            JobSubcommand::Show { id } => cmd_job_show(&addr, &id)?,
-            JobSubcommand::Cancel { id } => cmd_job_cancel(&addr, &id)?,
-            JobSubcommand::Delete { id } => cmd_job_delete(&addr, &id)?,
-            JobSubcommand::Run => cmd_job_run(&addr)?,
+            DaemonSubcommand::Status => cmd_status(&addr)?,
+            DaemonSubcommand::Logs { follow, lines } => cmd_daemon_logs(follow, lines)?,
+            DaemonSubcommand::Config => cmd_daemon_config(&addr)?,
+            DaemonSubcommand::Autostart { sub } => match sub {
+                AutostartSubcommand::Install => cmd_autostart_install(&addr)?,
+                AutostartSubcommand::Uninstall => cmd_autostart_uninstall()?,
+                AutostartSubcommand::Status => cmd_autostart_status()?,
+            },
         },
 
         Command::Adapter { sub } => match sub {
-            AdapterSubcommand::List {
-                include_disabled,
-                include_hidden,
-            } => {
-                cmd_adapter_list(&addr, include_disabled, include_hidden)?;
+            AdapterSubcommand::List { include_disabled } => {
+                cmd_adapter_list(&addr, include_disabled)?;
             }
             AdapterSubcommand::Search { query } => cmd_adapter_search(&addr, &query)?,
             AdapterSubcommand::Enable { name } => cmd_adapter_enable(&addr, &name)?,
             AdapterSubcommand::Disable { name } => cmd_adapter_disable(&addr, &name)?,
-            AdapterSubcommand::Sync { folder } => cmd_adapter_sync(&addr, folder)?,
-        },
-
-        Command::Tools { sub } => match sub {
-            ToolsSubcommand::Search { query } => cmd_tools_search(&query)?,
-            ToolsSubcommand::List => cmd_tools_list()?,
-            ToolsSubcommand::Info { name } => cmd_tools_info(&name)?,
-            ToolsSubcommand::Summary => cmd_tools_summary()?,
         },
 
         Command::Plugin { sub } => match sub {
@@ -847,19 +755,116 @@ pub fn run() -> Result<()> {
             PluginSubcommand::Update { name } => cmd_plugin_update(&addr, name.as_deref())?,
         },
 
-        Command::Socket { args: raw_args } => {
-            if raw_args.is_empty() {
-                anyhow::bail!("Usage: socket <method> [params_json]");
-            }
-            let method = &raw_args[0];
-            let params: Value = raw_args
-                .get(1)
-                .and_then(|s| serde_json::from_str(s).ok())
-                .unwrap_or(serde_json::json!({}));
-            let result = socket_request(&addr, method, params)?;
-            println!("{}", serde_json::to_string_pretty(&result)?);
-        }
+        Command::Kv { sub } => cmd_kv(sub)?,
     }
 
     Ok(())
+}
+
+fn cmd_kv(sub: KvSubcommand) -> Result<()> {
+    use opencli_rs_core::kv;
+    let map_err = |e: String| anyhow::anyhow!(e);
+    match sub {
+        KvSubcommand::Get { key } => match kv::get(&key).map_err(map_err)? {
+            Some(v) => match v {
+                Value::String(s) => println!("{s}"),
+                other => println!("{}", serde_json::to_string_pretty(&other)?),
+            },
+            None => {
+                eprintln!("(missing) {key}");
+                std::process::exit(1);
+            }
+        },
+        KvSubcommand::Set {
+            key,
+            value,
+            ttl,
+            json,
+        } => {
+            let parsed = if json {
+                serde_json::from_str(&value)
+                    .map_err(|e| anyhow::anyhow!("--json value is not valid JSON: {e}"))?
+            } else {
+                Value::String(value)
+            };
+            kv::set(&key, parsed, ttl.as_deref()).map_err(map_err)?;
+            println!("ok {key}");
+        }
+        KvSubcommand::List { prefix } => {
+            let entries = kv::list(prefix.as_deref()).map_err(map_err)?;
+            if entries.is_empty() {
+                println!("(empty)");
+                return Ok(());
+            }
+            for (k, e) in entries {
+                let val = match &e.value {
+                    Value::String(s) => s.clone(),
+                    other => serde_json::to_string(other).unwrap_or_default(),
+                };
+                let exp = e
+                    .expires_at
+                    .map(|t| format!(" expires_at={t}"))
+                    .unwrap_or_default();
+                println!("{k} = {val}  (updated_at={}{exp})", e.updated_at);
+            }
+        }
+        KvSubcommand::Del { key } => {
+            if kv::del(&key).map_err(map_err)? {
+                println!("deleted {key}");
+            } else {
+                println!("(missing) {key}");
+            }
+        }
+        KvSubcommand::Clear { prefix, all } => {
+            if prefix.is_none() && !all {
+                anyhow::bail!("Refusing to clear entire KV store without --all (or pass --prefix)");
+            }
+            let n = kv::clear(prefix.as_deref()).map_err(map_err)?;
+            println!("cleared {n} key(s)");
+        }
+    }
+    Ok(())
+}
+
+/// Build a ready-to-copy invocation string from an adapter's declared args.
+fn adapter_usage_line(cmd: &opencli_rs_core::CliCommand) -> String {
+    let mut parts = vec![format!("opencli {}", cmd.full_name())];
+    for a in &cmd.args {
+        if !a.positional {
+            continue;
+        }
+        parts.push(if a.required {
+            format!("<{}>", a.name)
+        } else {
+            format!("[<{}>]", a.name)
+        });
+    }
+    for a in &cmd.args {
+        if a.positional {
+            continue;
+        }
+        if a.required {
+            parts.push(format!("--{} <{}>", a.name, arg_type_hint(a)));
+        }
+    }
+    for a in &cmd.args {
+        if a.positional || a.required {
+            continue;
+        }
+        match &a.default {
+            Some(v) => parts.push(format!("[--{}={}]", a.name, v)),
+            None => parts.push(format!("[--{} <{}>]", a.name, arg_type_hint(a))),
+        }
+    }
+    parts.join(" ")
+}
+
+fn arg_type_hint(a: &opencli_rs_core::ArgDef) -> &'static str {
+    use opencli_rs_core::ArgType;
+    match a.arg_type {
+        ArgType::Int => "int",
+        ArgType::Number => "number",
+        ArgType::Bool | ArgType::Boolean => "bool",
+        ArgType::Str => "str",
+    }
 }

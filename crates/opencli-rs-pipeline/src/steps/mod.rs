@@ -3,6 +3,7 @@ pub mod download;
 pub mod dump;
 pub mod fetch;
 pub mod intercept;
+pub mod kv;
 pub mod tap;
 pub mod transform;
 
@@ -10,6 +11,7 @@ pub use browser::register_browser_steps;
 pub use download::register_download_steps;
 pub use fetch::register_fetch_steps;
 pub use intercept::register_intercept_steps;
+pub use kv::register_kv_steps;
 pub use tap::register_tap_steps;
 pub use transform::register_transform_steps;
 
@@ -22,4 +24,5 @@ pub fn register_all_steps(registry: &mut StepRegistry) {
     register_intercept_steps(registry);
     register_tap_steps(registry);
     register_download_steps(registry);
+    register_kv_steps(registry);
 }

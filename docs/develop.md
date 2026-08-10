@@ -48,6 +48,34 @@ pipeline:
   - map: { title: "${{ item.title }}" }
 ```
 
+## 本地 KV（身份/小状态缓存）
+
+路径：`~/.opencli-rs/kv.json`。用于跨命令缓存**稳定、小体积**的身份字段（如 `xiaohongshu:me.userId`），**不要**存 cookie/token 或整页抓取结果。
+
+```bash
+opencli kv set xiaohongshu:me.userId 55b21552b7ba226b7385f107
+opencli kv get xiaohongshu:me.userId
+opencli kv list --prefix xiaohongshu:
+opencli kv del xiaohongshu:me.userId
+opencli kv clear --prefix xiaohongshu:
+opencli kv clear --all   # 清空全部，需显式 --all
+```
+
+Pipeline：
+
+```yaml
+- kv_get:
+    key: xiaohongshu:me.userId
+    field: userId
+    only_if_empty: true
+- kv_set:
+    key: xiaohongshu:me.userId
+    value: ${{ data.userId }}
+    ttl: 30d   # 可选
+```
+
+Key 约定：`{site}:{namespace}.{field}`，例如 `xiaohongshu:me.userId`、`bilibili:me.mid`。
+
 ## 环境变量
 
 - OPENCLI_VERBOSE, 启用日志输出（默认 info）；默认情况下日志保持静默，不会打印 adapter 加载细节

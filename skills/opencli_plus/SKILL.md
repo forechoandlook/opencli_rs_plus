@@ -1,67 +1,85 @@
 ---
 name: opencli
-description: opencli 的安装、启动、daemon/client 模式、adapter 发现、工具检索、发布验证或功能实现时触发. 获取网站信息的命令行工具，支持浏览器交互和 YAML 定义的适配器.
+description: opencli 的安装、daemon、adapter 发现与 disable、KV、写 adapter、plugin 分发时触发. 用 YAML adapter + 浏览器登录态把网站变成 CLI.
 author: "zwy"
-version: "0.1"
+version: "0.4"
 ---
 
-## 检查,安装,更新
-是否安装: `opencli --version`
-安装: `curl -fsSL https://github.com/forechoandlook/opencli_rs_plus/releases/latest/download/install.sh | bash`
-安装后默认路径：`~/.local/bin/opencli`.
-更新：`opencli update` 或重新执行安装脚本.
-`opencli doctor` 进行环境检查和问题排查.
+## 检查 / 安装
 
-## 模式判断
+```bash
+opencli --version
+curl -fsSL https://github.com/forechoandlook/opencli_rs_plus/releases/latest/download/install.sh | bash
+opencli update
+opencli doctor
+```
 
-`opencli` 有三类常见路径：
+## 产品重心
 
-- `daemon` 模式：`opencli daemon` 启动调度 daemon，负责任务调度、adapter 管理、SQLite 持久化和 socket API。
-- `client` 模式：`status` / `stop` / `restart` / `job` / `adapter` / `plugin` / `socket` / `tools` 等命令会连接 daemon。
-- `direct` 模式：其他 adapter 命令直接执行，不依赖 daemon；daemon 未运行时也可用于调试单个 adapter。
+**核心是 adapter。** 日常心智：
 
-- `opencli --help` 默认只展示内置命令和 daemon/client 命令。
-- `opencli <family> --help` 查看某个 family。
+```text
+跑:   opencli <site> <cmd>
+找:   opencli adapter search
+裁:   opencli adapter disable|enable
+装:   opencli plugin install|update
+身份: opencli kv …
+常驻: opencli daemon start   # 插件/扩展时
+```
 
-## 常用命令
+已删除：tools / summary / feedback / job / FTS / find / history / adapter sync / hidden / socket exec。
 
-`--fields` 选项适用于支持的 adapter，指定输出字段（逗号分隔，保持顺序）
+## 模式
+
+- **direct**: `opencli <site> <command>`（调试与日常抓取）
+- **daemon**: `opencli daemon start` — plugin 热加载、扩展 action API
+- **管理**: `adapter` / `plugin` / `kv`（enable/disable/kv 可不依赖 daemon）
 
 ```bash
 opencli --help
-opencli --help --adapters
-opencli daemon
-opencli status
-opencli restart
-opencli adapter list
-opencli tool list
-opencli adapter search "zhihu"
-opencli plugin list
-opencli tools search curl
-opencli tools info ripgrep
+opencli <site> --help
+opencli adapter search zhihu
+opencli adapter disable "zhihu hot"
+opencli adapter disable wikipedia
+opencli adapter list --include-disabled
+opencli plugin install forechoandlook/opencli-adapters
+opencli daemon start
+opencli daemon status
 ```
 
-## daemon 约定
+输出: `-f csv|table|json|yaml|md`，`--fields a,b,c`。
 
-- 调度 daemon 默认监听 `127.0.0.1:10008`。
-- browser-daemon 负责和 Chrome 插件保持长连接，端口范围默认 `19825-19834`。
-- 需要浏览器的 adapter 会由 daemon 通过 browser-daemon 转发到 Chrome 插件执行。
-- 安装、卸载、更新 plugin 后，daemon 会自动重新加载 adapters。
+## KV
 
-## adapter 与插件
-
-- adapter 是运行时加载的 YAML 定义，插件可以来自 GitHub 仓库、本地路径或子目录。
-- `opencli adapter search` 用于按名称、描述或使用热点查找 adapter。
-- `opencli adapter disable/enable` 是持久化控制，避免无效命令继续出现在帮助或检索里。
-- 如果用户在找某个外部工具信息，先用 `opencli tools search/list/info/summary`，这些是本地文件，不依赖 daemon。
-
-## 常见排查
+`~/.opencli-rs/kv.json`，只存身份字段。Key：`{site}:me.*`。
 
 ```bash
-opencli status
-opencli feedback "zhihu hot returns 403" --adapter "zhihu hot" --kind broken
+opencli kv get bilibili:me.mid
+opencli kv list --prefix bilibili:
+opencli kv clear --prefix xiaohongshu:
 ```
 
-## 问题反馈
+## 写 adapter
 
-`opencli feedback` 用于把用户遇到的问题、错误结果、文档不准确之处记录到本地，并可选打开预填好的 GitHub issue 页面。 参考 [反馈文档](./feedback.md) 获取详细用法和上报建议。
+1. API 优先；Playwright/CDP 验证  
+2. `adapters/<site>/<command>.yaml`  
+3. 身份用 KV  
+4. `cargo run -- <site> <cmd>`  
+5. changelog；分发 opencli-adapters  
+
+`retry: false` 风控；写操作 `--confirm`。
+
+## 排查
+
+| 现象 | 动作 |
+|---|---|
+| 找不到 adapter | `adapter search` / plugin / disable 列表 |
+| mid 错 | `kv list` / clear prefix |
+| 需登录 | 浏览器登录 + 扩展 |
+| macOS killed | `codesign --force --sign - $(which opencli)` |
+
+## Agent
+
+- 抓站 → search → 跑；缺包装 plugin  
+- 噪声多 → disable 裁子集  
+- 加命令 → 写 YAML，不扩平台命令  

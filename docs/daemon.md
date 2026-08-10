@@ -1,23 +1,24 @@
-## Daemon 调度模式
+## Daemon 模式
 
 所有功能集成在单一 `opencli` 二进制中，内部由两个独立进程组成：
 
-- **调度 daemon**（`opencli daemon`）— 任务调度、adapter 管理、SQLite 持久化、TCP Socket API（默认端口 10008）
-- **browser-daemon**（浏览器 daemon，`opencli-rs-browser` crate 内）— 管理与 Chrome 插件的 WebSocket 长连接，代理 CDP 命令，监听端口 19825-19834
+- **opencli daemon**（`opencli daemon`）— adapter/plugin 管理、扩展 action API、TCP Socket API（默认端口 10008）
+- **browser-daemon**（`opencli-rs-browser` crate 内）— 管理与 Chrome 插件的 WebSocket 长连接，代理 CDP 命令，监听端口 19825-19834
 
 `opencli` 命令路由规则：
 
 | 第一个参数 | 行为 |
 |---|---|
-| `daemon` | 启动调度 daemon |
-| `status` / `stop` / `restart` / `job` / `adapter` / `plugin` / `tools` | 作为调度客户端连接 daemon |
+| `daemon` | 启动 opencli daemon |
+| `daemon start/stop/status/...` | 进程管理 |
+| `adapter` / `plugin` / `kv` | 管理命令（部分可不连 daemon） |
 | 其他（如 `zhihu hot`）| 直接执行 adapter |
 
-调度 daemon 在执行需要浏览器的 adapter 时，通过 HTTP POST 调用 browser-daemon，browser-daemon 再通过 WebSocket 转发给 Chrome 插件执行。
+需要浏览器的 adapter 在 direct 模式下经 browser-daemon 转发到 Chrome 插件执行。
 
 ### 浏览器插件当前页面操作
 
-调度 daemon 还会在 `127.0.0.1:10009` 启动一个仅供 Chrome 扩展调用的本地 action-discovery API。扩展打开时读取当前标签 URL，向 daemon 请求已注册且匹配该 URL 的 action；点击后的读取与下载在用户当前标签内直接完成，browser-daemon 不参与这类操作。
+daemon 还会在 `127.0.0.1:10009` 启动仅供 Chrome 扩展调用的本地 action-discovery API。扩展打开时读取当前标签 URL，向 daemon 请求已注册且匹配该 URL 的 action；点击后的读取与下载在用户当前标签内直接完成，browser-daemon 不参与这类操作。
 
 adapter 通过可选的 `context` 字段注册操作：
 
@@ -53,50 +54,54 @@ opencli zhihu hot --help
 ```
 
 ```
-opencli status / job / adapter / ...
+opencli status / adapter / plugin / ...
     ↓ TCP JSON-RPC (127.0.0.1:10008)
 opencli daemon
-    ├── AdapterManager  (adapter 加载/管理/搜索/禁用)
-    ├── AdapterIndex    (FTS5 全文索引 + 使用统计，index.db)
-    ├── PluginManager   (插件安装/卸载/更新，plugins.lock.json)
-    ├── Scheduler       (轮询 due jobs，并发执行)
-    └── JobStore        (SQLite CRUD，指数退避重试，jobs.db)
-         ↓ HTTP POST /command (需要浏览器时)
-    browser-daemon (127.0.0.1:19825-19834)
-         ↓ WebSocket /ext
-    Chrome 插件
-         ↓ CDP
-    Chrome 页面（并发执行，最后一个任务完成后 120s 关闭窗口）
+    ├── AdapterManager  (加载 / 子串搜索 / enable-disable)
+    └── PluginManager   (插件安装/卸载/更新，plugins.lock.json)
+         （扩展 action API 127.0.0.1:10009）
+
+opencli <site> <cmd>  (direct)
+    ↓ HTTP POST /command (需要浏览器时)
+browser-daemon (127.0.0.1:19825-19834)
+    ↓ WebSocket /ext
+Chrome 插件 → CDP
 ```
 
 ### 启动和管理
 
 ```bash
-# 启动 daemon（阻塞前台，建议配合 nohup 或 systemd 后台运行）
+# 前台启动（阻塞终端）
 opencli daemon
-opencli daemon --poll-interval 10
 opencli daemon --addr 0.0.0.0:10008   # 自定义地址
 
-# 后台运行示例（macOS/Linux）
-nohup opencli daemon > ~/.opencli-rs/daemon.log 2>&1 &
+# 后台启动/停止/重启（自动 detach，日志写入 ~/.opencli-rs/daemon.log）
+opencli daemon start
+opencli daemon stop
+opencli daemon restart
 
-# 查看状态
-opencli status
+# 查看状态 / 日志 / 配置
+opencli daemon status        # 等价于 opencli status
+opencli daemon logs -f
+opencli daemon logs -n 100
+opencli daemon config
 
-# 停止/重启
-opencli stop
-opencli restart
-
-# 连接远程 daemon
-opencli --addr 192.168.1.100:10008 status
+# 开机自启动（macOS launchd / Linux systemd --user）
+opencli daemon autostart install
+opencli daemon autostart uninstall
+opencli daemon autostart status
 
 # 直接执行 adapter（无需 daemon）
 opencli zhihu hot
 opencli bilibili hot
 
-# 查看顶层命令
+# 搜索 adapter（子串 + 用法）
+opencli adapter search zhihu
+
 opencli --help
 ```
+
+定时调度（`job`）已移除；需要定时执行时用系统 `cron` / `launchd` 调用 `opencli <site> <cmd>`。
 
 ### Adapter 管理
 
@@ -104,67 +109,26 @@ opencli --help
 # 查看所有 adapters（隐藏已禁用的）
 opencli adapter list
 
-# 搜索 adapters（FTS5/BM25 全文检索 + 使用热点混合排序）
+# 搜索 adapters（子串匹配，打印用法）
 opencli adapter search "zhihu"
 
-# 禁用/启用 adapter（持久化，不显示在 help 中）
+# 禁用/启用 adapter（持久化；help/search/direct 执行都会生效，可不依赖 daemon）
 opencli adapter disable "zhihu hot"
+opencli adapter disable zhihu/hot
+opencli adapter disable wikipedia      # 整站
 opencli adapter enable "zhihu hot"
+opencli adapter list --include-disabled
 
-# 同步 adapters（从指定目录增量更新索引）
-opencli adapter sync --folder /path/to/adapters
 ```
 
-### Job 管理
+### Adapter 搜索
 
 ```bash
-# 添加任务
-opencli job add "zhihu hot" --delay 300              # 5分钟后执行
-opencli job add "bilibili hot" --interval 3600       # 每小时循环
-opencli job add "zhihu collection_items_api" --args '{"collection_id":"123"}' --run-at "2026-03-31T10:00:00Z"
-
-# 查看任务
-opencli job list --status pending
-opencli job show <id>
-
-# 取消/删除
-opencli job cancel <id>
-opencli job delete <id>
-
-# 手动触发 due jobs
-opencli job run
+opencli adapter search collection_items
 ```
 
-### 工具知识库
+子串匹配；每条命中打印 description 与可复制用法。见 [search.md](search.md)。
 
-工具知识库是唯一的 `opencli tools` 入口，用来索引 CLI 工具信息（名称、描述、安装命令等），所有工具都通过 `~/.opencli-rs/tools/*.md` 管理。
-
-**本地纯文件方案，不经过 daemon**，直接读取 `~/.opencli-rs/tools/*.md`，内存过滤。
-
-每个 `.md` 文件格式：
-
-```markdown
----
-name: ripgrep
-binary: rg
-homepage: https://github.com/BurntSushi/ripgrep
-tags: [search, grep, regex]
-install:
-  mac: brew install ripgrep
-  linux: apt install ripgrep
----
-
-Fast line-oriented regex search tool.（第一行 = short description）
-
-更详细的说明...
-```
-
-```bash
-opencli tools search <query>    # 关键词搜索（名称、binary、描述、标签）
-opencli tools list              # 列出所有工具
-opencli tools info <name>       # 查看工具详情（含完整 markdown body）
-opencli tools summary           # 所有工具名称 + 短描述 + 是否已安装
-```
 
 ### Socket API（调试用）
 
@@ -199,6 +163,10 @@ opencli tools summary           # 所有工具名称 + 短描述 + 是否已安�
 若无 manifest，插件名取自目录名，目录内所有 `.yaml` 文件作为 adapter 加载。
 
 ```bash
+# 官方 adapter 包（推荐用户安装路径）
+opencli plugin install forechoandlook/opencli-adapters
+opencli plugin update opencli-adapters
+
 # 安装插件（整个仓库，裸 user/repo 自动补 github:）
 opencli plugin install user/my-plugin
 # 安装仓库中的某个子目录
@@ -218,6 +186,8 @@ opencli plugin update
 # 卸载插件
 opencli plugin uninstall my-plugin
 ```
+
+开发仍以本仓库 `adapters/` 为准；向用户分发时用 `scripts/sync-adapters-repo.sh` 同步到 [opencli-adapters](https://github.com/forechoandlook/opencli-adapters) 并打 tag。默认不自动静默覆盖已装插件。
 
 安装/卸载/更新后 daemon 自动重新加载所有 adapter（等同于 `adapter.reload`）。
 
