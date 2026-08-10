@@ -1,8 +1,6 @@
 ---
 name: opencli
 description: opencli 的安装、daemon、adapter 发现与 disable、KV、写 adapter、plugin 分发时触发. 用 YAML adapter + 浏览器登录态把网站变成 CLI.
-author: "zwy"
-version: "0.4"
 ---
 
 ## 检查 / 安装
@@ -39,7 +37,6 @@ opencli doctor
 opencli --help
 opencli <site> --help
 opencli adapter search zhihu
-opencli adapter disable "zhihu hot"
 opencli adapter disable wikipedia
 opencli adapter list --include-disabled
 opencli plugin install forechoandlook/opencli-adapters
@@ -76,10 +73,3 @@ opencli kv clear --prefix xiaohongshu:
 | 找不到 adapter | `adapter search` / plugin / disable 列表 |
 | mid 错 | `kv list` / clear prefix |
 | 需登录 | 浏览器登录 + 扩展 |
-| macOS killed | `codesign --force --sign - $(which opencli)` |
-
-## Agent
-
-- 抓站 → search → 跑；缺包装 plugin  
-- 噪声多 → disable 裁子集  
-- 加命令 → 写 YAML，不扩平台命令  
