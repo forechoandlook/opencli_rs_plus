@@ -231,6 +231,19 @@ impl StepHandler for DashMuxStep {
             .map(|value| render_template_str(value, &ctx))
             .transpose()?
             .and_then(|value| value.as_str().map(str::to_string));
+        let save_metadata = params
+            .get("saveMetadata")
+            .or_else(|| params.get("save_metadata"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let metadata_filename = params
+            .get("metadataFilename")
+            .or_else(|| params.get("metadata_filename"))
+            .and_then(Value::as_str)
+            .map(|value| render_template_str(value, &ctx))
+            .transpose()?
+            .and_then(|value| value.as_str().map(str::to_string))
+            .unwrap_or_else(|| "note.md".to_string());
 
         if !is_direct_http_url(&video_url) || !is_direct_http_url(&audio_url) {
             return Err(CliError::argument(
@@ -304,12 +317,25 @@ impl StepHandler for DashMuxStep {
             let bytes = std::fs::metadata(&output)
                 .map(|metadata| metadata.len())
                 .unwrap_or(0);
-            Ok::<Value, CliError>(serde_json::json!([{
+            let mut results = vec![serde_json::json!({
                 "title": title,
+                "type": "video",
                 "status": "ok",
                 "size": format_size(bytes as usize),
                 "path": output.display().to_string(),
-            }]))
+            })];
+            if save_metadata {
+                let output_dir_string = output_dir.to_string_lossy();
+                match write_media_metadata(&output_dir_string, &metadata_filename, data, &results) {
+                    Ok(path) => results.push(serde_json::json!({
+                        "type": "metadata", "status": "ok", "size": "saved", "path": path
+                    })),
+                    Err(error) => results.push(serde_json::json!({
+                        "type": "metadata", "status": format!("failed: {error}"), "size": "-"
+                    })),
+                }
+            }
+            Ok::<Value, CliError>(Value::Array(results))
         }
         .await;
 
@@ -824,9 +850,14 @@ async fn execute_media_batch_download(
 
     let _ = std::fs::create_dir_all(&output_dir);
 
+    let timeout_seconds = params
+        .get("timeoutSeconds")
+        .or_else(|| params.get("timeout_seconds"))
+        .and_then(Value::as_u64)
+        .unwrap_or(30);
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(timeout_seconds))
         .build()
         .unwrap_or_default();
 
@@ -880,7 +911,7 @@ async fn execute_media_batch_download(
                 Err(error) => {
                     debug!(%error, media_type, "Direct media download failed");
                     results.push(serde_json::json!({
-                        "index": idx, "type": media_type, "status": "failed", "size": "-"
+                        "index": idx, "type": media_type, "status": "failed", "size": "-", "reason": error
                     }));
                 }
             }
@@ -994,13 +1025,20 @@ async fn download_direct_media(
         .map_err(|error| error.to_string())?;
     let mut byte_count = 0usize;
 
-    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
-        file.write_all(&chunk)
-            .await
-            .map_err(|error| error.to_string())?;
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        let _ = std::fs::remove_file(&partial_path);
+        error.to_string()
+    })? {
+        file.write_all(&chunk).await.map_err(|error| {
+            let _ = std::fs::remove_file(&partial_path);
+            error.to_string()
+        })?;
         byte_count += chunk.len();
     }
-    file.flush().await.map_err(|error| error.to_string())?;
+    file.flush().await.map_err(|error| {
+        let _ = std::fs::remove_file(&partial_path);
+        error.to_string()
+    })?;
     drop(file);
     tokio::fs::rename(&partial_path, &path)
         .await
@@ -1080,6 +1118,15 @@ fn write_media_metadata(
     if !source.is_empty() {
         markdown.push_str(&format!("- 来源：{}\n", source));
     }
+    if let Some(statistics) = data.get("statistics").and_then(Value::as_object) {
+        let labels = [("plays", "播放"), ("likes", "点赞"), ("comments", "评论"), ("collects", "收藏"), ("shares", "分享")];
+        let lines: Vec<String> = labels.iter().filter_map(|(key, label)| {
+            statistics.get(*key).and_then(Value::as_i64).map(|value| format!("{}：{}", label, value))
+        }).collect();
+        if !lines.is_empty() {
+            markdown.push_str(&format!("- 统计：{}\n", lines.join("；")));
+        }
+    }
     markdown.push_str("\n## 正文\n\n");
     markdown.push_str(content.trim());
     markdown.push_str("\n\n## 媒体\n\n");
@@ -1097,6 +1144,30 @@ fn write_media_metadata(
             markdown.push_str(&format!("- {}：`{}`（{}）\n", media_type, path, status));
         } else {
             markdown.push_str(&format!("- {}：{}\n", media_type, status));
+        }
+    }
+    let comments = data.get("comments").and_then(Value::as_array).cloned().unwrap_or_default();
+    if !comments.is_empty() {
+        markdown.push_str("\n## 评论\n\n");
+        for (index, comment) in comments.iter().enumerate() {
+            let author = comment.get("author").and_then(Value::as_str).unwrap_or("unknown");
+            let content = comment.get("content").and_then(Value::as_str).unwrap_or("").trim();
+            if content.is_empty() {
+                continue;
+            }
+            markdown.push_str(&format!("### {}. {}\n\n{}\n", index + 1, author, content));
+            let mut details = Vec::new();
+            for (key, label) in [("likes", "赞"), ("replies", "回复"), ("time", "时间"), ("ip", "IP")] {
+                match comment.get(key) {
+                    Some(Value::String(value)) if !value.trim().is_empty() => details.push(format!("{}：{}", label, value)),
+                    Some(Value::Number(value)) => details.push(format!("{}：{}", label, value)),
+                    _ => {}
+                }
+            }
+            if !details.is_empty() {
+                markdown.push_str(&format!("\n- {}\n", details.join("；")));
+            }
+            markdown.push('\n');
         }
     }
     std::fs::write(&path, markdown).map_err(|error| error.to_string())?;
@@ -1523,7 +1594,7 @@ mod tests {
     }
 
     #[test]
-    fn metadata_redacts_xsec_token_and_lists_media() {
+    fn metadata_redacts_xsec_token_and_combines_media_and_comments() {
         let unique = format!(
             "opencli-download-test-{}",
             std::time::SystemTime::now()
@@ -1538,7 +1609,8 @@ mod tests {
             "author": "author",
             "content": "正文内容",
             "noteType": "normal",
-            "sourceUrl": "https://www.xiaohongshu.com/explore/abc?xsec_token=secret&xsec_source=pc_feed"
+            "sourceUrl": "https://www.xiaohongshu.com/explore/abc?xsec_token=secret&xsec_source=pc_feed",
+            "comments": [{"author": "评论作者", "content": "首屏评论", "likes": 3, "replies": 1}]
         });
         let results = vec![json!({
             "type": "image", "status": "ok", "path": "abc_001.webp"
@@ -1549,6 +1621,8 @@ mod tests {
         let markdown = std::fs::read_to_string(output_dir.join(&filename)).unwrap();
         assert!(markdown.contains("正文内容"));
         assert!(markdown.contains("`abc_001.webp`"));
+        assert!(markdown.contains("## 评论"));
+        assert!(markdown.contains("首屏评论"));
         assert!(markdown.contains("xsec_source=pc_feed"));
         assert!(!markdown.contains("xsec_token"));
         std::fs::remove_dir_all(output_dir).unwrap();
