@@ -35,16 +35,34 @@ OPENCLI_API_DUMP=1 cargo run -- <site> <cmd>
 
 用来判断是 `evaluate`/`fetch` 拿到的原始数据就不对，还是后面 `map`/`filter`/`select` 处理时丢字段——把问题定位到 pipeline 的哪一个 step。
 
-## 第 3 层：怀疑是浏览器插件没连上 / CDP 层面的问题
+## 第 3 层：怀疑是浏览器插件没连上 / 页面层面的问题
 
-先确认 Chrome 插件已加载且处于"已连接"状态（扩展图标/popup 里看连接状态），然后：
+先确认 opencli Chrome 插件已加载且处于"已连接"状态（扩展图标或 `opencli doctor`），再用 **Playwright CLI 的 Chrome 扩展通道**探索页面。它直接控制用户当前 Chrome Profile，复用现有登录态，不需要给默认 Profile 开启 CDP 端口。
+
+前提：已安装并启用 Playwright MCP Chrome 扩展，并从扩展取得连接 Token。Token 是凭据；开发机可将它写入 `~/.zshrc`，以便新终端自动可用，但绝不能提交到仓库或写入日志。
 
 ```bash
-# 绕过 opencli 内置 browser-daemon，直连你手动起的 Chrome CDP 端口
-OPENCLI_CDP_ENDPOINT=http://127.0.0.1:9222 cargo run -- <site> <cmd>
+# 仅在本机 ~/.zshrc 配置一次；此处必须替换为自己的 Token
+export PLAYWRIGHT_MCP_EXTENSION_TOKEN='从 Playwright MCP 扩展取得的 Token'
+
+# 修改 ~/.zshrc 后，在当前终端生效
+source ~/.zshrc
+
+# 连接当前已打开的 Chrome；不启动新浏览器，也不需要 --remote-debugging-port
+playwright-cli -s=opencli-debug attach --extension=chrome
+
+# 仅探索：打开页面、读取无障碍结构、读取 DOM
+playwright-cli -s=opencli-debug tab-new https://www.zhihu.com/
+playwright-cli -s=opencli-debug snapshot --depth=6
+playwright-cli -s=opencli-debug eval 'document.title'
+
+# 完成后只断开，不关闭用户浏览器
+playwright-cli -s=opencli-debug detach
 ```
 
-这一层能排除"browser-daemon 转发出问题"还是"页面/选择器本身有问题"。如果直连 CDP 还是不行，去 chrome-cdp / playwright-cli 里手动跑一遍探索流程，确认选择器/JS 逻辑本身是对的，再在 [opencli-adapters](https://github.com/forechoandlook/opencli-adapters) 写回 YAML。
+用该通道确认选择器、页面结构和只读 JS 逻辑后，再在 [opencli-adapters](https://github.com/forechoandlook/opencli-adapters) 写回 YAML，并用本仓库构建的 `opencli` 以本地插件方式验证。涉及发帖、下单、发送消息、删除等写操作时，先停下并取得用户明确确认。
+
+Chrome 136 起，默认用户数据目录会忽略 `--remote-debugging-port` 和 `--remote-debugging-pipe`；因此不要再把日常 Profile 作为手动 CDP 调试目标。CDP 仅保留给 opencli 插件内部转发，或使用独立的非默认测试 Profile 的特殊场景。见 [Chrome 的官方说明](https://developer.chrome.com/blog/remote-debugging-port?hl=zh-cn)。
 
 ## 速查表
 
@@ -52,5 +70,5 @@ OPENCLI_CDP_ENDPOINT=http://127.0.0.1:9222 cargo run -- <site> <cmd>
 |---|---|
 | 命令直接报错/panic | 第1层，看 VERBOSE 日志 |
 | 拿到空数据/字段缺失 | 第2层，API dump 对比 |
-| 卡住不返回/超时 | 第3层，确认插件连接状态，再直连 CDP |
-| 新写的 adapter 选择器不对 | 在 opencli-adapters 中用 chrome-cdp/playwright-cli 重新探索，不要直接改 YAML 猜 |
+| 卡住不返回/超时 | 第3层，确认插件连接状态，再通过 Playwright 扩展通道检查页面 |
+| 新写的 adapter 选择器不对 | 在 opencli-adapters 中用 Playwright CLI 扩展通道重新探索，不要直接改 YAML 猜 |

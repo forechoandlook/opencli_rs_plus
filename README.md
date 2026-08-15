@@ -108,6 +108,8 @@ YAML adapter 的开发、调试、回归和发布均在 [opencli-adapters](https
 opencli plugin install /path/to/opencli-adapters
 ```
 
+浏览器页面的人工调试统一使用 Playwright CLI 的 Chrome 扩展通道：它连接当前 Chrome Profile 并复用登录态，不要求为日常 Profile 开启 CDP 端口。连接 Token 可在开发机的 `~/.zshrc` 中配置为环境变量，但不得写入仓库或日志。完整流程见 [docs/debug.md](docs/debug.md)。
+
 ## 目录结构
 
 - `crates/opencli-rs-core` 核心抽象与 registry
@@ -132,5 +134,6 @@ opencli update --check
 ## 文档
 
 - [docs/daemon.md](docs/daemon.md)
+- [docs/debug.md](docs/debug.md)
 - [docs/search.md](docs/search.md)
 - [docs/changelog.md](docs/changelog.md)

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "OpenCLI",
   "version": "1.2.8",
-  "description": "Bridge between opencli CLI and your browser — execute commands, read cookies, manage tabs.",
+  "description": "Run OpenCLI commands in your signed-in browser session through a local browser-to-CLI bridge.",
   "permissions": [
     "debugger",
     "tabs",
@@ -31,5 +31,5 @@
     },
     "default_popup": "src/popup.html"
   },
-  "homepage_url": "https://github.com/jackwener/opencli"
+  "homepage_url": "https://github.com/forechoandlook/opencli_rs_plus"
 }
