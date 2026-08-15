@@ -62,6 +62,13 @@ async function getConnectionState(): Promise<ConnectionState> {
 }
 
 async function connect(): Promise<ConnectionState> {
+  // Alarms wake the service worker repeatedly. A connected worker must not
+  // probe the port range again, because the old WebSocket probe could replace
+  // the daemon's real extension session.
+  if (ws?.readyState === WebSocket.OPEN && connectedPort !== null) {
+    return await getConnectionState();
+  }
+
   // Respect user-pinned ports; only auto-detect when the port is not pinned.
   const { port: savedPort, pinned } = await getStoredPortConfig();
   const port = pinned
@@ -370,6 +377,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'keepalive') void connect();
 });
 
+// A Manifest V3 service worker can be restarted for an incoming event long
+// after the browser daemon was started. Lifecycle events such as onInstalled
+// and onStartup do not fire for every restart, so initialise on every worker
+// boot as well. `initialize` is idempotent within one worker lifetime.
+void initialize();
+
 // ─── Command dispatcher ─────────────────────────────────────────────
 
 async function handleCommand(cmd: Command): Promise<Result> {
@@ -592,6 +605,18 @@ async function handleNavigate(cmd: Command, workspace: string): Promise<Result> 
   let timedOut = false;
   await new Promise<void>((resolve) => {
     let urlChanged = false;
+    let finished = false;
+    let recheckTimer: ReturnType<typeof setTimeout> | null = null;
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      chrome.tabs.onUpdated.removeListener(listener);
+      if (recheckTimer) clearTimeout(recheckTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      resolve();
+    };
 
     const listener = (id: number, info: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) => {
       if (id !== tabId) return;
@@ -604,31 +629,28 @@ async function handleNavigate(cmd: Command, workspace: string): Promise<Result> 
       }
 
       if (urlChanged && (waitUntilCommit || info.status === 'complete')) {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
+        finish();
       }
     };
     chrome.tabs.onUpdated.addListener(listener);
 
     // Also check if the tab already navigated (e.g. instant cache hit)
-    setTimeout(async () => {
+    recheckTimer = setTimeout(async () => {
       try {
         const currentTab = await chrome.tabs.get(tabId);
         if (currentTab.url && currentTab.url !== beforeUrl &&
             !currentTab.url.startsWith('about:') && !currentTab.url.startsWith('data:') &&
             (waitUntilCommit || currentTab.status === 'complete')) {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
+          finish();
         }
       } catch { /* tab gone */ }
     }, 100);
 
     // Timeout fallback with warning
-    setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
+    timeoutTimer = setTimeout(() => {
       timedOut = true;
       console.warn(`[opencli] Navigate to ${targetUrl} timed out after 15s`);
-      resolve();
+      finish();
     }, 15000);
   });
 

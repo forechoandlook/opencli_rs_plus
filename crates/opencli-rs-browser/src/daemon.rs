@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 use tokio::sync::{oneshot, Mutex, RwLock};
@@ -116,6 +119,8 @@ pub struct DaemonState {
     pub extension_tx: Mutex<Option<futures::stream::SplitSink<WebSocket, Message>>>,
     pub pending_commands: RwLock<PendingMap>,
     pub extension_connected: RwLock<bool>,
+    /// A stale socket must not clear a newer extension connection.
+    pub active_extension_connection_id: AtomicU64,
     pub last_activity: RwLock<Instant>,
     pub tasks: RwLock<VecDeque<BrowserTask>>,
 }
@@ -126,6 +131,7 @@ impl DaemonState {
             extension_tx: Mutex::new(None),
             pending_commands: RwLock::new(HashMap::new()),
             extension_connected: RwLock::new(false),
+            active_extension_connection_id: AtomicU64::new(0),
             last_activity: RwLock::new(Instant::now()),
             tasks: RwLock::new(VecDeque::new()),
         }
@@ -555,6 +561,10 @@ async fn ws_handler(
 
 async fn handle_extension_ws(state: Arc<DaemonState>, socket: WebSocket) {
     let (sender, mut receiver) = socket.split();
+    let connection_id = state
+        .active_extension_connection_id
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
 
     // Store the sender so we can forward commands
     *state.extension_tx.lock().await = Some(sender);
@@ -629,6 +639,13 @@ async fn handle_extension_ws(state: Arc<DaemonState>, socket: WebSocket) {
             }
             _ => {}
         }
+    }
+
+    // A newer connection may have replaced this one while this socket was
+    // closing. Only the active connection owns daemon state and commands.
+    if state.active_extension_connection_id.load(Ordering::SeqCst) != connection_id {
+        heartbeat_handle.abort();
+        return;
     }
 
     // Clean up

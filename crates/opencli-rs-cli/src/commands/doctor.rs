@@ -1,5 +1,9 @@
 use colored::Colorize;
 use opencli_rs_browser::DaemonClient;
+
+const DAEMON_PORT_START: u16 = 19825;
+const DAEMON_PORT_END: u16 = 19834;
+
 fn is_binary_installed(binary: &str) -> bool {
     let cmd = if cfg!(target_os = "windows") {
         "where"
@@ -13,6 +17,34 @@ fn is_binary_installed(binary: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+fn daemon_ports_to_check() -> Vec<u16> {
+    if let Some(port) = std::env::var("OPENCLI_DAEMON_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+    {
+        return vec![port];
+    }
+
+    (DAEMON_PORT_START..=DAEMON_PORT_END).collect()
+}
+
+async fn find_daemon() -> Option<(u16, bool)> {
+    let mut first_reachable = None;
+    for port in daemon_ports_to_check() {
+        let client = DaemonClient::new(port);
+        if client.is_running().await {
+            let extension_connected = client.is_extension_connected().await;
+            if extension_connected {
+                return Some((port, true));
+            }
+            // Keep looking: another bridge daemon may own the connected extension.
+            // If none does, report the first reachable daemon for useful diagnostics.
+            first_reachable.get_or_insert((port, false));
+        }
+    }
+    first_reachable
 }
 
 pub async fn run_doctor() {
@@ -39,22 +71,15 @@ pub async fn run_doctor() {
     print_check("Chrome/Chromium", chrome);
 
     // 2. Check daemon reachable
-    let client = DaemonClient::new(
-        std::env::var("OPENCLI_DAEMON_PORT")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(19825),
-    );
-    let daemon_running = client.is_running().await;
-    print_check("Daemon running", daemon_running);
+    let daemon = find_daemon().await;
+    print_check("Daemon running", daemon.is_some());
 
-    // 3. Check extension connected
-    if daemon_running {
-        let ext_connected = client.is_extension_connected().await;
-        print_check("Chrome extension connected", ext_connected);
-    } else {
-        print_check("Chrome extension connected", false);
-    }
+    // 3. The bridge can select any port in its supported range. Match that
+    // discovery behaviour instead of incorrectly checking 19825 only.
+    print_check(
+        "Chrome extension connected",
+        daemon.map(|(_, connected)| connected).unwrap_or(false),
+    );
 
     // 4. Check CDP endpoint
     let cdp = std::env::var("OPENCLI_CDP_ENDPOINT").ok();

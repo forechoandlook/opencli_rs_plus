@@ -19,8 +19,18 @@ class MockWebSocket {
   onmessage: ((event: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  private listeners = new Map<string, Array<() => void>>();
 
-  constructor(_url: string) {}
+  constructor(_url: string) {
+    queueMicrotask(() => {
+      this.readyState = MockWebSocket.OPEN;
+      this.onopen?.();
+      this.listeners.get('open')?.forEach((listener) => listener());
+    });
+  }
+  addEventListener(type: string, listener: () => void): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
   send(_data: string): void {}
   close(): void {
     this.onclose?.();
@@ -89,6 +99,10 @@ function createChromeMock() {
       onMessage: { addListener: vi.fn() } as Listener<(message: unknown, sender: unknown, sendResponse: unknown) => void>,
     },
     storage: {
+      local: {
+        get: vi.fn(async (_keys: string | string[]) => ({})),
+        set: vi.fn(async (_values: Record<string, unknown>) => {}),
+      },
       session: {
         get: vi.fn(async (key: string) => ({ [key]: sessionStorage[key] })),
         set: vi.fn(async (values: Record<string, unknown>) => { Object.assign(sessionStorage, values); }),
@@ -96,6 +110,9 @@ function createChromeMock() {
     },
     cookies: {
       getAll: vi.fn(async () => []),
+    },
+    debugger: {
+      onDetach: { addListener: vi.fn() },
     },
   };
 

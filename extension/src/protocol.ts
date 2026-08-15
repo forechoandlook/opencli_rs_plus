@@ -105,24 +105,22 @@ export function daemonWsUrl(port: number): string {
   return `ws://${DAEMON_HOST}:${port}/ext`;
 }
 
-/** Check whether a daemon WebSocket is reachable on the given port */
+/** Check whether a daemon is reachable without claiming its extension WebSocket slot. */
 export async function checkDaemonConnection(port: number, timeoutMs = 1200): Promise<boolean> {
-  return new Promise((resolve) => {
-    const ws = new WebSocket(daemonWsUrl(port));
-    const timer = setTimeout(() => {
-      try { ws.close(); } catch { /* ignore */ }
-      resolve(false);
-    }, timeoutMs);
-    ws.onopen = () => {
-      clearTimeout(timer);
-      ws.close();
-      resolve(true);
-    };
-    ws.onerror = () => {
-      clearTimeout(timer);
-      resolve(false);
-    };
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`http://${DAEMON_HOST}:${port}/health`, {
+      signal: controller.signal,
+    });
+    // The legacy daemon may require X-OpenCLI and return 403. That still
+    // proves the port belongs to a reachable daemon.
+    return response.ok || response.status === 403;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Find the first reachable daemon port, preferring the given port when present. */
