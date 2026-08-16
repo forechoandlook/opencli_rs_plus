@@ -39,7 +39,15 @@ function md5(string) {
   a=addUnsigned(a,AA);b=addUnsigned(b,BB);c=addUnsigned(c,CC);d=addUnsigned(d,DD);}
   return wordToHex(a)+wordToHex(b)+wordToHex(c)+wordToHex(d);
 }
-async function wbiSign(params) {
+async function resolveWbiKeys() {
+  if (globalThis.__opencliWbi && globalThis.__opencliWbi.imgKey && globalThis.__opencliWbi.subKey) {
+    return globalThis.__opencliWbi;
+  }
+  const cached = (typeof data !== 'undefined' && data && data.wbi) ? data.wbi : null;
+  if (cached && cached.imgKey && cached.subKey) {
+    globalThis.__opencliWbi = { imgKey: String(cached.imgKey), subKey: String(cached.subKey) };
+    return globalThis.__opencliWbi;
+  }
   const navRes = await fetch('https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' });
   const nav = await navRes.json();
   const wbiImg = nav?.data?.wbi_img || {};
@@ -47,6 +55,14 @@ async function wbiSign(params) {
   const subUrl = wbiImg.sub_url || '';
   const imgKey = imgUrl.split('/').pop()?.split('.')[0] || '';
   const subKey = subUrl.split('/').pop()?.split('.')[0] || '';
+  globalThis.__opencliWbi = { imgKey, subKey };
+  return globalThis.__opencliWbi;
+}
+function currentWbiKeys() {
+  return globalThis.__opencliWbi || {};
+}
+async function wbiSign(params) {
+  const { imgKey, subKey } = await resolveWbiKeys();
   const mixinKey = getMixinKey(imgKey, subKey);
   const wts = Math.floor(Date.now() / 1000);
   const allParams = { ...params, wts: String(wts) };

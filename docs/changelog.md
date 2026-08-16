@@ -1,5 +1,10 @@
 # 2026-08-16
 
+## KV: skip redundant identity / list / WBI fetches
+
+- WBI helper reuses `data.wbi` / in-page keys so Bilibili commands do not hit `/nav` every time.
+- `opencli batch --resume` reuses `out/following.json` instead of listing again.
+
 ## Engine: clean output, typed errors, helpers, batch
 
 - **Machine stdout**：`-f json|yaml|csv` 不再把 `Elapsed` / `Source` 写进 stdout；诊断只在 `-v` 时去 stderr。

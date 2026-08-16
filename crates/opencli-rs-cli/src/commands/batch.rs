@@ -48,19 +48,25 @@ pub async fn run_batch(matches: &ArgMatches, registry: &Registry) -> Result<(), 
     let rows = if let Some(path) = items_file {
         load_items(&path)?
     } else {
-        let list_name = list_cmd.ok_or_else(|| {
-            CliError::argument("batch requires <list-command> or --items FILE")
-        })?;
-        let cmd = registry.get(site, list_name).ok_or_else(|| {
-            CliError::argument(format!("unknown list adapter: {site} {list_name}"))
-        })?;
-        let mut kwargs = defaults_from(cmd);
-        if list_all {
-            kwargs.insert("all".into(), Value::Bool(true));
+        let cached_list = out_dir.join("following.json");
+        if resume && cached_list.is_file() {
+            eprintln!("[batch] reuse {}", cached_list.display());
+            load_items(&cached_list)?
+        } else {
+            let list_name = list_cmd.ok_or_else(|| {
+                CliError::argument("batch requires <list-command> or --items FILE")
+            })?;
+            let cmd = registry.get(site, list_name).ok_or_else(|| {
+                CliError::argument(format!("unknown list adapter: {site} {list_name}"))
+            })?;
+            let mut kwargs = defaults_from(cmd);
+            if list_all {
+                kwargs.insert("all".into(), Value::Bool(true));
+            }
+            eprintln!("[batch] list {site} {list_name}");
+            let data = execute_command(cmd, kwargs).await?;
+            rows_from(data)
         }
-        eprintln!("[batch] list {site} {list_name}");
-        let data = execute_command(cmd, kwargs).await?;
-        rows_from(data)
     };
 
     let each = registry.get(site, each_cmd).ok_or_else(|| {
