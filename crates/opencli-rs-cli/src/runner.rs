@@ -154,11 +154,39 @@ pub async fn run() {
                         source: Some(cmd.full_name()),
                         footer_extra: None,
                     };
+                    if verbose {
+                        let secs = start.elapsed().as_secs_f64();
+                        eprintln!(
+                            "Elapsed: {:.2}s | Source: {}",
+                            secs,
+                            cmd.full_name()
+                        );
+                    }
                     println!("{}", render(&data, &opts));
                 }
                 Err(e) => {
-                    print_error(&e);
-                    std::process::exit(1);
+                    let e = e.classify();
+                    if e.is_soft_empty() {
+                        eprintln!("{} {}", e.icon(), e);
+                        let empty = serde_json::json!([]);
+                        let opts = RenderOptions {
+                            format: output_format,
+                            fields: fields.clone(),
+                            columns: None,
+                            title: None,
+                            elapsed: None,
+                            source: None,
+                            footer_extra: None,
+                        };
+                        println!("{}", render(&empty, &opts));
+                        std::process::exit(0);
+                    }
+                    if format_str == "json" {
+                        eprintln!("{}", e.to_json());
+                    } else {
+                        print_error(&e);
+                    }
+                    std::process::exit(e.exit_code());
                 }
             }
         } else {

@@ -116,11 +116,32 @@ async fn execute_command_inner(
         let should_pre_navigate = matches!(cmd.strategy, Strategy::Cookie | Strategy::Header);
         if should_pre_navigate && !pipeline_starts_with_navigate {
             if let Some(domain) = &cmd.domain {
-                let url = format!("https://{}", domain);
-                tracing::debug!(url = %url, "Pre-navigating to domain");
-                page.goto(&url, None).await?;
+                let already_on_origin = page
+                    .url()
+                    .await
+                    .ok()
+                    .and_then(|current| {
+                        let host = current
+                            .split("://")
+                            .nth(1)
+                            .unwrap_or(&current)
+                            .split('/')
+                            .next()
+                            .unwrap_or("");
+                        Some(host.eq_ignore_ascii_case(domain.trim()))
+                    })
+                    .unwrap_or(false);
+                if already_on_origin {
+                    tracing::debug!(domain = %domain, "Skip pre-navigate; page already on origin");
+                } else {
+                    let url = format!("https://{}", domain);
+                    tracing::debug!(url = %url, "Pre-navigating to domain");
+                    page.goto(&url, None).await?;
+                }
             }
         }
+
+        opencli_rs_pipeline::helpers::set_helper_root(cmd.source_dir.clone());
 
         // Execute
         let result = if let Some(ref steps) = cmd.pipeline {
@@ -155,9 +176,13 @@ async fn execute_command_inner(
             let _ = page.close().await;
         }
 
+        opencli_rs_pipeline::helpers::set_helper_root(None);
         result
     } else {
-        run_command(cmd, None, &kwargs, &registry).await
+        opencli_rs_pipeline::helpers::set_helper_root(cmd.source_dir.clone());
+        let result = run_command(cmd, None, &kwargs, &registry).await;
+        opencli_rs_pipeline::helpers::set_helper_root(None);
+        result
     }
 }
 

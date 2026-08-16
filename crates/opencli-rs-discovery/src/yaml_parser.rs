@@ -1,5 +1,6 @@
 use opencli_rs_core::{
-    ArgDef, ArgType, CliCommand, CliError, ContextAction, NavigateBefore, Strategy,
+    AdapterCapabilities, ArgDef, ArgType, CliCommand, CliError, ContextAction, NavigateBefore,
+    Strategy,
 };
 use serde_json::Value;
 
@@ -92,6 +93,14 @@ pub fn parse_yaml_adapter(content: &str) -> Result<CliCommand, CliError> {
                 suggestions: vec![],
                 source: None,
             })?,
+        source_dir: None,
+        capabilities: raw
+            .get("capabilities")
+            .cloned()
+            .map(serde_json::from_value::<AdapterCapabilities>)
+            .transpose()
+            .unwrap_or(None)
+            .unwrap_or_default(),
     })
 }
 
@@ -175,6 +184,23 @@ pipeline:
         assert_eq!(cmd.columns, vec!["rank", "title", "score", "author"]);
         assert!(cmd.pipeline.is_some());
         assert_eq!(cmd.pipeline.unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_parse_capabilities() {
+        let yaml = r#"
+site: zhihu
+name: user
+capabilities:
+  auth: true
+  paginate: true
+  incremental: true
+"#;
+        let cmd = parse_yaml_adapter(yaml).unwrap();
+        assert!(cmd.capabilities.auth);
+        assert!(cmd.capabilities.paginate);
+        assert!(cmd.capabilities.incremental);
+        assert!(!cmd.capabilities.download);
     }
 
     #[test]

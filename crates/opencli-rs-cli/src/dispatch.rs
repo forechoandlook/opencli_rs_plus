@@ -3,7 +3,7 @@
 use clap::ArgMatches;
 use opencli_rs_core::CliError;
 
-use crate::commands::{doctor, uninstall, update};
+use crate::commands::{batch, doctor, uninstall, update};
 use opencli_rs_core::Registry;
 
 pub fn print_error(err: &CliError) {
@@ -22,9 +22,17 @@ pub fn print_error(err: &CliError) {
 pub async fn dispatch_builtin(
     site_name: &str,
     site_matches: &ArgMatches,
-    _registry: &Registry,
+    registry: &Registry,
 ) -> bool {
     match site_name {
+        "batch" => {
+            if let Err(err) = batch::run_batch(site_matches, registry).await {
+                let err = err.classify();
+                print_error(&err);
+                std::process::exit(err.exit_code());
+            }
+            true
+        }
         "doctor" => {
             doctor::run_doctor().await;
             true

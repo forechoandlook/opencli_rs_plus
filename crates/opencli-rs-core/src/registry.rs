@@ -99,6 +99,8 @@ mod tests {
             version: None,
             updated_at: None,
             context: None,
+            source_dir: None,
+            capabilities: Default::default(),
         }
     }
 

@@ -1,5 +1,6 @@
 pub mod context;
 pub mod executor;
+pub mod helpers;
 pub mod step_registry;
 pub mod steps;
 pub mod template;

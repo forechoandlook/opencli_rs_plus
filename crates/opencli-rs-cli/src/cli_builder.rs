@@ -142,6 +142,80 @@ pub fn daemon_help_commands() -> Vec<Command> {
                         Arg::new("name").help("Plugin name; omit to update all installed plugins"),
                     ),
             ),
+        Command::new("batch")
+            .about("Run an item adapter for every row from a list adapter or JSON file")
+            .long_about(
+                "Fetch a following/list, then run another adapter once per person.\n\n\
+                 Examples:\n  \
+                   opencli batch zhihu following --each user --id url_token --limit 100 --out ./archive/zhihu --all --resume\n  \
+                   opencli batch xiaohongshu following --each user --id id --limit 100 --out ./archive/xhs --all\n  \
+                   opencli batch bilibili following --each user-videos --id mid --limit 100 --out ./archive/bili --all\n  \
+                   opencli batch zhihu following --each user --id url_token --items following.json --out ./archive/zhihu --resume",
+            )
+            .display_order(ORD_TOOLS + 6)
+            .arg(Arg::new("site").required(true).help("Site, e.g. zhihu"))
+            .arg(
+                Arg::new("list_cmd")
+                    .help("List adapter name, e.g. following (omit when using --items)"),
+            )
+            .arg(
+                Arg::new("each")
+                    .long("each")
+                    .required(true)
+                    .help("Item adapter to run per row, e.g. user"),
+            )
+            .arg(
+                Arg::new("id")
+                    .long("id")
+                    .required(true)
+                    .help("Field on each list row used as the item id (url_token / id / mid)"),
+            )
+            .arg(
+                Arg::new("out")
+                    .long("out")
+                    .required(true)
+                    .help("Output directory"),
+            )
+            .arg(
+                Arg::new("limit")
+                    .long("limit")
+                    .help("Passed to the item adapter as --limit (max items per person)"),
+            )
+            .arg(
+                Arg::new("all")
+                    .long("all")
+                    .action(ArgAction::SetTrue)
+                    .help("Pass --all true to the list adapter"),
+            )
+            .arg(
+                Arg::new("incremental")
+                    .long("incremental")
+                    .action(ArgAction::SetTrue)
+                    .help("Pass --incremental true to the item adapter"),
+            )
+            .arg(
+                Arg::new("resume")
+                    .long("resume")
+                    .action(ArgAction::SetTrue)
+                    .help("Skip people already recorded in out/progress.json"),
+            )
+            .arg(
+                Arg::new("sleep")
+                    .long("sleep")
+                    .default_value("0.4")
+                    .help("Seconds to wait between people"),
+            )
+            .arg(
+                Arg::new("items")
+                    .long("items")
+                    .help("JSON array file instead of running the list adapter"),
+            )
+            .arg(
+                Arg::new("name-field")
+                    .long("name-field")
+                    .default_value("name")
+                    .help("Display-name field on each list row"),
+            ),
         Command::new("kv")
             .about("Local key-value store for identity/session hints (~/.opencli-rs/kv.json)")
             .long_about(
@@ -226,7 +300,8 @@ pub fn build_cli(registry: &Registry) -> Command {
                opencli zhihu hot\n  \
                opencli twitter search --query openai\n  \
                opencli adapter search zhihu\n  \
-               opencli plugin install forechoandlook/opencli-adapters",
+               opencli plugin install forechoandlook/opencli-adapters\n  \
+               opencli batch zhihu following --each user --id url_token --limit 100 --out ./archive --all",
         )
         .arg(
             Arg::new("format")
@@ -262,7 +337,28 @@ pub fn build_cli(registry: &Registry) -> Command {
                 "Use `opencli <site> <command> --help` to inspect adapter-specific arguments.",
             );
         for cmd in registry.list_commands(site) {
-            let mut sub = Command::new(cmd.name.clone()).about(cmd.description.clone());
+            let mut about = cmd.description.clone();
+            let caps = &cmd.capabilities;
+            let mut tags = Vec::new();
+            if caps.auth {
+                tags.push("auth");
+            }
+            if caps.paginate {
+                tags.push("paginate");
+            }
+            if caps.incremental {
+                tags.push("incremental");
+            }
+            if caps.download {
+                tags.push("download");
+            }
+            if caps.rich_text {
+                tags.push("rich_text");
+            }
+            if !tags.is_empty() {
+                about = format!("{about} [{}]", tags.join(","));
+            }
+            let mut sub = Command::new(cmd.name.clone()).about(about);
             for arg_def in &cmd.args {
                 let mut arg = if arg_def.positional {
                     Arg::new(arg_def.name.clone())

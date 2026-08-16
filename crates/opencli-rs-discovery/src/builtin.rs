@@ -138,6 +138,7 @@ fn scan_dir_recursive(
             match parse_yaml_adapter(&yaml) {
                 Ok(mut cmd) => {
                     cmd.func = None;
+                    cmd.source_dir = path.parent().map(|p| p.to_path_buf());
                     tracing::debug!(site = %cmd.site, name = %cmd.name, "Registered adapter");
                     registry.register(cmd);
                     *count += 1;

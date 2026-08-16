@@ -1,3 +1,14 @@
+# 2026-08-16
+
+## Engine: clean output, typed errors, helpers, batch
+
+- **Machine stdout**：`-f json|yaml|csv` 不再把 `Elapsed` / `Source` 写进 stdout；诊断只在 `-v` 时去 stderr。
+- **Typed errors**：adapter JS 抛出的 `AUTH_REQUIRED` / 注销 / 空结果 / 429 会映射为 `AUTH_REQUIRED`、`GONE`、`EMPTY_RESULT`、`RATE_LIMIT`。空结果打印 `[]` 并以 0 退出；JSON 错误对象写 stderr。
+- **`evaluate.helpers`**：内置 `wbi`、`zhihu-fetch`、`pinia-wait`，也可覆盖插件 `helpers/*.js`。
+- **`opencli batch`**：对 following 列表逐人跑 user/user-videos，带 `--out` / `--resume` / `--incremental` / `--sleep`。
+- **同源预导航**：页面已在目标 domain 上则跳过再 `goto` 首页。
+- **capabilities**：adapter YAML 可声明 `auth` / `paginate` / `incremental` / `download` / `rich_text`，会出现在 `--help`。
+
 # 2026-08-10
 
 ## Direct CLI adapter precedence

@@ -86,6 +86,25 @@ pub struct CliCommand {
     pub updated_at: Option<String>,
     /// Optional browser-popup declaration parsed from the adapter YAML.
     pub context: Option<ContextAction>,
+    /// Directory of the YAML file (plugin/site folder). Used to resolve helpers.
+    pub source_dir: Option<std::path::PathBuf>,
+    /// Declared adapter capabilities for help and batch tooling.
+    pub capabilities: AdapterCapabilities,
+}
+
+/// What an adapter can do. Parsed from YAML `capabilities:` (or site meta).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AdapterCapabilities {
+    #[serde(default)]
+    pub auth: bool,
+    #[serde(default)]
+    pub paginate: bool,
+    #[serde(default)]
+    pub incremental: bool,
+    #[serde(default)]
+    pub download: bool,
+    #[serde(default, rename = "rich_text")]
+    pub rich_text: bool,
 }
 
 impl CliCommand {

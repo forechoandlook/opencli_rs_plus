@@ -259,14 +259,22 @@ impl StepHandler for EvaluateStep {
         // Support both string form (js code) and object form {js?, format, path}
         // In object form, the js code is the first string value found (js field or any string field).
         // Other fields are treated as options: format, path.
-        let (js_code, raw_dump) = match params {
-            Value::String(s) => (s.clone(), None),
+        let (js_code, raw_dump, helper_names) = match params {
+            Value::String(s) => (s.clone(), None, Vec::new()),
             Value::Object(obj) => {
                 // Find the JS code: prefer explicit "js" field, fall back to first string value
                 let js = obj
                     .get("js")
                     .and_then(|v| v.as_str())
-                    .or_else(|| obj.values().find_map(|v| v.as_str()))
+                    .or_else(|| {
+                        obj.iter().find_map(|(k, v)| {
+                            if k == "helpers" || k == "format" || k == "path" || k == "retry" {
+                                None
+                            } else {
+                                v.as_str()
+                            }
+                        })
+                    })
                     .ok_or_else(|| {
                         CliError::pipeline("evaluate: object form requires a js code string")
                     })?;
@@ -285,16 +293,38 @@ impl StepHandler for EvaluateStep {
                 } else {
                     None
                 };
-                (js.to_string(), raw_dump)
+                let helper_names = match obj.get("helpers") {
+                    Some(Value::String(s)) => vec![s.clone()],
+                    Some(Value::Array(arr)) => arr
+                        .iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                (js.to_string(), raw_dump, helper_names)
             }
             _ => {
                 return Err(CliError::pipeline(
-                    "evaluate: params must be a string or {js?, format?, path?} object",
+                    "evaluate: params must be a string or {js?, format?, path?, helpers?} object",
                 ))
             }
         };
 
         let js = render_str_param(&Value::String(js_code), data, args)?;
+
+        let mut helper_src = String::new();
+        if !helper_names.is_empty() {
+            let root = crate::helpers::current_helper_root();
+            for name in &helper_names {
+                match crate::helpers::resolve_helper(name, root.as_deref()) {
+                    Ok(src) => {
+                        helper_src.push_str(&src);
+                        helper_src.push('\n');
+                    }
+                    Err(e) => return Err(CliError::pipeline(format!("evaluate helpers: {e}"))),
+                }
+            }
+        }
 
         // Inject `args` and `data` as local variables so JS code can reference them
         // directly (e.g. `args.query`, `args.limit`) without ${{ }} template syntax.
@@ -302,11 +332,14 @@ impl StepHandler for EvaluateStep {
         let args_json = serde_json::to_string(args).unwrap_or("{}".to_string());
         let data_json = serde_json::to_string(data).unwrap_or("null".to_string());
         let wrapped_js = format!(
-            "(function() {{ const args = {}; const data = {}; return ({}); }})()",
-            args_json, data_json, js
+            "(function() {{ const args = {}; const data = {}; {}\nreturn ({}); }})()",
+            args_json, data_json, helper_src, js
         );
 
-        let result = pg.evaluate(&wrapped_js).await?;
+        let result = match pg.evaluate(&wrapped_js).await {
+            Ok(v) => v,
+            Err(e) => return Err(e.classify()),
+        };
 
         // Dump raw data if format=raw is specified
         if let Some(path_tpl) = raw_dump {

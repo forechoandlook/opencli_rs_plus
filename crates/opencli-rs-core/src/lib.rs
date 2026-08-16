@@ -11,7 +11,8 @@ mod value_ext;
 pub use adapter_settings::AdapterSettings;
 pub use args::{ArgDef, ArgType};
 pub use command::{
-    ActiveTabAction, AdapterFunc, CliCommand, CommandArgs, ContextAction, NavigateBefore,
+    ActiveTabAction, AdapterCapabilities, AdapterFunc, CliCommand, CommandArgs, ContextAction,
+    NavigateBefore,
 };
 pub use error::CliError;
 pub use page::{
