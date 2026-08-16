@@ -1,4 +1,11 @@
-# 2026-08-16
+# 2026-08-16 — opencli v0.0.10
+
+## Release highlights
+
+- Typed errors (`AUTH_REQUIRED` / `GONE` / `EMPTY_RESULT` / `RATE_LIMIT`), clean machine stdout for json/yaml/csv, soft empty → `[]`.
+- Built-in `evaluate.helpers` (`wbi`, `zhihu-fetch`, `pinia-wait`) and adapter `capabilities` in help.
+- `opencli batch` for following → per-user content jobs, with `--resume` reusing `following.json`.
+- Same-origin skip pre-navigate; WBI keys reusable from KV pipeline data.
 
 ## KV: skip redundant identity / list / WBI fetches
 
