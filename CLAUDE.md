@@ -4,6 +4,7 @@
 - 使用中文，当有问题解决不了的时候及时停下反思.
 - 新增或修改 adapter 一律在 `/Users/zzwy/tmp/opencli-adapters` 进行：先通过 Playwright CLI 的 Chrome 扩展通道调试当前登录 Profile，再通过本仓库构建的 `opencli` 以本地插件方式验证；本仓库不保存站点 YAML。Playwright MCP Token 可配置在开发机 `~/.zshrc`，但不要写入仓库或日志。
 - 保持项目简洁，并将获取cli这项任务完成到极致.
+- 小红书曾因批量 `user`/`user_posted` 扫关注人笔记触发风控；约束与复盘见 `docs/xiaohongshu-risk.md`，禁止再对全关注列表短间隔扫近 100 条。
 
 ## 项目概述
 opencli-rs 用于从任意网站抓取信息,通过 浏览器插件实现登陆状态复用,yaml adapters 实现扩展。目前有两种模式: 
