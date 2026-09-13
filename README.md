@@ -1,3 +1,5 @@
+
+
 # opencli-rs
 
 `opencli-rs` 是一个面向网站信息获取的命令行工具。它通过浏览器插件复用登录态，用 YAML adapter 描述抓取流程，既可以直接执行单个 adapter，也可以通过 daemon 常驻管理 adapter 与插件。
@@ -117,6 +119,7 @@ opencli plugin install /path/to/opencli-adapters
 - `crates/opencli-rs-browser` 浏览器桥接、daemon、CDP 相关实现
 - `crates/opencli-rs-output` 表格、JSON、YAML、CSV、Markdown 输出
 - `crates/opencli-rs-discovery` YAML 解析和缓存
+- `crates/opencli-rs-engine` adapter 命令执行引擎
 - `crates/opencli-rs-cli` CLI 入口与执行流程
 - `crates/opencli-rs-daemon` AdapterManager、PluginManager、Socket API
 - `extension/` Chrome extension
