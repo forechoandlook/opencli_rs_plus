@@ -76,6 +76,7 @@ impl BrowserBridge {
         let client = Arc::new(DaemonClient::new(port));
 
         // Step 4: Wait up to 5s for extension to connect
+        eprintln!("Connecting to OpenCLI Chrome extension...");
         if self
             .poll_extension(&client, EXTENSION_INITIAL_WAIT, false)
             .await

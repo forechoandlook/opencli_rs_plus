@@ -28,10 +28,20 @@ pub async fn run_batch(matches: &ArgMatches, registry: &Registry) -> Result<(), 
     let limit = matches
         .get_one::<String>("limit")
         .and_then(|s| s.parse::<i64>().ok());
+    let default_sleep = if site == "xiaohongshu" { 3.0 } else { 0.4 };
     let sleep_s = matches
         .get_one::<String>("sleep")
         .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.4);
+        .unwrap_or(default_sleep);
+    let sleep_s = if site == "xiaohongshu" && sleep_s < 2.0 {
+        eprintln!(
+            "[batch] ⚠️ Xiaohongshu risk notice: increasing sleep between users from {:.2}s to 2.0s to avoid risk control.",
+            sleep_s
+        );
+        2.0
+    } else {
+        sleep_s
+    };
     let resume = matches.get_flag("resume");
     let list_all = matches.get_flag("all");
     let incremental = matches.get_flag("incremental");
