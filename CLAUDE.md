@@ -1,5 +1,5 @@
 # CLAUDE.md
-
+mini机器上也有一份/Users/wangyangzuo/tmp/opencli_rs_plus,可以通过git同步代码，主要运行需要在mini上.
 ## Agents
 - 使用中文，当有问题解决不了的时候及时停下反思.
 - 新增或修改 adapter 一律在 `/Users/zzwy/tmp/opencli-adapters` 进行：先通过 Playwright CLI 的 Chrome 扩展通道调试当前登录 Profile，再通过本仓库构建的 `opencli` 以本地插件方式验证；本仓库不保存站点 YAML。Playwright MCP Token 可配置在开发机 `~/.zshrc`，但不要写入仓库或日志。
@@ -12,12 +12,10 @@ opencli-rs 用于从任意网站抓取信息,通过 浏览器插件实现登陆�
 - daemon 模式 docs/daemon.md ，常驻进程，Socket API 接收命令，浏览器连接复用，支持 adapter/plugin 管理与扩展 action API。
 
 ## 架构
-
 - `browser-daemon` 这一层只负责 CDP / WebSocket 消息转发和并发路由，不承担业务级状态机
 - 并发是按 `cmd.id` 进行请求-响应配对：daemon 用 `pending_commands` 保存 `id -> oneshot sender`，extension 回包时带回同一个 `id`
 
 ## 架构
-
 1. ./crates/opencli-rs-core, CliCommand、Strategy、IPage、CliError、Registry, docs/01-core.md
 2. ./crates/opencli-rs-pipeline, StepRegistry、Step、模板系统, docs/02-pipeline.md
 3. ./crates/opencli-rs-browser, BrowserBridge、Daemon、DaemonPage、CdpPage、Extension, docs/03-browser.md
@@ -29,6 +27,5 @@ opencli-rs 用于从任意网站抓取信息,通过 浏览器插件实现登陆�
 9. extension/  # chrome extension
 
 ## 额外功能
-
 Adapter 发现: `adapter search`（子串，见 docs/search.md）。本地 KV: `opencli kv --help`。
 已移除：tools/summary/feedback/job/history/sync/hidden/FTS/find/socket-exec（专注 adapter 质量）。
