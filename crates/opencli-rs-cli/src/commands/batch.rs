@@ -187,8 +187,12 @@ pub async fn run_batch(matches: &ArgMatches, registry: &Registry) -> Result<(), 
         }
 
         if sleep_s > 0.0 {
-            // Apply a small random jitter (±25%) to simulate human intervals and defeat fixed-frequency detection
-            let jitter_factor = rand::random::<f64>() * 0.5 + 0.75; // 0.75 ~ 1.25
+            // Pseudo-random jitter based on nanos to avoid extra dependencies (±25% fluctuation)
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0);
+            let jitter_factor = 0.75 + ((nanos % 500) as f64 / 1000.0); // 0.75 ~ 1.25
             let actual_sleep = (sleep_s * jitter_factor).max(0.1);
             tokio::time::sleep(Duration::from_secs_f64(actual_sleep)).await;
         }
