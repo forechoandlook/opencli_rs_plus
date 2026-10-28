@@ -817,6 +817,16 @@ async fn execute_media_batch_download(
         .or_else(|| params.get("save_metadata"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let cover_only = params
+        .get("coverOnly")
+        .or_else(|| params.get("cover_only"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let no_video = params
+        .get("noVideo")
+        .or_else(|| params.get("no_video"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let metadata_filename = params
         .get("metadataFilename")
         .or_else(|| params.get("metadata_filename"))
@@ -870,6 +880,7 @@ async fn execute_media_batch_download(
 
     let mut results = Vec::new();
 
+    let mut first_image_saved = false;
     for (i, item) in items.iter().enumerate() {
         let media_type = item
             .get("type")
@@ -882,6 +893,18 @@ async fn execute_media_batch_download(
         }
 
         let idx = i + 1;
+
+        if cover_only {
+            if media_type == "image" {
+                if first_image_saved {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        } else if no_video && media_type != "image" {
+            continue;
+        }
 
         if media_type == "image" || media_type == "video" {
             if !is_direct_http_url(url) {
@@ -905,9 +928,14 @@ async fn execute_media_batch_download(
             )
             .await
             {
-                Ok((filename, size)) => results.push(serde_json::json!({
-                    "index": idx, "type": media_type, "status": "ok", "size": size, "path": filename
-                })),
+                Ok((filename, size)) => {
+                    if media_type == "image" {
+                        first_image_saved = true;
+                    }
+                    results.push(serde_json::json!({
+                        "index": idx, "type": media_type, "status": "ok", "size": size, "path": filename
+                    }));
+                }
                 Err(error) => {
                     debug!(%error, media_type, "Direct media download failed");
                     results.push(serde_json::json!({

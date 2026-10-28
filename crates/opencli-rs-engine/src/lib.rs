@@ -13,13 +13,38 @@ fn daemon_port() -> u16 {
         .unwrap_or(19825)
 }
 
-/// Get command timeout from env or command config or default (60s)
-fn command_timeout(cmd: &CliCommand) -> u64 {
-    std::env::var("OPENCLI_BROWSER_COMMAND_TIMEOUT")
+/// Get command timeout from env, command config, or arguments (e.g. all=true -> 300s), or default (60s)
+fn command_timeout(cmd: &CliCommand, kwargs: &HashMap<String, Value>) -> u64 {
+    if let Some(env_timeout) = std::env::var("OPENCLI_BROWSER_COMMAND_TIMEOUT")
         .ok()
         .and_then(|s| s.parse().ok())
-        .or(cmd.timeout_seconds)
-        .unwrap_or(60)
+    {
+        return env_timeout;
+    }
+
+    if let Some(configured) = cmd.timeout_seconds {
+        return configured;
+    }
+
+    // If --all true is passed (e.g. favorites, feed, search), automatically scale timeout to 300s
+    let has_all_flag = kwargs
+        .get("all")
+        .and_then(|v| {
+            if let Some(b) = v.as_bool() {
+                Some(b)
+            } else if let Some(s) = v.as_str() {
+                Some(s == "true" || s == "1")
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false);
+
+    if has_all_flag {
+        300
+    } else {
+        60
+    }
 }
 
 /// Keep browser pages by their configured origin rather than command name.
@@ -41,7 +66,7 @@ pub async fn execute_command(
     cmd: &CliCommand,
     kwargs: HashMap<String, Value>,
 ) -> Result<Value, CliError> {
-    let timeout_secs = command_timeout(cmd);
+    let timeout_secs = command_timeout(cmd, &kwargs);
 
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(timeout_secs),

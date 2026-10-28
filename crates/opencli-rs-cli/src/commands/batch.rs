@@ -187,7 +187,10 @@ pub async fn run_batch(matches: &ArgMatches, registry: &Registry) -> Result<(), 
         }
 
         if sleep_s > 0.0 {
-            tokio::time::sleep(Duration::from_secs_f64(sleep_s)).await;
+            // Apply a small random jitter (±25%) to simulate human intervals and defeat fixed-frequency detection
+            let jitter_factor = rand::random::<f64>() * 0.5 + 0.75; // 0.75 ~ 1.25
+            let actual_sleep = (sleep_s * jitter_factor).max(0.1);
+            tokio::time::sleep(Duration::from_secs_f64(actual_sleep)).await;
         }
     }
 
